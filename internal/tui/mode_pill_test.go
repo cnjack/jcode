@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/cnjack/jcode/internal/mode"
@@ -49,9 +50,14 @@ func TestPromoteToFullAccess(t *testing.T) {
 	var m Model
 	m.applySelectorMode(mode.Approval)
 	var notified []bool
-	m.OnApprovalModeChange = func(enabled bool) { notified = append(notified, enabled) }
+	m.OnApprovalModeChange = func(enabled bool) error {
+		notified = append(notified, enabled)
+		return nil
+	}
 
-	m.promoteToFullAccess()
+	if err := m.promoteToFullAccess(); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := m.selectorMode(); got != mode.FullAccess {
 		t.Errorf("selectorMode()=%v, want %v", got, mode.FullAccess)
@@ -68,23 +74,43 @@ func TestPromoteToFullAccess(t *testing.T) {
 	}
 }
 
-// TestPromoteToFullAccessInPlan pins that "Approve all" during Plan flips only
-// the approval axis: the backend keeps the read-only plan tool set until the
-// plan is approved, so the pill must keep naming the tool axis.
+// TestPromoteToFullAccessInPlan pins that "Approve all" is one unified durable
+// transition: it cannot expose an auto-approval axis behind a stale Plan pill.
 func TestPromoteToFullAccessInPlan(t *testing.T) {
 	var m Model
 	m.applySelectorMode(mode.Plan)
 
-	m.promoteToFullAccess()
+	if err := m.promoteToFullAccess(); err != nil {
+		t.Fatal(err)
+	}
 
-	if got := m.selectorMode(); got != mode.Plan {
-		t.Errorf("selectorMode()=%v, want %v", got, mode.Plan)
+	if got := m.selectorMode(); got != mode.FullAccess {
+		t.Errorf("selectorMode()=%v, want %v", got, mode.FullAccess)
 	}
 	if m.approvalMode != ModeAuto {
 		t.Errorf("approvalMode=%v, want %v", m.approvalMode, ModeAuto)
 	}
-	if m.agentMode != ModePlanning {
-		t.Errorf("agentMode=%v, want %v", m.agentMode, ModePlanning)
+	if m.agentMode != ModeNormal {
+		t.Errorf("agentMode=%v, want %v", m.agentMode, ModeNormal)
+	}
+}
+
+func TestPromoteToFullAccessFailureKeepsApprovalPendingState(t *testing.T) {
+	var m Model
+	m.applySelectorMode(mode.Approval)
+	m.approvalPending = true
+	m.approvalQueue = []ToolApprovalRequestMsg{{Name: "queued"}}
+	m.OnApprovalModeChange = func(bool) error { return errors.New("journal unavailable") }
+
+	if err := m.promoteToFullAccess(); err == nil {
+		t.Fatal("promotion unexpectedly succeeded")
+	}
+	if m.selectorMode() != mode.Approval || m.approvalMode != ModeManual || !m.approvalPending {
+		t.Fatalf("failed promotion changed selector=%v approval=%v pending=%v",
+			m.selectorMode(), m.approvalMode, m.approvalPending)
+	}
+	if len(m.approvalQueue) != 1 {
+		t.Fatalf("failed promotion released queued approvals: %d", len(m.approvalQueue))
 	}
 }
 

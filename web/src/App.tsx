@@ -54,6 +54,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { AuthGate } from './components/AuthGate'
 import { SetupView } from './components/SetupView'
 import { SettingsView } from './components/SettingsView'
+import { GeneratedImageToolRenderer } from './components/GeneratedImageToolRenderer'
 import { TopBar } from './components/TopBar'
 import { CloudSyncToggle } from './components/CloudSyncToggle'
 import { DesktopTitlebar } from './components/DesktopTitlebar'
@@ -180,7 +181,7 @@ type PanelType = 'terminal' | 'files' | 'changes' | 'plan' | 'artifacts'
 function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mobile' | 'automation-run' | 'settings' }) {
   const dispatch = useAppDispatch()
   const runtime = useChatRuntime()
-  const registry = useRef(createDefaultToolRegistry()).current
+  const registry = useRef(createDefaultToolRegistry().register('generate_image', GeneratedImageToolRenderer)).current
   const paletteOpen = useAppSelector((s) => s.ui.paletteOpen)
   const isRunning = useAppSelector((s) => s.chat.isRunning)
   const wsConnected = useAppSelector((s) => s.session.wsConnected)
@@ -190,6 +191,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
   // bottom panel (terminal) that can be open simultaneously.
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState<'files' | 'changes' | 'plan' | 'artifacts'>('files')
+  const [selectedArtifactID, setSelectedArtifactID] = useState('')
   const [bottomPanel, setBottomPanel] = useState<'none' | 'terminal'>('none')
   const [bottomPanelHeight, setBottomPanelHeight] = useState(260)
   const [activeRun, setActiveRun] = useState<AutomationRun | null>(null)
@@ -246,12 +248,25 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
   }, [togglePanel])
 
   useEffect(() => {
-    function onArtifactUpserted() {
+    function onArtifactUpserted(event: Event) {
+      const detail = (event as CustomEvent<{ artifact_id?: string }>).detail
+      setSelectedArtifactID(detail?.artifact_id || '')
       setRightPanelTab('artifacts')
       setRightPanelOpen(true)
     }
     window.addEventListener('jcode:artifact-upserted', onArtifactUpserted)
     return () => window.removeEventListener('jcode:artifact-upserted', onArtifactUpserted)
+  }, [])
+
+  useEffect(() => {
+    function onOpenArtifact(event: Event) {
+      const detail = (event as CustomEvent<{ artifact_id?: string }>).detail
+      setSelectedArtifactID(detail?.artifact_id || '')
+      setRightPanelTab('artifacts')
+      setRightPanelOpen(true)
+    }
+    window.addEventListener('jcode:open-artifact', onOpenArtifact)
+    return () => window.removeEventListener('jcode:open-artifact', onOpenArtifact)
   }, [])
 
   useEffect(() => {
@@ -354,6 +369,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
           {rightPanelOpen && (
             <RightPanel
               activeTab={rightPanelTab}
+              selectedArtifactID={selectedArtifactID}
               onClose={() => setRightPanelOpen(false)}
               onSwitchTab={setRightPanelTab}
             />

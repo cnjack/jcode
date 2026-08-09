@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -240,6 +241,52 @@ func TestEngineForChatRequiresAnExplicitIDForANewTask(t *testing.T) {
 	}
 	if got != fresh {
 		t.Fatalf("engineForChat(%q) = %p, want fresh engine %p", fresh.taskID, got, fresh)
+	}
+}
+
+func TestEngineForChatSingleflightsFirstRequestForExplicitTask(t *testing.T) {
+	s := stubFactoryServer(t)
+	originalFactory := s.newEngine
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var builds atomic.Int32
+	s.newEngine = func(taskID, pwd, modeStr string) (*EngineConfig, error) {
+		if builds.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return originalFactory(taskID, pwd, modeStr)
+	}
+
+	results := make(chan *Engine, 2)
+	errors := make(chan error, 2)
+	for range 2 {
+		go func() {
+			eng, err := s.engineForChat("same-new-task", "build")
+			results <- eng
+			errors <- err
+		}()
+	}
+	<-entered
+	close(release)
+	first, second := <-results, <-results
+	if err := <-errors; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errors; err != nil {
+		t.Fatal(err)
+	}
+	if builds.Load() != 1 || first == nil || first != second {
+		t.Fatalf("builds=%d first=%p second=%p", builds.Load(), first, second)
+	}
+	accepted := 0
+	for _, eng := range []*Engine{first, second} {
+		if eng.running.CompareAndSwap(false, true) {
+			accepted++
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("same task accepted %d concurrent runs", accepted)
 	}
 }
 

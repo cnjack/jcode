@@ -10,8 +10,8 @@
  *  - classic boolean: allow once / allow all (armed) / deny → `resolveApproval`
  *  - host-defined `approval.options` (arbitrary ids, e.g. ACP
  *    permission_request) → `resolveApprovalOption`; if the host didn't provide
- *    that action, kinds fall back onto the boolean contract so mock/demo
- *    runtimes keep working.
+ *    that action, non-billable kinds fall back onto the boolean contract so
+ *    mock/demo runtimes keep working. billable_external always fails closed.
  *
  * The `resolving` flag on the approval object disables controls while a resolve
  * request is in flight (prevents double-submit).
@@ -29,6 +29,8 @@ export interface ApprovalDecisionActions {
   allowAllCancel: () => void
   deny: () => void
   armed: boolean
+  /** Whether opaque option ids can be returned without boolean coercion. */
+  canResolveOptions: boolean
   /** Options mode: choose a non-arming option (kind ≠ 'allow_always'). */
   choose: (optionId: string) => void
   /** Options mode: id currently armed for two-step confirm, or null. */
@@ -91,7 +93,9 @@ export function ApprovalBlock({ approval, className, renderPending, renderResolv
     const opt = approval.options?.find((o) => o.id === optionId)
     if (!opt) return
     if (actions.resolveApprovalOption) actions.resolveApprovalOption(approval.id, optionId)
-    else booleanFallback(actions.resolveApproval, approval.id, opt)
+    else if (approval.approvalClass !== 'billable_external') {
+      booleanFallback(actions.resolveApproval, approval.id, opt)
+    }
   }
   const choose = (optionId: string) => dispatchOption(optionId)
   const armOption = (optionId: string) => setArmedOptionId(optionId)
@@ -108,6 +112,7 @@ export function ApprovalBlock({ approval, className, renderPending, renderResolv
     allowAllCancel,
     deny,
     armed,
+    canResolveOptions: !!actions.resolveApprovalOption,
     choose,
     armedOptionId,
     armOption,

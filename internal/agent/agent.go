@@ -11,6 +11,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/memory"
 	internalmodel "github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/toolpolicy"
 )
 
 const maxIterations = 1000
@@ -115,7 +116,11 @@ func newAgent(
 	if exactListMiddleware := newToolSearchExactListMiddleware(disclosureGroups.deferred); exactListMiddleware != nil {
 		enhanced = append(enhanced, exactListMiddleware)
 	}
-	enhanced = append(enhanced, newApprovalMiddleware(approvalFunc))
+	billablePreparers, err := collectBillableIntentPreparers(ctx, directTools, deferredTools)
+	if err != nil {
+		return nil, err
+	}
+	enhanced = append(enhanced, newApprovalMiddleware(approvalFunc, billablePreparers))
 	// PostToolUse hook sits INSIDE approval, wrapping the raw tool, so it sees the
 	// true execution error and can rewrite the result.
 	enhanced = append(enhanced, newPostHookMiddleware())
@@ -141,4 +146,31 @@ func newAgent(
 			BackoffFunc: internalmodel.SmartBackoff,
 		},
 	})
+}
+
+func collectBillableIntentPreparers(
+	ctx context.Context,
+	groups ...[]tool.BaseTool,
+) (map[string]toolpolicy.BillableIntentPreparer, error) {
+	preparers := make(map[string]toolpolicy.BillableIntentPreparer)
+	for _, group := range groups {
+		for _, candidate := range group {
+			preparer, ok := candidate.(toolpolicy.BillableIntentPreparer)
+			if !ok {
+				continue
+			}
+			info, err := candidate.Info(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("agent billable tool info: %w", err)
+			}
+			if info == nil || info.Name == "" {
+				return nil, fmt.Errorf("agent billable tool has no name")
+			}
+			if _, exists := preparers[info.Name]; exists {
+				return nil, fmt.Errorf("agent has duplicate billable tool %q", info.Name)
+			}
+			preparers[info.Name] = preparer
+		}
+	}
+	return preparers, nil
 }

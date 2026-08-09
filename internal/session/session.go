@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,19 +33,184 @@ const (
 	EntryToolResult   EntryType = "tool_result"
 
 	// Extended entry types for structured state tracking.
-	EntryPlanUpdate      EntryType = "plan_update"
-	EntryTodoSnapshot    EntryType = "todo_snapshot"
-	EntrySubagentStart   EntryType = "subagent_start"
-	EntrySubagentResult  EntryType = "subagent_result"
-	EntrySubagentAsync   EntryType = "subagent_async"
-	EntryModeChange      EntryType = "mode_change"
-	EntryAgentChange     EntryType = "agent_change"
-	EntryCompact         EntryType = "compact"
-	EntryBudgetWarning   EntryType = "budget_warning"
-	EntrySystemPrompt    EntryType = "system_prompt"
-	EntryGoalUpdate      EntryType = "goal_update"
-	EntryToolObservation EntryType = "tool_observation"
-	EntryArtifact        EntryType = "artifact"
+	EntryPlanUpdate            EntryType = "plan_update"
+	EntryTodoSnapshot          EntryType = "todo_snapshot"
+	EntrySubagentStart         EntryType = "subagent_start"
+	EntrySubagentResult        EntryType = "subagent_result"
+	EntrySubagentAsync         EntryType = "subagent_async"
+	EntryModeChange            EntryType = "mode_change"
+	EntryAgentChange           EntryType = "agent_change"
+	EntryCompact               EntryType = "compact"
+	EntryBudgetWarning         EntryType = "budget_warning"
+	EntrySystemPrompt          EntryType = "system_prompt"
+	EntryGoalUpdate            EntryType = "goal_update"
+	EntryToolObservation       EntryType = "tool_observation"
+	EntryArtifact              EntryType = "artifact"
+	EntryGenerationOperation   EntryType = "generation_operation"
+	EntryProviderToolOperation EntryType = "provider_tool_operation"
+	EntrySessionToolOverride   EntryType = "session_tool_override"
+)
+
+// GenerationOperationState is a durable provider-dispatch state. Progress UI
+// phases are ephemeral; these states exist to answer the crash-recovery
+// question "could the provider already have accepted a billable request?".
+type GenerationOperationState string
+
+const (
+	GenerationDispatchAttempted GenerationOperationState = "dispatch_attempted"
+	GenerationAccepted          GenerationOperationState = "accepted"
+	GenerationSaving            GenerationOperationState = "saving"
+	GenerationSucceeded         GenerationOperationState = "succeeded"
+	GenerationFailed            GenerationOperationState = "failed"
+	GenerationUncertain         GenerationOperationState = "uncertain"
+)
+
+func (state GenerationOperationState) IsTerminal() bool {
+	switch state {
+	case GenerationSucceeded, GenerationFailed, GenerationUncertain:
+		return true
+	default:
+		return false
+	}
+}
+
+func (state GenerationOperationState) valid() bool {
+	switch state {
+	case GenerationDispatchAttempted, GenerationAccepted, GenerationSaving,
+		GenerationSucceeded, GenerationFailed, GenerationUncertain:
+		return true
+	default:
+		return false
+	}
+}
+
+func generationStateRank(state GenerationOperationState) int {
+	if state.IsTerminal() {
+		return 4
+	}
+	switch state {
+	case GenerationDispatchAttempted:
+		return 1
+	case GenerationAccepted:
+		return 2
+	case GenerationSaving:
+		return 3
+	default:
+		return 0
+	}
+}
+
+// OperationCapabilityKey is the metadata-only snapshot used by the durable
+// journal. Runtime capability implementations map their key into this neutral
+// representation; session replay never imports provider/config packages.
+type OperationCapabilityKey struct {
+	ProviderProfileID string `json:"provider_profile_id"`
+	CredentialKind    string `json:"credential_kind,omitempty"`
+	EndpointProfile   string `json:"endpoint_profile"`
+	ModelID           string `json:"model_id"`
+}
+
+// GenerationOperation is one immutable-intent state transition. Secret
+// credentials, prompts, signed URLs, and provider response bodies are never
+// persisted here.
+type GenerationOperation struct {
+	OperationID           string                   `json:"operation_id"`
+	ToolCallID            string                   `json:"tool_call_id"`
+	State                 GenerationOperationState `json:"state"`
+	CapabilityKey         OperationCapabilityKey   `json:"capability_key"`
+	CredentialFingerprint string                   `json:"credential_fingerprint"`
+	ConfigEpoch           uint64                   `json:"config_epoch"`
+	IdempotencyKey        string                   `json:"idempotency_key"`
+	ProviderRequestIDHash string                   `json:"provider_request_id_hash,omitempty"`
+	ArtifactIDs           []string                 `json:"artifact_ids,omitempty"`
+	ErrorCode             string                   `json:"error_code,omitempty"`
+	UpdatedAt             time.Time                `json:"updated_at"`
+}
+
+func (operation GenerationOperation) validate() error {
+	if strings.TrimSpace(operation.OperationID) == "" {
+		return fmt.Errorf("generation operation ID is required")
+	}
+	if strings.TrimSpace(operation.ToolCallID) == "" {
+		return fmt.Errorf("generation operation tool call ID is required")
+	}
+	if !operation.State.valid() {
+		return fmt.Errorf("invalid generation operation state %q", operation.State)
+	}
+	if operation.CapabilityKey.ProviderProfileID == "" ||
+		operation.CapabilityKey.EndpointProfile == "" || operation.CapabilityKey.ModelID == "" {
+		return fmt.Errorf("generation operation capability key is incomplete")
+	}
+	if operation.CredentialFingerprint == "" || operation.IdempotencyKey == "" {
+		return fmt.Errorf("generation operation immutable intent is incomplete")
+	}
+	return nil
+}
+
+// ValidateGenerationStart is the pre-dispatch guard used before the first
+// journal append. Recovery code may append a terminal repair entry to a legacy
+// transcript, so RecordGenerationOperation validates shape but deliberately
+// leaves first-state policy to this explicit helper.
+func ValidateGenerationStart(operation GenerationOperation) error {
+	if err := operation.validate(); err != nil {
+		return err
+	}
+	if operation.State != GenerationDispatchAttempted {
+		return fmt.Errorf("generation operation must start at %q", GenerationDispatchAttempted)
+	}
+	return nil
+}
+
+// ValidateGenerationTransition enforces monotonic state and immutable intent.
+// Duplicate transitions are allowed so crash recovery can append idempotently.
+func ValidateGenerationTransition(previous, next GenerationOperation) error {
+	if err := previous.validate(); err != nil {
+		return fmt.Errorf("invalid previous generation operation: %w", err)
+	}
+	if err := next.validate(); err != nil {
+		return err
+	}
+	if previous.OperationID != next.OperationID || previous.ToolCallID != next.ToolCallID ||
+		previous.CapabilityKey != next.CapabilityKey ||
+		previous.CredentialFingerprint != next.CredentialFingerprint ||
+		previous.ConfigEpoch != next.ConfigEpoch || previous.IdempotencyKey != next.IdempotencyKey {
+		return fmt.Errorf("generation operation immutable intent changed")
+	}
+	if previous.State.IsTerminal() && previous.State != next.State {
+		return fmt.Errorf("generation operation cannot leave terminal state %q", previous.State)
+	}
+	if previous.State == next.State {
+		return nil
+	}
+	if next.State.IsTerminal() {
+		return nil
+	}
+	validProgression := (previous.State == GenerationDispatchAttempted && next.State == GenerationAccepted) ||
+		(previous.State == GenerationAccepted && next.State == GenerationSaving)
+	if !validProgression {
+		return fmt.Errorf("invalid generation operation transition from %q to %q", previous.State, next.State)
+	}
+	return nil
+}
+
+// GenerationOperationSnapshot is the replay projection used to rebuild the
+// atomic session ledger. Dispatched remains true once a dispatch_attempted
+// entry was observed, independent of later success or failure.
+type GenerationOperationSnapshot struct {
+	Latest     GenerationOperation `json:"latest"`
+	Dispatched bool                `json:"dispatched"`
+}
+
+// GenerationRecoveryPriority formalizes the release ordering. Higher evidence
+// wins: terminal operation > artifact > terminal tool result > nonterminal op.
+type GenerationRecoveryPriority int
+
+const (
+	GenerationRecoveryNone GenerationRecoveryPriority = iota
+	GenerationRecoveryNonTerminalOperation
+	GenerationRecoveryTerminalToolResult
+	GenerationRecoveryArtifact
+	GenerationRecoveryTerminalOperation
 )
 
 // ToolObservation stores metadata-only evidence about progressive tool
@@ -106,6 +272,12 @@ type Entry struct {
 	Error      string    `json:"error,omitempty"`        // tool error
 	ToolCallID string    `json:"tool_call_id,omitempty"` // links tool_call ↔ tool_result
 	Timestamp  string    `json:"timestamp"`
+	// Typed tool/generation correlation. These additive fields are shared by
+	// operation journal and enhanced tool-result entries.
+	OperationID string   `json:"operation_id,omitempty"`
+	Outcome     string   `json:"outcome,omitempty"`
+	ErrorCode   string   `json:"error_code,omitempty"`
+	ArtifactIDs []string `json:"artifact_ids,omitempty"`
 
 	// Tool-call batch fields. Tool calls issued by one assistant message share
 	// a BatchID; legacy files simply lack these keys (unmarshal to zero values,
@@ -160,16 +332,54 @@ type Entry struct {
 	// tool_observation fields
 	ToolObservation *ToolObservation `json:"tool_observation,omitempty"`
 
-	// artifact fields. Only safe, workspace-relative metadata is persisted;
-	// content and absolute paths remain in the workspace.
-	ArtifactID        string `json:"artifact_id,omitempty"`
-	ArtifactPath      string `json:"artifact_path,omitempty"`
-	ArtifactTitle     string `json:"artifact_title,omitempty"`
-	ArtifactKind      string `json:"artifact_kind,omitempty"`
-	ArtifactMediaType string `json:"artifact_media_type,omitempty"`
-	ArtifactSize      int64  `json:"artifact_size,omitempty"`
-	ArtifactRevision  int    `json:"artifact_revision,omitempty"`
-	ArtifactFocus     bool   `json:"artifact_focus,omitempty"`
+	// Artifact fields. Content and absolute paths are never persisted. A missing
+	// storage kind is a legacy workspace record.
+	ArtifactID          string `json:"artifact_id,omitempty"`
+	ArtifactPath        string `json:"artifact_path,omitempty"`
+	ArtifactStorageKind string `json:"artifact_storage_kind,omitempty"`
+	ArtifactKey         string `json:"artifact_key,omitempty"`
+	ArtifactTitle       string `json:"artifact_title,omitempty"`
+	ArtifactKind        string `json:"artifact_kind,omitempty"`
+	ArtifactMediaType   string `json:"artifact_media_type,omitempty"`
+	ArtifactSize        int64  `json:"artifact_size,omitempty"`
+	ArtifactWidth       int    `json:"artifact_width,omitempty"`
+	ArtifactHeight      int    `json:"artifact_height,omitempty"`
+	ArtifactSHA256      string `json:"artifact_sha256,omitempty"`
+	ArtifactProviderID  string `json:"artifact_provider_id,omitempty"`
+	ArtifactModelID     string `json:"artifact_model_id,omitempty"`
+	ArtifactParentID    string `json:"artifact_parent_id,omitempty"`
+	ArtifactRevision    int    `json:"artifact_revision,omitempty"`
+	ArtifactFocus       bool   `json:"artifact_focus,omitempty"`
+	ArtifactShareable   bool   `json:"artifact_shareable,omitempty"`
+
+	// generation_operation fields.
+	OperationState                 string                  `json:"operation_state,omitempty"`
+	OperationCapabilityKey         *OperationCapabilityKey `json:"operation_capability_key,omitempty"`
+	OperationCredentialFingerprint string                  `json:"operation_credential_fingerprint,omitempty"`
+	OperationConfigEpoch           uint64                  `json:"operation_config_epoch,omitempty"`
+	OperationIdempotencyKey        string                  `json:"operation_idempotency_key,omitempty"`
+	OperationProviderRequestIDHash string                  `json:"operation_provider_request_id_hash,omitempty"`
+	OperationUpdatedAt             string                  `json:"operation_updated_at,omitempty"`
+
+	// provider_tool_operation fields. These entries deliberately persist only
+	// metadata hashes and stable identifiers: never tool arguments, raw
+	// credentials, endpoint URLs, response bodies, or result content.
+	ProviderToolState             string `json:"provider_tool_state,omitempty"`
+	ProviderToolRunID             string `json:"provider_tool_run_id,omitempty"`
+	ProviderToolCapabilityKey     string `json:"provider_tool_capability_key,omitempty"`
+	ProviderToolProviderProfileID string `json:"provider_tool_provider_profile_id,omitempty"`
+	ProviderToolName              string `json:"provider_tool_name,omitempty"`
+	ProviderToolIntentHash        string `json:"provider_tool_intent_hash,omitempty"`
+	ProviderToolConfigEpoch       string `json:"provider_tool_config_epoch,omitempty"`
+	ProviderToolIdempotencyKey    string `json:"provider_tool_idempotency_key,omitempty"`
+	ProviderToolUpdatedAt         string `json:"provider_tool_updated_at,omitempty"`
+
+	// session_tool_override fields. Persisted is deliberately separate from
+	// runtime availability/effectiveness: those are evaluated from the current
+	// engine configuration and must never be replayed as durable truth.
+	SessionToolOverrideTool      string `json:"session_tool_override_tool,omitempty"`
+	SessionToolOverridePersisted bool   `json:"session_tool_override_persisted,omitempty"`
+	SessionToolOverrideRevision  uint64 `json:"session_tool_override_revision,omitempty"`
 }
 
 // SessionMeta is stored in the index for fast listing.
@@ -204,6 +414,11 @@ type SessionMeta struct {
 	ArtifactUnseen    bool   `json:"artifact_unseen,omitempty"`
 	ArtifactUpdatedAt string `json:"artifact_updated_at,omitempty"`
 	ArtifactViewedAt  string `json:"artifact_viewed_at,omitempty"`
+	// ArtifactViewedRevisions is the durable per-artifact read cursor. The
+	// legacy ArtifactViewedAt timestamp remains a read-only fallback for index
+	// files written by older versions; new views never advance that global
+	// timestamp because doing so would mark unrelated artifacts as read.
+	ArtifactViewedRevisions map[string]int `json:"artifact_viewed_revisions,omitempty"`
 }
 
 // ProjectMeta is project-level metadata kept in its own file (projects.json,
@@ -338,6 +553,49 @@ func writePrivateSessionFile(path string, data []byte) error {
 	return os.Chmod(path, privateSessionFileMode)
 }
 
+func durableReplacePrivateSessionFile(path string, data []byte) (resultErr error) {
+	dir := filepath.Dir(path)
+	temporary, err := os.CreateTemp(dir, "."+filepath.Base(path)+".rewrite-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer func() {
+		_ = temporary.Close()
+		if temporaryPath != "" {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	if err := temporary.Chmod(privateSessionFileMode); err != nil {
+		return err
+	}
+	remaining := data
+	for len(remaining) > 0 {
+		written, writeErr := temporary.Write(remaining)
+		if writeErr != nil {
+			return writeErr
+		}
+		if written <= 0 {
+			return fmt.Errorf("write durable session replacement: no progress")
+		}
+		remaining = remaining[written:]
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return err
+	}
+	temporaryPath = ""
+	if err := syncSessionDirectory(dir); err != nil {
+		return fmt.Errorf("sync session directory: %w", err)
+	}
+	return nil
+}
+
 func openPrivateSessionAppend(path string) (*os.File, error) {
 	if err := os.Chmod(path, privateSessionFileMode); err != nil {
 		return nil, err
@@ -375,6 +633,10 @@ type Recorder struct {
 	// jcode does not leave an empty session on disk.
 	pendingSystemPrompt string
 	pendingEnvInfo      string
+	// toolOverrides is a lazy replay cache. CompareAndSwapSessionToolOverride
+	// updates it only after the JSONL append has been fsynced successfully.
+	toolOverrides       map[SessionTool]SessionToolOverride
+	toolOverridesLoaded bool
 }
 
 // NewRecorder returns a Recorder that will create the session file only when
@@ -475,6 +737,8 @@ func (r *Recorder) SetUUID(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.uuid = id
+	r.toolOverrides = nil
+	r.toolOverridesLoaded = false
 	// Only mark as resuming if the session file already exists on disk.
 	// For brand-new sessions with a client-provided UUID, we still want
 	// title generation on the first user message.
@@ -586,6 +850,28 @@ func (r *Recorder) RecordToolCall(name, args, toolCallID, batchID string, batchI
 // persistence failure is returned so callers do not treat an unstored result as
 // durable conversation history.
 func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, denied bool, duration time.Duration) (string, error) {
+	return r.RecordToolResultWithDetails(name, output, toolCallID, err, denied, duration, ToolResultDetails{})
+}
+
+// ToolResultDetails persists the transport-neutral terminal evidence needed to
+// reconstruct a provider-backed operation without parsing its human-readable
+// output. It deliberately contains identifiers and classifications only.
+type ToolResultDetails struct {
+	OperationID string
+	Outcome     string
+	ErrorCode   string
+	Provider    string
+	Model       string
+	ArtifactIDs []string
+}
+
+func (r *Recorder) RecordToolResultWithDetails(
+	name, output, toolCallID string,
+	err error,
+	denied bool,
+	duration time.Duration,
+	details ToolResultDetails,
+) (string, error) {
 	errStr := ""
 	if err != nil {
 		errStr = err.Error()
@@ -594,6 +880,9 @@ func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, 
 	if writeErr := r.writeEntry(Entry{
 		Type: EntryToolResult, Name: name, Output: output, ToolCallID: toolCallID, Error: errStr,
 		Denied: denied, DurationMs: duration.Milliseconds(),
+		OperationID: details.OperationID, Outcome: details.Outcome, ErrorCode: details.ErrorCode,
+		Provider: details.Provider, Model: details.Model,
+		ArtifactIDs: append([]string(nil), details.ArtifactIDs...),
 	}); writeErr != nil {
 		return output, fmt.Errorf("record tool result in session %s for tool call %q: %w",
 			r.sessionFilePathForError(), toolCallID, writeErr)
@@ -626,17 +915,76 @@ func (r *Recorder) RecordToolObservation(observation ToolObservation) {
 // the historical best-effort recorder helpers, it returns append failures so
 // the show_artifact tool cannot report a revision that was never persisted.
 func (r *Recorder) RecordArtifact(record artifact.Record) error {
-	if err := r.writeEntry(Entry{
+	entry := Entry{
 		Type: EntryArtifact, ArtifactID: record.ID, ArtifactPath: record.RelativePath,
+		ArtifactStorageKind: string(record.StorageKind), ArtifactKey: record.RelativeKey,
 		ArtifactTitle: record.Title, ArtifactKind: string(record.Kind), ArtifactMediaType: record.MediaType,
-		ArtifactSize: record.Size, ArtifactRevision: record.Revision, ArtifactFocus: record.Focus,
-	}); err != nil {
+		ArtifactSize: record.Size, ArtifactWidth: record.Width, ArtifactHeight: record.Height,
+		ArtifactSHA256: record.SHA256, ArtifactProviderID: record.ProviderID,
+		ArtifactModelID: record.ModelID, ArtifactParentID: record.ParentArtifactID,
+		OperationID: record.OperationID, ToolCallID: record.ToolCallID,
+		ArtifactRevision: record.Revision, ArtifactFocus: record.Focus,
+		ArtifactShareable: record.Shareable,
+	}
+	sessionID := r.UUID()
+	lock, err := acquireSessionSecurityLock(sessionID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.release() }()
+	r.mu.Lock()
+	if r.uuid != sessionID {
+		r.mu.Unlock()
+		return fmt.Errorf("session changed while recording artifact")
+	}
+	err = r.writePathBoundEntryLocked(entry)
+	r.mu.Unlock()
+	if err != nil {
 		return err
 	}
 	if err := reconcileArtifactSummary(r.UUID()); err != nil {
 		config.Logger().Printf("[artifact] reconcile session summary %s: %v", r.UUID(), err)
 	}
 	return nil
+}
+
+// RecordGenerationOperation synchronously appends and fsyncs one provider
+// dispatch transition. Callers must receive nil before initiating the billable
+// POST. The operation contains fingerprints only, never raw credentials.
+func (r *Recorder) RecordGenerationOperation(operation GenerationOperation) error {
+	if err := operation.validate(); err != nil {
+		return err
+	}
+	updatedAt := operation.UpdatedAt.UTC()
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	sessionID := r.UUID()
+	lock, err := acquireSessionSecurityLock(sessionID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.release() }()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.uuid != sessionID {
+		return fmt.Errorf("session changed while recording generation operation")
+	}
+	return r.writeSecurityEntryLocked(generationOperationEntry(operation, updatedAt))
+}
+
+func generationOperationEntry(operation GenerationOperation, updatedAt time.Time) Entry {
+	return Entry{
+		Type: EntryGenerationOperation, OperationID: operation.OperationID,
+		ToolCallID: operation.ToolCallID, OperationState: string(operation.State),
+		OperationCapabilityKey:         &operation.CapabilityKey,
+		OperationCredentialFingerprint: operation.CredentialFingerprint,
+		OperationConfigEpoch:           operation.ConfigEpoch,
+		OperationIdempotencyKey:        operation.IdempotencyKey,
+		OperationProviderRequestIDHash: operation.ProviderRequestIDHash,
+		ArtifactIDs:                    append([]string(nil), operation.ArtifactIDs...),
+		ErrorCode:                      operation.ErrorCode, OperationUpdatedAt: updatedAt.Format(time.RFC3339Nano),
+	}
 }
 
 func reconcileArtifactSummary(sessionID string) error {
@@ -655,10 +1003,82 @@ func reconcileArtifactSummary(sessionID string) error {
 		if !latest.IsZero() {
 			meta.ArtifactUpdatedAt = latest.Format(time.RFC3339Nano)
 		}
-		viewedAt, _ := time.Parse(time.RFC3339Nano, meta.ArtifactViewedAt)
-		meta.ArtifactUnseen = latest.After(viewedAt)
+		legacyViewedAt, _ := time.Parse(time.RFC3339Nano, meta.ArtifactViewedAt)
+		meta.ArtifactUnseen = false
+		for i := range records {
+			if meta.ArtifactViewedRevisions[records[i].ID] >= records[i].Revision {
+				continue
+			}
+			if !legacyViewedAt.IsZero() && !records[i].UpdatedAt.After(legacyViewedAt) {
+				continue
+			}
+			meta.ArtifactUnseen = true
+			break
+		}
 	})
 	return err
+}
+
+var (
+	// ErrArtifactNotFound reports that an opaque artifact ID is not present in
+	// the requested session.
+	ErrArtifactNotFound = errors.New("artifact not found")
+	// ErrArtifactRevisionMismatch prevents a stale viewer from marking a newer
+	// artifact revision as read.
+	ErrArtifactRevisionMismatch = errors.New("artifact revision changed")
+)
+
+// MarkArtifactViewed advances exactly one artifact's revision cursor. It is
+// serialized with artifact journal appends so a concurrent new revision is
+// always left unseen. The operation never advances the legacy session-wide
+// timestamp.
+func MarkArtifactViewed(sessionID, artifactID string, revision int) error {
+	if err := ValidateSessionID(sessionID); err != nil {
+		return err
+	}
+	artifactID = strings.TrimSpace(artifactID)
+	if artifactID == "" || len(artifactID) > 512 || revision <= 0 {
+		return ErrArtifactNotFound
+	}
+	lock, err := acquireSessionSecurityLock(sessionID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.release() }()
+
+	records, err := LoadArtifactRecords(sessionID)
+	if err != nil {
+		return err
+	}
+	found := false
+	for i := range records {
+		if records[i].ID != artifactID {
+			continue
+		}
+		found = true
+		if records[i].Revision != revision {
+			return ErrArtifactRevisionMismatch
+		}
+		break
+	}
+	if !found {
+		return ErrArtifactNotFound
+	}
+	meta, err := UpdateSessionMeta(sessionID, func(meta *SessionMeta) {
+		if meta.ArtifactViewedRevisions == nil {
+			meta.ArtifactViewedRevisions = make(map[string]int)
+		}
+		if meta.ArtifactViewedRevisions[artifactID] < revision {
+			meta.ArtifactViewedRevisions[artifactID] = revision
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if meta == nil {
+		return ErrArtifactNotFound
+	}
+	return reconcileArtifactSummary(sessionID)
 }
 
 // RecordPlanUpdate appends a plan state change entry.
@@ -712,9 +1132,47 @@ func (r *Recorder) RecordSubagentAsync(name, taskID, agentType string) {
 	_ = r.writeEntry(Entry{Type: EntrySubagentAsync, SubagentName: name, Output: taskID, SubagentType: agentType})
 }
 
-// RecordModeChange appends a mode transition entry.
+// RecordModeChange appends a mode transition entry on a best-effort basis.
+// Authorization-sensitive callers that must not publish an in-memory mode
+// before it is durable use RecordModeChangeStrict instead.
 func (r *Recorder) RecordModeChange(mode string) {
-	_ = r.writeEntry(Entry{Type: EntryModeChange, Mode: mode})
+	if err := r.RecordModeChangeStrict(mode); err != nil {
+		config.Logger().Printf("[session] record mode change: %v", err)
+	}
+}
+
+// RecordModeChangeStrict durably appends a canonical unified mode transition.
+// Mode is authorization state (Full access removes per-call approval), so it is
+// serialized with transcript replacement and bound to the current on-disk
+// inode just like the other append-only session metadata. A nil return is the
+// caller's permission to publish the corresponding in-memory/UI transition.
+func (r *Recorder) RecordModeChangeStrict(mode string) error {
+	if !validRecordedSessionMode(mode) {
+		return fmt.Errorf("invalid session mode %q", mode)
+	}
+
+	sessionID := r.UUID()
+	lock, err := acquireSessionSecurityLock(sessionID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.release() }()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.uuid != sessionID {
+		return fmt.Errorf("session changed while recording mode")
+	}
+	return r.writePathBoundEntryLocked(Entry{Type: EntryModeChange, Mode: mode})
+}
+
+func validRecordedSessionMode(mode string) bool {
+	switch mode {
+	case "approval", "plan", "auto", "full_access":
+		return true
+	default:
+		return false
+	}
 }
 
 // RecordCompact appends a compact/summarization event entry. keptN is the
@@ -734,23 +1192,28 @@ func (r *Recorder) RecordSystemPrompt(prompt, envInfo string) {
 	r.pendingEnvInfo = envInfo
 }
 
-// TruncateAtUserMessage rewrites the session file keeping only entries that
-// appear before the (beforeCount)th user message (0-indexed).
-// If beforeCount == 0, the file is truncated to the session_start header only.
+// TruncateAtUserMessage rewrites the conversational projection, keeping only
+// entries that appear before the (beforeCount)th user message (0-indexed).
+// Security-critical provider dispatch journals and session tool policy entries
+// are append-only and survive truncation wherever they occur in the file. If
+// beforeCount == 0, conversational history is truncated to session_start.
 // The recorder is reset to append mode on the (now shorter) file.
 // This preserves the session UUID and index entry — no new session is created.
 func (r *Recorder) TruncateAtUserMessage(beforeCount int) error {
+	sessionID := r.UUID()
+	lock, err := acquireSessionSecurityLock(sessionID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.release() }()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.uuid != sessionID {
+		return fmt.Errorf("session changed while truncating history")
+	}
 
 	if r.agentID != "" {
 		return fmt.Errorf("TruncateAtUserMessage not supported for teammate recorders")
-	}
-
-	// Close current file handle before rewriting.
-	if r.file != nil {
-		_ = r.file.Close()
-		r.file = nil
 	}
 
 	dir, err := config.SessionsDir()
@@ -769,11 +1232,11 @@ func (r *Recorder) TruncateAtUserMessage(beforeCount int) error {
 		return fmt.Errorf("read session file: %w", err)
 	}
 
-	// Collect entries to keep: session_start always, then everything before
-	// the beforeCount-th user entry. When beforeCount == 0 we keep nothing
-	// except the session_start header.
+	// Collect entries to keep: session_start and append-only security journals
+	// always, plus conversational entries before the target user message.
 	var keep []string
 	userCount := 0
+	conversationCut := beforeCount == 0
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -781,38 +1244,48 @@ func (r *Recorder) TruncateAtUserMessage(beforeCount int) error {
 		}
 		var e Entry
 		if err := json.Unmarshal([]byte(line), &e); err != nil {
-			continue
+			return fmt.Errorf("parse session line during truncation: %w", err)
 		}
 		// Always keep the session_start header.
 		if e.Type == EntrySessionStart {
 			keep = append(keep, line)
 			continue
 		}
-		// Stop as soon as we reach the Nth user message.
+		if appendOnlySessionEntry(e.Type) {
+			keep = append(keep, line)
+			continue
+		}
+		if conversationCut {
+			continue
+		}
+		// Cut conversational entries as soon as we reach the Nth user message,
+		// but continue scanning so later append-only journals are retained.
 		if e.Type == EntryUser {
 			if userCount >= beforeCount {
-				break
+				conversationCut = true
+				continue
 			}
 			userCount++
-		}
-		// For beforeCount == 0 we must not keep any non-session_start entry.
-		if beforeCount == 0 {
-			break
 		}
 		keep = append(keep, line)
 	}
 
-	// Atomically rewrite the file.
-	tmpPath := filePath + ".tmp"
+	// Atomically and durably rewrite the file. The replacement is fsynced
+	// before rename and the parent directory is fsynced afterwards so a crash
+	// cannot erase previously durable security journals.
 	content := strings.Join(keep, "\n")
 	if len(keep) > 0 {
 		content += "\n"
 	}
-	if err := writePrivateSessionFile(tmpPath, []byte(content)); err != nil {
-		return fmt.Errorf("write truncated session: %w", err)
+	// Keep the existing append handle alive until parsing has completely
+	// succeeded. A malformed line must abort without rewriting the transcript
+	// or leaving this Recorder unable to continue appending.
+	if r.file != nil {
+		_ = r.file.Close()
+		r.file = nil
 	}
-	if err := os.Rename(tmpPath, filePath); err != nil {
-		return fmt.Errorf("rename truncated session: %w", err)
+	if err := durableReplacePrivateSessionFile(filePath, []byte(content)); err != nil {
+		return fmt.Errorf("write truncated session: %w", err)
 	}
 
 	// Reopen for append so subsequent writes go to the correct file.
@@ -822,7 +1295,22 @@ func (r *Recorder) TruncateAtUserMessage(beforeCount int) error {
 	}
 	r.file = f
 	r.resuming = true
+	r.toolOverrides = nil
+	r.toolOverridesLoaded = false
 	return nil
+}
+
+func securityJournalEntry(entryType EntryType) bool {
+	switch entryType {
+	case EntryGenerationOperation, EntryProviderToolOperation, EntrySessionToolOverride:
+		return true
+	default:
+		return false
+	}
+}
+
+func appendOnlySessionEntry(entryType EntryType) bool {
+	return securityJournalEntry(entryType) || entryType == EntryArtifact || entryType == EntryModeChange
 }
 
 // Close flushes and closes the underlying file.  Safe to call multiple times.
@@ -936,13 +1424,95 @@ func (r *Recorder) ensureFile() error {
 }
 
 func (r *Recorder) writeEntry(e Entry) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.writeEntryLocked(e)
+}
+
+// writeSecurityEntryLocked appends billing/policy evidence after first making
+// sure this Recorder still points at the path currently protected by the
+// session security lock. Another process may have atomically replaced the
+// transcript during truncation while this Recorder retained an fd for the old,
+// now-unlinked inode; writing through that stale fd would falsely report a
+// durable append that replay can never observe.
+func (r *Recorder) writeSecurityEntryLocked(e Entry) error {
+	if !securityJournalEntry(e.Type) {
+		return fmt.Errorf("entry type %q is not a security journal", e.Type)
+	}
+	return r.writePathBoundEntryLocked(e)
+}
+
+// writePathBoundEntryLocked appends metadata that must survive transcript
+// replacement. It must be called with r.mu and the cross-process session lock
+// held so truncate cannot drop the entry or redirect it to an unlinked inode.
+func (r *Recorder) writePathBoundEntryLocked(e Entry) error {
+	if !appendOnlySessionEntry(e.Type) {
+		return fmt.Errorf("entry type %q is not append-only session metadata", e.Type)
+	}
+	if err := r.refreshSecurityAppendFileLocked(); err != nil {
+		return err
+	}
+	return r.writeEntryLocked(e)
+}
+
+// refreshSecurityAppendFileLocked must be called with r.mu and the
+// cross-process session security lock held.
+func (r *Recorder) refreshSecurityAppendFileLocked() error {
+	dir, err := config.SessionsDir()
+	if err != nil {
+		return err
+	}
+	var path string
+	if r.agentID != "" {
+		path = filepath.Join(dir, r.customDir, "subagents", "agent-"+r.agentID+".jsonl")
+	} else {
+		path = filepath.Join(dir, r.uuid+".json")
+	}
+	pathInfo, pathErr := os.Stat(path)
+	if r.file == nil {
+		if pathErr == nil {
+			r.resuming = true
+			return nil
+		}
+		if os.IsNotExist(pathErr) {
+			return nil
+		}
+		return fmt.Errorf("stat current session journal: %w", pathErr)
+	}
+	if pathErr != nil {
+		return fmt.Errorf("current session journal is unavailable: %w", pathErr)
+	}
+	openInfo, err := r.file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat open session journal: %w", err)
+	}
+	if os.SameFile(openInfo, pathInfo) {
+		return nil
+	}
+	old := r.file
+	r.file = nil
+	if err := old.Close(); err != nil {
+		return fmt.Errorf("close stale session journal: %w", err)
+	}
+	fresh, err := openPrivateSessionAppend(path)
+	if err != nil {
+		return fmt.Errorf("reopen current session journal: %w", err)
+	}
+	r.file = fresh
+	r.resuming = true
+	return nil
+}
+
+// writeEntryLocked appends and fsyncs one entry while r.mu is held. Keeping
+// the append primitive available under the recorder lock lets stateful CAS
+// records validate their expected revision and durably append without a race
+// window between those two operations.
+func (r *Recorder) writeEntryLocked(e Entry) error {
 	e.Timestamp = time.Now().Format(time.RFC3339)
 	data, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	// Lazily initialise the file on the first real write.
 	if err := r.ensureFile(); err != nil {
 		return err
@@ -1288,6 +1858,45 @@ func LoadSession(id string) ([]Entry, error) {
 	return entries, nil
 }
 
+// LoadSessionModeStrict reads the latest durable unified mode without the
+// conversational replay loader's corrupt-line tolerance. A malformed line
+// could itself be a newer mode transition, so authorization restore must fail
+// closed rather than silently skipping it and reviving an older Full access
+// value. An empty result is the legacy/default Approval mode.
+func LoadSessionModeStrict(id string) (string, error) {
+	if err := ValidateSessionID(id); err != nil {
+		return "", err
+	}
+	dir, err := config.SessionsDir()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, id+".json"))
+	if err != nil {
+		return "", fmt.Errorf("session %s not found: %w", id, err)
+	}
+
+	latest := ""
+	for index, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		var entry Entry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return "", fmt.Errorf("session mode journal line %d is malformed: %w", index+1, err)
+		}
+		if entry.Type != EntryModeChange {
+			continue
+		}
+		if !validRecordedSessionMode(entry.Mode) {
+			return "", fmt.Errorf("session mode journal line %d has invalid mode", index+1)
+		}
+		latest = entry.Mode
+	}
+	return latest, nil
+}
+
 // LoadArtifactRecords rebuilds the latest metadata revision for every Artifact
 // in a session. Entry order is not trusted: the greatest revision wins, with a
 // later timestamp breaking ties for defensive recovery from duplicated lines.
@@ -1303,10 +1912,17 @@ func LoadArtifactRecords(id string) ([]artifact.Record, error) {
 		}
 		updatedAt, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 		record := artifact.Record{
-			ID: entry.ArtifactID, SessionID: id, RelativePath: entry.ArtifactPath,
+			ID: entry.ArtifactID, SessionID: id,
+			StorageKind:  artifact.StorageKind(entry.ArtifactStorageKind),
+			RelativePath: entry.ArtifactPath, RelativeKey: entry.ArtifactKey,
 			Title: entry.ArtifactTitle, Kind: artifact.Kind(entry.ArtifactKind), MediaType: entry.ArtifactMediaType,
-			Size: entry.ArtifactSize, Revision: entry.ArtifactRevision, UpdatedAt: updatedAt,
+			Size: entry.ArtifactSize, Width: entry.ArtifactWidth, Height: entry.ArtifactHeight,
+			SHA256: entry.ArtifactSHA256, ProviderID: entry.ArtifactProviderID,
+			ModelID: entry.ArtifactModelID, ParentArtifactID: entry.ArtifactParentID,
+			OperationID: entry.OperationID, ToolCallID: entry.ToolCallID,
+			Revision: entry.ArtifactRevision, UpdatedAt: updatedAt,
 			Status: artifact.StatusAvailable, Focus: entry.ArtifactFocus,
+			Shareable: entry.ArtifactShareable || entry.ArtifactStorageKind != string(artifact.StorageManaged),
 		}
 		current, exists := latest[record.ID]
 		if !exists || record.Revision > current.Revision ||
@@ -1325,4 +1941,109 @@ func LoadArtifactRecords(id string) ([]artifact.Record, error) {
 		return records[i].UpdatedAt.After(records[j].UpdatedAt)
 	})
 	return records, nil
+}
+
+// ReplayGenerationOperations rebuilds the latest monotonic projection for each
+// operation and separately remembers whether its durable consume point was
+// observed. It tolerates corrupted/out-of-order lines conservatively: terminal
+// evidence never regresses to a progress state, while dispatch evidence is
+// sticky for ledger reconstruction.
+func ReplayGenerationOperations(entries []Entry) map[string]GenerationOperationSnapshot {
+	snapshots := make(map[string]GenerationOperationSnapshot)
+	for _, entry := range entries {
+		if entry.Type != EntryGenerationOperation || entry.OperationID == "" {
+			continue
+		}
+		operation := generationOperationFromEntry(entry)
+		if operation.validate() != nil {
+			continue
+		}
+		snapshot := snapshots[operation.OperationID]
+		if operation.State == GenerationDispatchAttempted {
+			snapshot.Dispatched = true
+		}
+		if snapshot.Latest.OperationID == "" || generationOperationWins(operation, snapshot.Latest) {
+			snapshot.Latest = operation
+		}
+		snapshots[operation.OperationID] = snapshot
+	}
+	return snapshots
+}
+
+func generationOperationFromEntry(entry Entry) GenerationOperation {
+	updatedAt, _ := time.Parse(time.RFC3339Nano, entry.OperationUpdatedAt)
+	if updatedAt.IsZero() {
+		updatedAt, _ = time.Parse(time.RFC3339Nano, entry.Timestamp)
+	}
+	capabilityKey := OperationCapabilityKey{}
+	if entry.OperationCapabilityKey != nil {
+		capabilityKey = *entry.OperationCapabilityKey
+	}
+	return GenerationOperation{
+		OperationID: entry.OperationID, ToolCallID: entry.ToolCallID,
+		State:                 GenerationOperationState(entry.OperationState),
+		CapabilityKey:         capabilityKey,
+		CredentialFingerprint: entry.OperationCredentialFingerprint,
+		ConfigEpoch:           entry.OperationConfigEpoch,
+		IdempotencyKey:        entry.OperationIdempotencyKey,
+		ProviderRequestIDHash: entry.OperationProviderRequestIDHash,
+		ArtifactIDs:           append([]string(nil), entry.ArtifactIDs...),
+		ErrorCode:             entry.ErrorCode, UpdatedAt: updatedAt,
+	}
+}
+
+func generationOperationWins(candidate, current GenerationOperation) bool {
+	candidateRank := generationStateRank(candidate.State)
+	currentRank := generationStateRank(current.State)
+	if candidateRank != currentRank {
+		return candidateRank > currentRank
+	}
+	if !candidate.UpdatedAt.Equal(current.UpdatedAt) {
+		return candidate.UpdatedAt.After(current.UpdatedAt)
+	}
+	// Equal/legacy timestamps retain append order: Replay assigns the candidate
+	// when it appears later in the JSONL stream.
+	return true
+}
+
+// LoadGenerationOperations reads one session and returns snapshots sorted by
+// operation ID for deterministic callers and tests.
+func LoadGenerationOperations(id string) ([]GenerationOperationSnapshot, error) {
+	entries, err := loadSecuritySession(id)
+	if err != nil {
+		return nil, err
+	}
+	byID := ReplayGenerationOperations(entries)
+	result := make([]GenerationOperationSnapshot, 0, len(byID))
+	for _, snapshot := range byID {
+		result = append(result, snapshot)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Latest.OperationID < result[j].Latest.OperationID
+	})
+	return result, nil
+}
+
+// GenerationRecoveryEvidencePriority returns the fixed reconciliation ordering
+// without deciding transport presentation. A terminal operation always wins;
+// otherwise a safely verified artifact outranks a typed terminal tool result,
+// which outranks a nonterminal operation.
+func GenerationRecoveryEvidencePriority(
+	snapshot GenerationOperationSnapshot,
+	hasVerifiedArtifact bool,
+	hasTerminalToolResult bool,
+) GenerationRecoveryPriority {
+	if snapshot.Latest.State.IsTerminal() {
+		return GenerationRecoveryTerminalOperation
+	}
+	if hasVerifiedArtifact {
+		return GenerationRecoveryArtifact
+	}
+	if hasTerminalToolResult {
+		return GenerationRecoveryTerminalToolResult
+	}
+	if snapshot.Latest.OperationID != "" {
+		return GenerationRecoveryNonTerminalOperation
+	}
+	return GenerationRecoveryNone
 }

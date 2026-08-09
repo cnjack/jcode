@@ -33,3 +33,45 @@ func TestModeChangeRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestStrictModeChangeSurvivesHistoryTruncation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	recorder, err := NewRecorder(t.TempDir(), "provider", "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recorder.Close()
+	recorder.RecordUser("first turn")
+	if err := recorder.RecordModeChangeStrict(mode.FullAccess.String()); err != nil {
+		t.Fatal(err)
+	}
+	recorder.RecordUser("discarded turn")
+	if err := recorder.TruncateAtUserMessage(0); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := LoadSession(recorder.UUID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ReconstructState(entries).Mode; got != mode.FullAccess.String() {
+		t.Fatalf("mode after truncate=%q, want %q", got, mode.FullAccess.String())
+	}
+}
+
+func TestLoadSessionModeStrictRejectsAmbiguousCorruption(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	recorder, err := NewRecorder(t.TempDir(), "provider", "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recorder.Close()
+	if err := recorder.RecordModeChangeStrict(mode.FullAccess.String()); err != nil {
+		t.Fatal(err)
+	}
+	appendRawSessionLine(t, recorder.UUID(), `{"type":"mode_change"`)
+
+	if _, err := LoadSessionModeStrict(recorder.UUID()); err == nil {
+		t.Fatal("ambiguous malformed line was skipped during authorization restore")
+	}
+}

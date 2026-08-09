@@ -163,10 +163,14 @@ func TestAckResultSealedWhenCipherActive(t *testing.T) {
 	defer cloudSrv.Close()
 	conn := withCipher(newTestConnector(t, cloudSrv.URL, localSrv.URL), wiringCipher(t))
 
+	sealed, err := conn.cipher.Seal(mustPayload(t, map[string]any{"text": "hi"}))
+	if err != nil {
+		t.Fatal(err)
+	}
 	cmd := DeviceCommand{
 		ID:      "cmd-enc-1",
 		Kind:    "chat.send",
-		Payload: mustPayload(t, map[string]any{"text": "hi"}),
+		Payload: sealed,
 	}
 	conn.executeAndAck(context.Background(), cmd)
 
@@ -233,18 +237,36 @@ func TestDownlinkEncryptedPayloadDecrypted(t *testing.T) {
 	}
 }
 
-func TestDownlinkPlaintextAcceptedWithCipherActive(t *testing.T) {
+func TestDownlinkPlaintextRejectedWithCipherActive(t *testing.T) {
 	local, localSrv := newFakeLocal(t)
-	conn := withCipher(newTestConnector(t, "http://127.0.0.1:1", localSrv.URL), wiringCipher(t))
+	mock := newMockCloud()
+	cloudSrv := httptest.NewServer(mock.handler())
+	defer cloudSrv.Close()
+	conn := withCipher(newTestConnector(t, cloudSrv.URL, localSrv.URL), wiringCipher(t))
 
-	// Grey rule: a plaintext (no `enc`) downlink payload still dispatches.
-	cmd := DeviceCommand{ID: "cmd-grey-1", Kind: "chat.send", Payload: mustPayload(t, map[string]any{"text": "plain still ok"})}
-	status, _ := conn.executeCommand(context.Background(), cmd)
-	if status != "ok" {
-		t.Fatalf("plaintext command with active cipher = %q, want ok", status)
+	cmd := DeviceCommand{ID: "cmd-grey-1", Kind: "chat.send", Payload: mustPayload(t, map[string]any{"text": "must not run"})}
+	conn.executeAndAck(context.Background(), cmd)
+	waitFor(t, func() bool { return mock.ackCount() == 1 }, "plaintext rejection ack")
+	mock.mu.Lock()
+	ack := mock.acks[cmd.ID]
+	mock.mu.Unlock()
+	if ack.Status != "error" {
+		t.Fatalf("plaintext command ack = %q, want error", ack.Status)
 	}
-	if body := local.chatBody(); body["message"] != "plain still ok" {
-		t.Fatalf("local chat body = %v", body)
+	local.mu.Lock()
+	defer local.mu.Unlock()
+	if len(local.chatBodies) != 0 {
+		t.Fatalf("plaintext command reached local control plane: %v", local.chatBodies)
+	}
+}
+
+func TestDownlinkPlaintextAcceptedWhenCipherExplicitlyDisabled(t *testing.T) {
+	conn := withCipher(newTestConnector(t, "http://127.0.0.1:1", "http://127.0.0.1:1"), wiringCipher(t))
+	conn.cfg.CipherDisabled = true
+	payload := mustPayload(t, map[string]any{"text": "explicit grey path"})
+	plain, err := conn.openDownlink(payload)
+	if err != nil || !bytes.Equal(plain, payload) {
+		t.Fatalf("disabled cipher plaintext = %s err=%v", plain, err)
 	}
 }
 

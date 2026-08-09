@@ -46,6 +46,10 @@ type Engine struct {
 	// settings refreshes cannot both build from one revision and discard whichever
 	// configuration happened to finish second.
 	rebuildMu sync.Mutex
+	// toolOverrideMu serializes GET hydration and two-phase CAS updates so a
+	// client never observes the durable revision between fsync and the prepared
+	// agent/catalog publication.
+	toolOverrideMu sync.Mutex
 
 	// taskID is the task identity (== the recorder's session UUID once a message
 	// has been recorded). Empty for a freshly created, not-yet-messaged engine.
@@ -273,6 +277,19 @@ func (e *Engine) curMode() string {
 	return e.mode
 }
 
+// recordModeChange commits authorization state before a caller publishes it to
+// the live engine or UI. The recorder pointer is snapshotted under emu, while
+// the potentially slow fsync runs without blocking unrelated history reads.
+func (e *Engine) recordModeChange(modeStr string) error {
+	e.emu.Lock()
+	recorder := e.recorder
+	e.emu.Unlock()
+	if recorder == nil {
+		return fmt.Errorf("session recorder is unavailable")
+	}
+	return recorder.RecordModeChangeStrict(modeStr)
+}
+
 func (e *Engine) curAgentRole() string {
 	e.emu.Lock()
 	defer e.emu.Unlock()
@@ -354,20 +371,6 @@ func (e *Engine) installAgentIfRevision(ag *adk.ChatModelAgent, revision uint64)
 	return true
 }
 
-// setAgentIfModel installs ag only if the engine is still on provider/model.
-// Rebuild paths construct agents outside emu; if a model switch lands in that
-// window, its (newer) agent must win over the rebuild's stale one. Returns
-// whether the agent was installed.
-func (e *Engine) setAgentIfModel(ag *adk.ChatModelAgent, provider, model string) bool {
-	e.emu.Lock()
-	defer e.emu.Unlock()
-	if e.providerName != provider || e.modelName != model {
-		return false
-	}
-	e.agent = ag
-	return true
-}
-
 // resolveEngine returns the engine for taskID, or the active engine when taskID
 // is empty (legacy / no-task_id callers). Returns nil when taskID is unknown.
 func (s *Server) resolveEngine(taskID string) *Engine {
@@ -392,17 +395,33 @@ func (s *Server) resolveEngine(taskID string) *Engine {
 const maxLiveEngines = 64
 
 var errTooManyTasks = fmt.Errorf("too many concurrent tasks")
+var errTaskAlreadyRegistered = fmt.Errorf("task engine is already registered")
 
 // registerEngine adds eng to the tasks map (keyed by task id), publishes its
 // pump-cancel under tasksMu (so teardown observes it), and starts its event
 // pump. Idempotent for an already-registered engine. Returns errTooManyTasks if
 // registering a NEW engine would exceed the live-engine cap.
 func (s *Server) registerEngine(eng *Engine) error {
-	if eng == nil || eng.taskID == "" {
+	if eng == nil {
+		return nil
+	}
+	if eng.handler != nil {
+		eng.handler.SetModePromotionCallback(func() error {
+			return s.syncModeAfterApproval(eng, true, true)
+		})
+	}
+	if eng.taskID == "" {
 		return nil
 	}
 	s.tasksMu.Lock()
-	_, existed := s.tasks[eng.taskID]
+	existing, existed := s.tasks[eng.taskID]
+	if existed {
+		s.tasksMu.Unlock()
+		if existing == eng {
+			return nil
+		}
+		return errTaskAlreadyRegistered
+	}
 	if !existed && len(s.tasks) >= maxLiveEngines {
 		s.tasksMu.Unlock()
 		return errTooManyTasks
@@ -515,7 +534,14 @@ func (s *Server) setActiveEngine(eng *Engine) {
 	if eng == nil {
 		return
 	}
-	_ = s.registerEngine(eng)
+	if err := s.registerEngine(eng); err != nil {
+		if canonical := s.resolveEngine(eng.taskID); canonical != nil {
+			eng = canonical
+		} else {
+			eng.teardown()
+			return
+		}
+	}
 	s.mu.Lock()
 	prev := s.Engine
 	s.Engine = eng
@@ -578,9 +604,14 @@ func (e *Engine) teardown() {
 	for i := 0; i < 200 && e.running.Load(); i++ {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if e.recorder != nil {
-		e.recorder.Close()
+	e.toolOverrideMu.Lock()
+	e.emu.Lock()
+	recorder := e.recorder
+	e.emu.Unlock()
+	if recorder != nil {
+		recorder.Close()
 	}
+	e.toolOverrideMu.Unlock()
 	// Release the remote target, if any: closes the SSH connection or
 	// decrements the Docker container ref-count (stopping it on last release).
 	// No-op for local engines.

@@ -1,5 +1,5 @@
 // API client for jcode backend — ported from web/src/composables/api.ts.
-import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse, ArtifactRecord, ArtifactShareResult, ArtifactShareSummary } from './types'
+import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, ProviderToolPolicy, ImageEndpointConfig, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse, ArtifactRecord, ArtifactShareResult, ArtifactShareSummary } from './types'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from './automation'
 import { apiBase } from './apiBase'
 import { getAuthToken, notifyAuthExpired } from './authToken'
@@ -50,11 +50,12 @@ async function requestBlob(path: string): Promise<Blob> {
   return resp.blob()
 }
 
-async function requestVoid(path: string, method: string): Promise<void> {
+async function requestVoid(path: string, method: string, body?: string): Promise<void> {
   const headers = new Headers()
   const token = getAuthToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const resp = await fetch(`${apiBase}${path}`, { method, headers })
+  if (body !== undefined) headers.set('Content-Type', 'application/json')
+  const resp = await fetch(`${apiBase}${path}`, { method, headers, body })
   if (resp.status === 401) notifyAuthExpired()
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({ error: resp.statusText }))
@@ -146,8 +147,12 @@ export const api = {
     requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/content`),
   artifactDownload: (taskId: string, artifactId: string) =>
     requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/download`),
-  markArtifactsViewed: (taskId: string) =>
-    requestVoid(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/viewed`, 'PATCH'),
+  markArtifactViewed: (taskId: string, artifactId: string, revision: number) =>
+    requestVoid(
+      `/api/tasks/${encodeURIComponent(taskId)}/artifacts/viewed`,
+      'PATCH',
+      JSON.stringify({ artifact_id: artifactId, revision }),
+    ),
   createArtifactShare: (taskId: string, artifactId: string, expiresInSeconds: number) =>
     request<ArtifactShareResult>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/shares`, {
       method: 'POST',
@@ -176,6 +181,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ id, approved, approve_all: approveAll, task_id: taskId }),
     }),
+  approvalOption: (id: string, optionId: string, taskId?: string) =>
+    request<{ status: string; resolved_option_id?: string }>('/api/approval', {
+      method: 'POST',
+      body: JSON.stringify({ id, option_id: optionId, task_id: taskId }),
+    }),
   askUser: (id: string, answers: AskUserAnswer[], taskId?: string) =>
     request<{ status: string }>('/api/ask', {
       method: 'POST',
@@ -199,6 +209,11 @@ export const api = {
   // takes effect immediately (subagent "small" alias, session titles).
   setSmallModel: (provider: string, model: string) =>
     request<{ status: string; small_model: string }>('/api/small-model', {
+      method: 'POST',
+      body: JSON.stringify({ provider, model }),
+    }),
+  setImageModel: (provider: string, model: string) =>
+    request<{ status: string; image_model: string }>('/api/image-model', {
       method: 'POST',
       body: JSON.stringify({ provider, model }),
     }),
@@ -378,12 +393,21 @@ export const api = {
     request<ProviderDetail[]>('/api/providers'),
   // vision is deliberately absent: image support is model metadata, and the
   // backend treats an omitted field as "clear the stored override".
-  addProvider: (data: { id: string; api_key: string; name?: string; model?: string; model_reasoning?: boolean; thinking?: boolean; reasoning_effort?: string } & ProviderAdvanced) =>
+  addProvider: (data: { id: string; api_key: string; name?: string; model?: string; model_reasoning?: boolean; thinking?: boolean; reasoning_effort?: string; provider_tools?: Record<string, ProviderToolPolicy>; image_endpoint?: ImageEndpointConfig } & ProviderAdvanced) =>
     request<{ status: string }>('/api/providers', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  updateProvider: (id: string, data: { api_key?: string; name?: string; custom_models?: CustomModelDetail[]; thinking?: boolean; reasoning_effort?: string } & ProviderAdvanced) =>
+  updateProvider: (id: string, data: {
+    api_key?: string
+    name?: string
+    custom_models?: CustomModelDetail[]
+    vision?: boolean
+    thinking?: boolean
+    reasoning_effort?: string
+    provider_tools?: Record<string, ProviderToolPolicy>
+    image_endpoint?: ImageEndpointConfig | null
+  } & Omit<ProviderAdvanced, 'base_url'> & { base_url?: string | null }) =>
     request<{ status: string }>(`/api/providers/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(data),

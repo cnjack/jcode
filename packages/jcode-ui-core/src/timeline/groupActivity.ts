@@ -1,7 +1,8 @@
 /**
  * Activity-group coalescing for the chat timeline (Claude Code / Codex-style).
  *
- * ALL adjacent tool items — read-only or mutating, batched or not — coalesce
+ * All adjacent default-surface tool items — read-only or mutating, batched or
+ * not — coalesce
  * into ONE synthetic `activity` ThreadItem. "Adjacent" means no assistant/user
  * message (or any other non-tool item) in between; approvals do NOT break a
  * group and keep rendering in place, independently. Tools sharing a `batchId`
@@ -27,10 +28,10 @@ function toolStatus(tools: ToolCall[]): ToolStatus {
 /** Pass-1 unit: either a run of tools (a batch or a lone tool) or a pass-through item. */
 type Unit = { cluster: { tools: ToolCall[]; seq: number } } | { item: ThreadItem }
 
-/** Ask User owns a complete timeline receipt and must not be collapsed into
- * the generic activity summary before or after the interaction resolves. */
+/** Standalone tools own their complete timeline surface and are hard grouping
+ * boundaries from the initial tool_call event onward. */
 export function isStandaloneTool(tool: ToolCall): boolean {
-  return tool.name === 'ask_user'
+  return tool.surface === 'standalone' || tool.name === 'ask_user'
 }
 
 /**
@@ -50,8 +51,8 @@ export function groupActivityTimeline(items: ThreadItem[]): ThreadItem[] {
   for (const item of items) {
     if (item.kind === 'tool') {
       if (isStandaloneTool(item.data)) {
-        // Do not allow a later member to be pulled backwards across the
-        // question/answer receipt by a batch that began before it.
+        // A batch must never pull a later member backwards across a standalone
+        // media surface. Reset the batch index and preserve this item in place.
         batches.clear()
         units.push({ item })
         continue

@@ -207,6 +207,22 @@ function modelSubline(modelId: string, info?: { context_limit?: number }): strin
   return parts.join(' · ')
 }
 
+/** The models endpoint is a capability catalog, not a chat-only list. Keep
+ * image-only entries out of the conversation picker. Missing modalities are
+ * treated as legacy text output for backward-compatible hosts. */
+function isChatModel(model: ModelInfo): boolean {
+  const outputsText = model.output_modalities?.includes('text') ?? true
+  return model.tool_call === true && outputsText
+}
+
+function acceptsImageInput(model?: ModelInfo): boolean {
+  return model?.input_modalities?.includes('image') ?? !!model?.image_support
+}
+
+function generatesImages(model?: ModelInfo): boolean {
+  return !!model?.output_modalities?.includes('image')
+}
+
 /**
  * Slash token at the cursor: walks back from the caret to the nearest "/" with
  * no whitespace in between, then decides whether that "/" can start a command.
@@ -285,6 +301,19 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const effortPopup = useViewportPopup(showEffortPicker)
   const agentPopup = useViewportPopup(showAgentPicker)
 
+  function handleAddMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]'))
+    if (items.length === 0) return
+    event.preventDefault()
+    const current = items.indexOf(document.activeElement as HTMLElement)
+    let next = 0
+    if (event.key === 'End') next = items.length - 1
+    else if (event.key === 'ArrowUp') next = current <= 0 ? items.length - 1 : current - 1
+    else if (event.key === 'ArrowDown') next = current < 0 || current === items.length - 1 ? 0 : current + 1
+    items[next]?.focus()
+  }
+
   // ─── Derived model catalog ────────────────────────────────────────────────
 
   function modelInfoFor(provider: string, model: string): ModelInfo | undefined {
@@ -321,7 +350,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const pickerProviders = useMemo(
     () =>
       filteredProviders
-        .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled === true) }))
+        .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled === true && isChatModel(m)) }))
         .filter((p) => p.models.length > 0),
     [filteredProviders],
   )
@@ -332,7 +361,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     return recentModels.filter((r) => {
       if (!favSet.has(`${r.provider}/${r.model}`)) return false
       if (providerName === r.provider && modelName === r.model) return false
-      if (modelInfoFor(r.provider, r.model)?.enabled !== true) return false
+      const model = modelInfoFor(r.provider, r.model)
+      if (model?.enabled !== true || !isChatModel(model)) return false
       if (!q) return true
       const name = getModelDisplayName(r.provider, r.model).toLowerCase()
       return name.includes(q) || r.provider.toLowerCase().includes(q)
@@ -939,6 +969,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                 <button
                   type="button"
                   title={strings.add}
+                  aria-haspopup="menu"
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openAdd() }}
                   className={`grid h-[30px] w-[30px] place-items-center rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)] ${
                     showAddMenu ? 'bg-[var(--color-secondary)] text-[var(--color-foreground)]' : ''
@@ -950,10 +981,17 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                   <div
                     ref={addPopup.ref}
                     style={addPopup.style}
+                    role="menu"
+                    aria-label={strings.add}
+                    onKeyDown={handleAddMenuKeyDown}
                     className="jcode-product-composer-add-menu absolute bottom-full left-0 z-20 mb-1 min-w-[188px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-md)]"
                   >
+                    <div className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-muted-foreground)]">
+                      {strings.add}
+                    </div>
                     <button
                       type="button"
+                      role="menuitem"
                       disabled={!imageSupport}
                       title={!imageSupport ? strings.modelNoImages : ''}
                       onClick={() => { triggerImageUpload(); setShowAddMenu(false) }}
@@ -967,8 +1005,10 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                         <span className="ml-auto font-mono text-[10px] text-[var(--color-primary)]">{pendingImages.length}</span>
                       )}
                     </button>
+                    <div className="mx-2 my-1 h-px bg-[var(--color-border)]" aria-hidden="true" />
                     <button
                       type="button"
+                      role="menuitem"
                       onClick={() => insertToken('/')}
                       className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                     >
@@ -977,6 +1017,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                     </button>
                     <button
                       type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={goalArmed}
                       title={goalArmed ? strings.goalHintNextReplaces : strings.goalHintNext}
                       onClick={() => { host.setGoalArmed(!goalArmed); setShowAddMenu(false) }}
                       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
@@ -1099,6 +1141,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                   </div>
                 </>
               )}
+
             </div>
 
             {/* Toolbar-right: token ring, model picker, effort picker, stop/send */}
@@ -1333,7 +1376,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                         <span className="inline-flex shrink-0 items-center gap-1.5">
                           {currentModelInfo?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={strings.modelReasoning} strokeWidth={1.9} />}
                           {currentModelInfo?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={strings.modelTools} strokeWidth={1.9} />}
-                          {currentModelInfo?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
+                          {acceptsImageInput(currentModelInfo) && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
+                          {generatesImages(currentModelInfo) && <SquaresPlusIcon className="h-[15px] w-[15px]" title={strings.modelImageOutput} strokeWidth={1.9} />}
                         </span>
                       </div>
                     )}
@@ -1364,7 +1408,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                                 <span className="inline-flex shrink-0 items-center gap-1.5">
                                   {info?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={strings.modelReasoning} strokeWidth={1.9} />}
                                   {info?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={strings.modelTools} strokeWidth={1.9} />}
-                                  {info?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
+                                  {acceptsImageInput(info) && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
+                                  {generatesImages(info) && <SquaresPlusIcon className="h-[15px] w-[15px]" title={strings.modelImageOutput} strokeWidth={1.9} />}
                                 </span>
                                 <StarIconSolid
                                   className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]"
@@ -1417,8 +1462,9 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                                 <span className="inline-flex shrink-0 items-center gap-1.5">
                                   {m.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={strings.modelReasoning} strokeWidth={1.9} />}
                                   {m.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={strings.modelTools} strokeWidth={1.9} />}
-                                  {m.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
-                                  {m.image_support === false && <PhotoIcon className="h-[15px] w-[15px] text-[var(--color-warning-fg)]" title={strings.modelNoImageInput} strokeWidth={1.9} />}
+                                  {acceptsImageInput(m) && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
+                                  {generatesImages(m) && <SquaresPlusIcon className="h-[15px] w-[15px]" title={strings.modelImageOutput} strokeWidth={1.9} />}
+                                  {m.input_modalities && !acceptsImageInput(m) && <PhotoIcon className="h-[15px] w-[15px] text-[var(--color-warning-fg)]" title={strings.modelNoImageInput} strokeWidth={1.9} />}
                                 </span>
                                 {active && <CheckIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" strokeWidth={2} />}
                                 <StarIcon
@@ -1701,6 +1747,11 @@ function ManageModelsDialog({
                     </span>
                     {m.recommended && (
                       <span className="shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--neutral-wash-strong)] px-1.5 py-px text-[10px] font-semibold text-[var(--color-foreground)]">{strings.commonRecommended}</span>
+                    )}
+                    {generatesImages(m) && (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-muted)] px-1.5 py-px text-[10px] text-[var(--color-muted-foreground)]" title={strings.modelImageOutput}>
+                        <SquaresPlusIcon className="h-3 w-3" /> {strings.modelImageOutput}
+                      </span>
                     )}
                     <button
                       type="button"

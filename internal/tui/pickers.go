@@ -481,6 +481,8 @@ func (m Model) approvalDialogView() string {
 	// Different header based on whether this is external path access
 	var headerText string
 	switch {
+	case m.approvalIsBillable:
+		headerText = toolNameStyle.Render("⚠️  External Billable Request")
 	case m.approvalIsExternal:
 		headerText = toolNameStyle.Render("⚠️  External Path Access")
 	case m.approvalWorkerName != "":
@@ -508,15 +510,27 @@ func (m Model) approvalDialogView() string {
 		Render(argsDisplay)
 
 	// Button group — left/right navigation
-	buttons := buttonGroup([]buttonOpts{
+	buttonOptions := []buttonOpts{
 		{text: " Approve ", selected: m.approvalSelected == 0},
-		{text: " Approve All ", selected: m.approvalSelected == 1},
-		{text: " Reject ", selected: m.approvalSelected == 2},
-	})
+	}
+	if m.approvalAllowApproveAll {
+		buttonOptions = append(buttonOptions,
+			buttonOpts{text: " Approve All ", selected: m.approvalSelected == 1},
+			buttonOpts{text: " Reject ", selected: m.approvalSelected == 2},
+		)
+	} else {
+		buttonOptions = append(buttonOptions,
+			buttonOpts{text: " Reject ", selected: m.approvalSelected == 1},
+		)
+	}
+	buttons := buttonGroup(buttonOptions)
 
 	// Keyboard hints
-	hintText := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-		Render("←/→ switch  ·  Enter confirm  ·  y/a/n")
+	hints := "←/→ switch  ·  Enter confirm  ·  y/n"
+	if m.approvalAllowApproveAll {
+		hints = "←/→ switch  ·  Enter confirm  ·  y/a/n"
+	}
+	hintText := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).Render(hints)
 
 	content := lipgloss.JoinVertical(lipgloss.Center,
 		lipgloss.NewStyle().Bold(true).Render(headerText),

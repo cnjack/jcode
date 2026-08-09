@@ -27,13 +27,19 @@ func (s *Server) handleArtifactDesktopAction(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
 		return
 	}
-	sessionID, workspace, err := s.artifactWorkspace(r)
+	scope, err := s.artifactScope(r)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
 		return
 	}
-	record, absolutePath, err := s.artifacts.Resolve(r.Context(), sessionID, workspace, r.PathValue("artifactID"))
+	record, absolutePath, err := s.artifacts.Resolve(
+		r.Context(), scope.sessionID, scope.workspace, r.PathValue("artifactID"),
+	)
 	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+		return
+	}
+	if scope.managedOnly && record.EffectiveStorageKind() != artifact.StorageManaged {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
 		return
 	}

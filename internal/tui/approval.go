@@ -10,10 +10,35 @@ func (m *Model) showApproval(msg ToolApprovalRequestMsg) {
 	m.approvalToolArgs = msg.Args
 	m.approvalRespChan = msg.Resp
 	m.approvalIsExternal = msg.IsExternal
+	m.approvalIsBillable = msg.IsBillable
 	m.approvalWorkerName = msg.WorkerName
 	m.approvalWorkerColor = msg.WorkerColor
+	m.approvalOptions = append(m.approvalOptions[:0], msg.Options...)
+	m.approvalAllowApproveAll = msg.AllowApproveAll && len(m.approvalOptions) == 0
 	m.approvalSelected = 0 // Default to "Approve"
 	m.textarea.Blur()
+	m.refreshViewport()
+}
+
+func (m *Model) approvalResponse(approved bool, responseMode ApprovalMode) ToolApprovalResponse {
+	response := ToolApprovalResponse{Approved: approved, Mode: responseMode}
+	wantedKind := "allow_once"
+	if !approved {
+		wantedKind = "deny"
+	}
+	for _, option := range m.approvalOptions {
+		if option.Kind == wantedKind {
+			response.ResolvedOptionID = option.ID
+			break
+		}
+	}
+	return response
+}
+
+// showApprovalPromotionFailure keeps the current request pending and surfaces
+// only an opaque storage error. Local paths/details remain in the debug log.
+func (m *Model) showApprovalPromotionFailure() {
+	m.lines = append(m.lines, textLine("   "+toolErrorStyle.Render("⚠ Full access unchanged — could not save mode change")))
 	m.refreshViewport()
 }
 
@@ -28,12 +53,21 @@ func (m *Model) resolveApproval(resp ToolApprovalResponse) {
 
 	// If user chose "Approve All", auto-approve everything in the queue.
 	if resp.Mode == ModeAuto {
+		remaining := make([]ToolApprovalRequestMsg, 0, len(m.approvalQueue))
 		for _, queued := range m.approvalQueue {
-			if queued.Resp != nil {
+			if queued.AllowApproveAll && queued.Resp != nil {
 				queued.Resp <- ToolApprovalResponse{Approved: true, Mode: ModeAuto}
+			} else {
+				remaining = append(remaining, queued)
 			}
 		}
-		m.approvalQueue = nil
+		m.approvalQueue = remaining
+		if len(m.approvalQueue) > 0 {
+			next := m.approvalQueue[0]
+			m.approvalQueue = m.approvalQueue[1:]
+			m.showApproval(next)
+			return
+		}
 		m.endRunPause()
 		m.textarea.Focus()
 		m.refreshViewport()

@@ -22,6 +22,9 @@ export interface WSHandlers {
     args: string
     tool_call_id?: string
     display_info?: { title: string; subtitle?: string; icon?: string; category?: string }
+    surface?: import('jcode-ui-core').ToolSurface
+    phase?: import('../app/toolLifecycle').WireToolPhase
+    operation_id?: string
     /** Concurrent-batch grouping (tools issued together by one assistant message). */
     batch_id?: string
     /** 0-based position within the batch. */
@@ -29,6 +32,16 @@ export interface WSHandlers {
     batch_size?: number
     /** Wall-clock start (unix ms). */
     started_at?: number
+  }) => void
+  onToolProgress?: (data: {
+    name?: string
+    tool_call_id: string
+    operation_id?: string
+    phase: import('../app/toolLifecycle').WireToolPhase
+    error_code?: string
+    provider?: string
+    model?: string
+    artifacts?: import('jcode-ui-core').ArtifactRef[]
   }) => void
   onToolResult?: (data: {
     name: string
@@ -44,6 +57,13 @@ export interface WSHandlers {
     streams?: import('./types').ToolResultStreams
     meta?: import('./types').ToolResultMeta
     presentation?: import('./types').ToolResultPresentation
+    operation_id?: string
+    phase?: import('../app/toolLifecycle').WireToolPhase
+    outcome?: import('jcode-ui-core').ToolOutcome
+    error_code?: string
+    provider?: string
+    model?: string
+    artifacts?: import('jcode-ui-core').ArtifactRef[]
   }) => void
   onTokenUpdate?: (data: import('./types').TokenUpdateData) => void
   onAgentDone?: (data: { error?: string; detail?: string; stopped?: boolean; task_id?: string }) => void
@@ -233,6 +253,7 @@ export class WSClient {
         agent_start: () => h.onAgentStart?.(),
         agent_text: (d) => h.onAgentText?.(d),
         tool_call: (d) => h.onToolCall?.(d),
+        tool_progress: (d) => h.onToolProgress?.(d),
         tool_result: (d) => h.onToolResult?.(d),
         token_update: (d) => h.onTokenUpdate?.(d),
         agent_done: (d) => h.onAgentDone?.(d),

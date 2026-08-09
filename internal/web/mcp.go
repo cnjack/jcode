@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/cnjack/jcode/internal/config"
@@ -23,45 +25,59 @@ type mcpLoginState struct {
 // mcpServerView is the JSON shape returned for one MCP server in the list and
 // CRUD responses — enough for the management UI's status badges and edit form.
 type mcpServerView struct {
-	Name    string            `json:"name"`
-	Type    string            `json:"type"`
-	URL     string            `json:"url,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     []string          `json:"env,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Timeout int               `json:"timeout,omitempty"`
-	Enabled bool              `json:"enabled"`
-	OAuth   bool              `json:"oauth"`    // OAuth enabled for this server
-	HasAuth bool              `json:"has_auth"` // a token is stored
-	Status  string            `json:"status"`   // connected | needs_auth | error | disabled | configured
-	Error   string            `json:"error,omitempty"`
-	Scope   string            `json:"scope"` // global | project — which config layer defines this server
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	URL         string            `json:"url,omitempty"`
+	Command     string            `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         []string          `json:"env,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Timeout     int               `json:"timeout,omitempty"`
+	Enabled     bool              `json:"enabled"`
+	OAuth       bool              `json:"oauth"`                  // OAuth enabled for this server
+	OAuthConfig *mcpOAuthView     `json:"oauth_config,omitempty"` // safe editable fields; secret masked
+	HasAuth     bool              `json:"has_auth"`               // a token is stored
+	Status      string            `json:"status"`                 // connected | needs_auth | error | disabled | configured
+	Error       string            `json:"error,omitempty"`
+	Scope       string            `json:"scope"` // global | project — which config layer defines this server
+}
+
+type mcpOAuthView struct {
+	Enabled               bool     `json:"enabled"`
+	ClientID              string   `json:"client_id,omitempty"`
+	ClientSecret          string   `json:"client_secret,omitempty"`
+	Scopes                []string `json:"scopes,omitempty"`
+	AuthServerMetadataURL string   `json:"auth_server_metadata_url,omitempty"`
+}
+
+type mcpOAuthReq struct {
+	Enabled            bool     `json:"enabled"`
+	ClientID           string   `json:"client_id"`
+	ClientSecret       string   `json:"client_secret"`
+	Scopes             []string `json:"scopes"`
+	RemoveClientSecret bool     `json:"remove_client_secret,omitempty"`
 }
 
 // mcpServerReq is the request body for creating/updating an MCP server.
 type mcpServerReq struct {
-	Name    string            `json:"name"`
-	Type    string            `json:"type"` // local|stdio|http|sse
-	URL     string            `json:"url"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Env     []string          `json:"env"`
-	Headers map[string]string `json:"headers"`
-	Timeout int               `json:"timeout"`
-	OAuth   *struct {
-		Enabled      bool     `json:"enabled"`
-		ClientID     string   `json:"client_id"`
-		ClientSecret string   `json:"client_secret"`
-		Scopes       []string `json:"scopes"`
-	} `json:"oauth"`
+	Name          string            `json:"name"`
+	Type          string            `json:"type"` // local|stdio|http|sse
+	URL           string            `json:"url"`
+	Command       string            `json:"command"`
+	Args          []string          `json:"args"`
+	Env           []string          `json:"env"`
+	Headers       map[string]string `json:"headers"`
+	RemoveHeaders []string          `json:"remove_headers,omitempty"`
+	Timeout       int               `json:"timeout"`
+	OAuth         *mcpOAuthReq      `json:"oauth"`
+	RemoveOAuth   bool              `json:"remove_oauth,omitempty"`
 }
 
-// serverFromReq builds a config.MCPServer from a request body, normalizing the
-// transport ("local" → "stdio") and preserving any existing OAuth token state.
+// serverFromReq builds a new config.MCPServer from a request body, normalizing
+// the transport ("local" → "stdio"). Update merging is handled separately.
 func serverFromReq(req *mcpServerReq) (*config.MCPServer, error) {
 	srv := &config.MCPServer{
-		Headers:        req.Headers,
+		Headers:        cleanHeaders(req.Headers),
 		TimeoutSeconds: req.Timeout,
 	}
 	t := req.Type
@@ -86,7 +102,7 @@ func serverFromReq(req *mcpServerReq) (*config.MCPServer, error) {
 	default:
 		return nil, fmt.Errorf("unknown server type %q (use local, http, or sse)", req.Type)
 	}
-	if req.OAuth != nil && (req.OAuth.Enabled || req.OAuth.ClientID != "" || len(req.OAuth.Scopes) > 0) {
+	if req.OAuth != nil && (req.OAuth.Enabled || req.OAuth.ClientID != "" || req.OAuth.ClientSecret != "" || len(req.OAuth.Scopes) > 0) {
 		srv.OAuth = &config.MCPOAuthConfig{
 			Enabled:      req.OAuth.Enabled || req.OAuth.ClientID != "",
 			ClientID:     req.OAuth.ClientID,
@@ -95,6 +111,130 @@ func serverFromReq(req *mcpServerReq) (*config.MCPServer, error) {
 		}
 	}
 	return srv, nil
+}
+
+// mergeMCPServerReq applies an update without ever treating a display mask as
+// a new credential. Omitted, empty, or current-mask secret values keep the
+// stored value. Deletion is deliberately explicit so a stale Settings client
+// cannot erase credentials it was never allowed to read.
+func mergeMCPServerReq(existing *config.MCPServer, req *mcpServerReq) (*config.MCPServer, error) {
+	next, err := serverFromReq(req)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return next, nil
+	}
+	next.Disabled = existing.Disabled
+	next.Source = existing.Source
+
+	next.Headers = cleanHeaders(existing.Headers)
+	for key, value := range cleanHeaders(req.Headers) {
+		old, exists := next.Headers[key]
+		if exists && secretValueUnchanged(value, old) {
+			continue
+		}
+		if next.Headers == nil {
+			next.Headers = make(map[string]string)
+		}
+		next.Headers[key] = value
+	}
+	for _, key := range req.RemoveHeaders {
+		delete(next.Headers, http.CanonicalHeaderKey(strings.TrimSpace(key)))
+	}
+	if len(next.Headers) == 0 {
+		next.Headers = nil
+	}
+
+	if req.RemoveOAuth {
+		next.OAuth = nil
+		return next, nil
+	}
+	if req.OAuth == nil {
+		next.OAuth = cloneMCPOAuth(existing.OAuth)
+		return next, nil
+	}
+	oauthReq := req.OAuth
+	if next.OAuth == nil {
+		next.OAuth = &config.MCPOAuthConfig{}
+	}
+	if existing.OAuth != nil {
+		if oauthReq.ClientID == "" {
+			next.OAuth.ClientID = existing.OAuth.ClientID
+		}
+		if !oauthReq.RemoveClientSecret && secretValueUnchanged(oauthReq.ClientSecret, existing.OAuth.ClientSecret) {
+			next.OAuth.ClientSecret = existing.OAuth.ClientSecret
+		}
+		if oauthReq.Scopes == nil {
+			next.OAuth.Scopes = append([]string(nil), existing.OAuth.Scopes...)
+		}
+		next.OAuth.AuthServerMetadataURL = existing.OAuth.AuthServerMetadataURL
+	}
+	if oauthReq.RemoveClientSecret {
+		next.OAuth.ClientSecret = ""
+	}
+	return next, nil
+}
+
+func secretValueUnchanged(incoming, stored string) bool {
+	return incoming == "" || (stored != "" && incoming == maskSecret(stored))
+}
+
+func maskedMCPHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	masked := make(map[string]string, len(headers))
+	for key, value := range headers {
+		masked[key] = maskSecret(value)
+	}
+	return masked
+}
+
+func safeMCPOAuthView(oauth *config.MCPOAuthConfig) *mcpOAuthView {
+	if oauth == nil {
+		return nil
+	}
+	return &mcpOAuthView{
+		Enabled:               oauth.Enabled,
+		ClientID:              oauth.ClientID,
+		ClientSecret:          maskSecret(oauth.ClientSecret),
+		Scopes:                append([]string(nil), oauth.Scopes...),
+		AuthServerMetadataURL: oauth.AuthServerMetadataURL,
+	}
+}
+
+func redactMCPServerSecrets(message string, servers ...*config.MCPServer) string {
+	if message == "" {
+		return ""
+	}
+	secrets := make([]string, 0)
+	for _, server := range servers {
+		if server == nil {
+			continue
+		}
+		for _, value := range server.Headers {
+			if value != "" {
+				secrets = append(secrets, value)
+			}
+		}
+		if server.OAuth != nil && server.OAuth.ClientSecret != "" {
+			secrets = append(secrets, server.OAuth.ClientSecret)
+		}
+	}
+	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+	for _, secret := range secrets {
+		message = strings.ReplaceAll(message, secret, "[redacted]")
+	}
+	return message
+}
+
+func redactMCPConfigSecrets(message string, servers map[string]*config.MCPServer) string {
+	values := make([]*config.MCPServer, 0, len(servers))
+	for _, server := range servers {
+		values = append(values, server)
+	}
+	return redactMCPServerSecrets(message, values...)
 }
 
 func cloneMCPServers(in map[string]*config.MCPServer) map[string]*config.MCPServer {
@@ -179,7 +319,7 @@ func (s *Server) reloadMCPAndRebuild() error {
 		s.cfgMu.Unlock()
 		statuses, err := s.reloadMCP(servers)
 		if err != nil {
-			return err
+			return errors.New(redactMCPConfigSecrets(err.Error(), servers))
 		}
 		s.mu.Lock()
 		s.mcpStatuses = make(map[string]tools.MCPStatus, len(statuses))
@@ -234,25 +374,27 @@ func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		status, errMsg := s.mcpServerStatus(name, srv)
+		errMsg = redactMCPServerSecrets(errMsg, srv)
 		scope := srv.Source
 		if scope == "" {
 			scope = "global"
 		}
 		servers[name] = mcpServerView{
-			Name:    name,
-			Type:    srv.Type,
-			URL:     srv.URL,
-			Command: srv.Command,
-			Args:    srv.Args,
-			Env:     srv.Env,
-			Headers: srv.Headers,
-			Timeout: srv.TimeoutSeconds,
-			Enabled: !srv.Disabled,
-			OAuth:   srv.OAuth != nil && srv.OAuth.Enabled,
-			HasAuth: tools.HasMCPOAuthToken(name),
-			Status:  status,
-			Error:   errMsg,
-			Scope:   scope,
+			Name:        name,
+			Type:        srv.Type,
+			URL:         srv.URL,
+			Command:     srv.Command,
+			Args:        srv.Args,
+			Env:         srv.Env,
+			Headers:     maskedMCPHeaders(srv.Headers),
+			Timeout:     srv.TimeoutSeconds,
+			Enabled:     !srv.Disabled,
+			OAuth:       srv.OAuth != nil && srv.OAuth.Enabled,
+			OAuthConfig: safeMCPOAuthView(srv.OAuth),
+			HasAuth:     tools.HasMCPOAuthToken(name),
+			Status:      status,
+			Error:       errMsg,
+			Scope:       scope,
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"servers": servers})
@@ -311,11 +453,6 @@ func (s *Server) handleUpdateMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	srv, err := serverFromReq(&req)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
 	s.cfgMu.Lock()
 	if s.cfg == nil {
 		s.cfgMu.Unlock()
@@ -328,18 +465,13 @@ func (s *Server) handleUpdateMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
 		return
 	}
-	previous := cloneMCPServers(s.cfg.MCPServers)
-	// Preserve disabled flag and any already-obtained OAuth client id/secret so
-	// editing other fields doesn't drop a working registration.
-	srv.Disabled = existing.Disabled
-	if srv.OAuth != nil && existing.OAuth != nil {
-		if srv.OAuth.ClientID == "" {
-			srv.OAuth.ClientID = existing.OAuth.ClientID
-		}
-		if srv.OAuth.ClientSecret == "" {
-			srv.OAuth.ClientSecret = existing.OAuth.ClientSecret
-		}
+	srv, err := mergeMCPServerReq(existing, &req)
+	if err != nil {
+		s.cfgMu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
+	previous := cloneMCPServers(s.cfg.MCPServers)
 	s.cfg.MCPServers[name] = srv
 	if err := config.SaveConfig(s.cfg); err != nil {
 		s.cfg.MCPServers = previous
@@ -517,8 +649,9 @@ func (s *Server) runMCPLogin(name string) {
 		if errors.Is(err, tools.ErrOAuthNeedsClientID) {
 			status = "needs_client_id"
 		}
-		s.setMCPLogin(name, status, err.Error())
-		config.Logger().Printf("[web] mcp login %q failed: %v", name, err)
+		safeMessage := redactMCPServerSecrets(err.Error(), srv)
+		s.setMCPLogin(name, status, safeMessage)
+		config.Logger().Printf("[web] mcp login %q failed: %s", name, safeMessage)
 		return
 	}
 

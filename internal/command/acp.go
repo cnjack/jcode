@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/artifact"
 	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
@@ -28,6 +29,7 @@ import (
 	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/providertools"
 	"github.com/cnjack/jcode/internal/review"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
@@ -92,6 +94,72 @@ type acpSession struct {
 	// say which one to go look at.
 	providerName string
 	modelName    string
+}
+
+func (s *acpSession) prepareModeLocked(target mode.SessionMode) (*adk.ChatModelAgent, error) {
+	if s.createAgent == nil {
+		return nil, fmt.Errorf("session agent factory is unavailable")
+	}
+	prompt, toolList := s.normalPrompt, s.allTools
+	if target.IsPlan() {
+		prompt, toolList = s.planPrompt, s.planTools
+	}
+	candidate, err := s.createAgent(prompt, toolList, target.IsPlan())
+	if err != nil {
+		return nil, err
+	}
+	if candidate == nil {
+		return nil, fmt.Errorf("candidate agent is unavailable")
+	}
+	return candidate, nil
+}
+
+func (s *acpSession) publishModeLocked(target mode.SessionMode, candidate *adk.ChatModelAgent) {
+	s.ag = candidate
+	s.mode = acpModeID(target)
+	s.approvalState.SetSessionMode(target)
+}
+
+// commitModeLocked is the ACP authorization transaction used by both an
+// explicit session/set_mode request and the permission dialog's Allow All.
+// The caller holds s.mu. No executable or advertised state is published until
+// the candidate agent exists and the mode entry has been durably fsynced.
+func (s *acpSession) commitModeLocked(target mode.SessionMode) error {
+	if s.mode == acpModeID(target) {
+		return nil
+	}
+	candidate, err := s.prepareModeLocked(target)
+	if err != nil {
+		return fmt.Errorf("prepare mode %s: %w", target.String(), err)
+	}
+	if s.rec == nil {
+		return fmt.Errorf("session recorder is unavailable")
+	}
+	if err := s.rec.RecordModeChangeStrict(target.String()); err != nil {
+		return fmt.Errorf("persist mode %s: %w", target.String(), err)
+	}
+	s.publishModeLocked(target, candidate)
+	return nil
+}
+
+// restoreModeLocked applies already-durable authorization during ACP Resume.
+// Strict journal parsing happens independently before this method is called;
+// on corruption the supplied target is the fail-closed Approval mode.
+func (s *acpSession) restoreModeLocked(target mode.SessionMode) error {
+	if s.mode == acpModeID(target) {
+		return nil
+	}
+	candidate, err := s.prepareModeLocked(target)
+	if err != nil {
+		// A reconnect must never retain a previously live Full access agent when
+		// strict restoration cannot build the requested safe snapshot.
+		s.ag = nil
+		s.mode = acpModeApproval
+		s.approvalState.SetSessionMode(mode.Approval)
+		return err
+	}
+	s.publishModeLocked(target, candidate)
+	return nil
 }
 
 // Close releases resources held by the session (recorder file handle, tracer).
@@ -376,7 +444,9 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 	attachTitleRefiner(ctx, rec)
 	sessionID := acp.SessionId(fmt.Sprintf("sess_%s", rec.UUID()))
 
-	sess, err := a.buildAgentSession(ctx, cfg, pwd, sessionID, rec, nil, "")
+	sess, err := a.buildAgentSession(
+		ctx, cfg, pwd, sessionID, rec, nil, "", resolveStartupMode(cfg, false),
+	)
 	if err != nil {
 		return acp.NewSessionResponse{}, err
 	}
@@ -395,8 +465,9 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 	a.scheduleSlashCommandsBroadcast(sessionID, sess)
 
 	return acp.NewSessionResponse{
-		SessionId: sessionID,
-		Modes:     acpModes(sess.mode),
+		SessionId:     sessionID,
+		Modes:         acpModes(sess.mode),
+		ConfigOptions: acpSessionConfigOptions(sess),
 	}, nil
 }
 
@@ -412,6 +483,7 @@ func (a *acpAgent) buildAgentSession(
 	rec *session.Recorder,
 	history []*schema.Message,
 	agentRoleName string,
+	startupMode mode.SessionMode,
 ) (*acpSession, error) {
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
@@ -471,10 +543,31 @@ func (a *acpAgent) buildAgentSession(
 	// token updates).
 	tokenUsage := &internalmodel.TokenUsage{}
 
-	// Load MCP tools from config.
-	var mcpTools []tool.BaseTool
-	if len(cfg.MCPServers) > 0 {
-		mcpTools, _ = tools.LoadMCPTools(ctx, cfg.MCPServers)
+	// Load the raw MCP catalog. Provider-owned endpoints are re-wrapped against
+	// this recorder and its durable usage ledger when the current chat provider
+	// configuration resolves the exact capability.
+	providerToolCfg := *cfg
+	projectActiveChatModel(&providerToolCfg, providerName, modelName)
+	providerRuntimeLoader := activeChatProviderRuntimeConfigLoader(
+		projectProviderRuntimeConfigLoader(pwd), providerName, modelName,
+	)
+	var rawMCPTools []tool.BaseTool
+	effectiveMCPServers := providertools.EffectiveMCPServers(&providerToolCfg)
+	if len(effectiveMCPServers) > 0 {
+		rawMCPTools, _ = tools.LoadMCPTools(ctx, effectiveMCPServers)
+	}
+	rawMCPCatalog := newProviderSearchMCPCatalog(&providerToolCfg, rawMCPTools)
+	providerSearchLedger, providerSearchLedgerErr := newProviderSearchUsageLedger(rec)
+	if providerSearchLedgerErr != nil {
+		config.Logger().Printf("[provider-search] initialize ACP usage ledger: %v", providerSearchLedgerErr)
+	}
+	mcpTools, providerSearchWrapErr := configuredProviderMCPTools(
+		ctx, &providerToolCfg, rec, providerSearchLedger,
+		rawMCPCatalog,
+		false, true, providerRuntimeLoader,
+	)
+	if providerSearchWrapErr != nil {
+		config.Logger().Printf("[provider-search] initialize ACP MCP tools: %v", providerSearchWrapErr)
 	}
 
 	// The ACPHandler is created before the tool list so the subagent tool can
@@ -534,6 +627,29 @@ func (a *acpAgent) buildAgentSession(
 			AgentRoles:   agentRoles,
 		}),
 	}
+	artifactService := artifact.NewService(session.LoadArtifactRecords, time.Now)
+	acpHandler.SetArtifactPathResolver(func(ctx context.Context, ref handler.ArtifactRef) (string, error) {
+		if rec == nil {
+			return "", fmt.Errorf("session recorder is unavailable")
+		}
+		_, enginePath, resolveErr := artifactService.Resolve(ctx, rec.UUID(), pwd, ref.ID)
+		return enginePath, resolveErr
+	})
+	imageLedger, imageLedgerErr := newImageUsageLedger(rec)
+	if imageLedgerErr != nil {
+		config.Logger().Printf("[image] initialize ACP usage ledger: %v", imageLedgerErr)
+	}
+	var sessionImageTool tool.BaseTool
+	if imageGenerationEnabled(cfg, false, true) {
+		if imageTool, imageErr := configuredGenerateImageTool(
+			cfg, artifactService, rec, imageLedger,
+			projectProviderRuntimeConfigLoader(pwd), acpHandler, nil,
+		); imageErr == nil {
+			sessionImageTool = imageTool
+		} else if cfg.ImageModel != "" {
+			config.Logger().Printf("[image] ACP generate_image unavailable: %v", imageErr)
+		}
+	}
 	if config.MemoryEnabled(cfg) {
 		allTools = append(allTools, env.NewMemoryNoteTool(&tools.MemoryNoteDeps{
 			SessionIDFn: func() string {
@@ -580,7 +696,6 @@ func (a *acpAgent) buildAgentSession(
 		rec.SetAgent(agentRoleName)
 		rec.SetModel(modelName)
 	}
-	startupMode := resolveStartupMode(cfg, false)
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
 		return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
@@ -590,7 +705,9 @@ func (a *acpAgent) buildAgentSession(
 	approvalState.SetHandler(acpHandler)
 
 	// Wire up environment change callback so switch_env properly restores
-	// the original local executor when switching back from SSH.
+	// the original local executor when switching back from SSH. The agent
+	// rebuild hook is installed below after the per-session agent factory exists.
+	var rebuildForEnvironment func()
 	env.OnEnvChange = func(label string, isLocal bool, envErr error) {
 		if envErr != nil {
 			config.Logger().Printf("[acp] env change error: %v", envErr)
@@ -599,9 +716,12 @@ func (a *acpAgent) buildAgentSession(
 		if isLocal {
 			env.ResetToLocal(pwd, platform)
 			config.Logger().Printf("[acp] env reset to original executor: %s", env.Exec.Label())
-			return
+		} else {
+			config.Logger().Printf("[acp] env changed to: %s", label)
 		}
-		config.Logger().Printf("[acp] env changed to: %s", label)
+		if rebuildForEnvironment != nil {
+			rebuildForEnvironment()
+		}
 	}
 
 	if rec != nil {
@@ -671,16 +791,35 @@ func (a *acpAgent) buildAgentSession(
 	if startupMode.IsPlan() {
 		initialPrompt, initialTools = planPrompt, planTools
 	}
-	newSessionAgent := func(
+	buildSessionAgent := func(
 		agentCtx context.Context,
 		sysPrompt string,
 		toolList []tool.BaseTool,
 		planMode bool,
+		candidateMCPTools []tool.BaseTool,
+		candidateImageTool tool.BaseTool,
 	) (*adk.ChatModelAgent, error) {
+		effectiveTools := toolList
+		effectiveMCPTools := candidateMCPTools
+		// Image generation runs in the local JCode engine and remains available
+		// when the coding executor points at SSH. Plan mode still excludes it.
+		if !planMode && candidateImageTool != nil {
+			effectiveTools = append(append([]tool.BaseTool(nil), toolList...), candidateImageTool)
+		}
+		switch {
+		case planMode:
+			effectiveMCPTools = nil
+		case env.IsRemote():
+			generic, _, identifyErr := splitProviderSearchMCPTools(agentCtx, effectiveMCPTools)
+			if identifyErr != nil {
+				config.Logger().Printf("[provider-search] filter remote ACP catalog: %v", identifyErr)
+			}
+			effectiveMCPTools = generic
+		}
 		if !config.ToolSearchEnabled(cfg) {
-			staticTools := toolList
+			staticTools := effectiveTools
 			if !planMode {
-				staticTools = append(append([]tool.BaseTool(nil), staticTools...), mcpTools...)
+				staticTools = append(append([]tool.BaseTool(nil), staticTools...), effectiveMCPTools...)
 			}
 			return agent.NewAgent(
 				agentCtx, chatModel, staticTools, sysPrompt,
@@ -692,7 +831,7 @@ func (a *acpAgent) buildAgentSession(
 			toolMode = agent.ToolModePlan
 		}
 		toolPlan, planErr := buildCommandToolPlan(
-			agentCtx, toolList, mcpTools, agent.ToolTransportACP, toolMode,
+			agentCtx, effectiveTools, effectiveMCPTools, agent.ToolTransportACP, toolMode,
 		)
 		if planErr != nil {
 			return nil, fmt.Errorf("build ACP tool plan: %w", planErr)
@@ -700,6 +839,16 @@ func (a *acpAgent) buildAgentSession(
 		return agent.NewAgentWithToolPlan(
 			agentCtx, chatModel, toolPlan, sysPrompt,
 			approvalState.RequestApproval, nil, handlers,
+		)
+	}
+	newSessionAgent := func(
+		agentCtx context.Context,
+		sysPrompt string,
+		toolList []tool.BaseTool,
+		planMode bool,
+	) (*adk.ChatModelAgent, error) {
+		return buildSessionAgent(
+			agentCtx, sysPrompt, toolList, planMode, mcpTools, sessionImageTool,
 		)
 	}
 
@@ -735,6 +884,25 @@ func (a *acpAgent) buildAgentSession(
 		skillLoader:   skillLoader,
 		flowLoader:    flowLoader,
 	}
+	rebuildForEnvironment = func() {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		planMode := mode.Parse(string(sess.mode)).IsPlan()
+		prompt, sessionTools := sess.normalPrompt, sess.allTools
+		if planMode {
+			prompt, sessionTools = sess.planPrompt, sess.planTools
+		}
+		newAgent, rebuildErr := sess.createAgent(prompt, sessionTools, planMode)
+		if rebuildErr != nil {
+			// The previous local agent may still contain billable tools. Never
+			// retain it after entering a remote environment when rebuilding the
+			// filtered catalog fails.
+			sess.ag = nil
+			config.Logger().Printf("[acp] fail-closed env agent rebuild failed: %v", rebuildErr)
+			return
+		}
+		sess.ag = newAgent
+	}
 
 	// Provide the config/platform needed to lazily build the LLM reviewer when
 	// the session enters Auto mode.
@@ -744,10 +912,14 @@ func (a *acpAgent) buildAgentSession(
 	// Reconcile the session's advertised mode when the handler promotes to
 	// Full access via "Allow All", so sess.mode never drifts from the approval
 	// state's source of truth.
-	acpHandler.SetModeChangeCallback(func(m mode.SessionMode) {
+	acpHandler.SetModeChangeCallback(func(m mode.SessionMode) error {
 		sess.mu.Lock()
-		sess.mode = acpModeID(m)
-		sess.mu.Unlock()
+		defer sess.mu.Unlock()
+		if err := sess.commitModeLocked(m); err != nil {
+			config.Logger().Printf("[acp] allow-all mode commit failed: %v", err)
+			return err
+		}
+		return nil
 	})
 
 	return sess, nil
@@ -865,6 +1037,11 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 	}
 
 	sess.mu.Lock()
+	ag := sess.ag
+	if ag == nil {
+		sess.mu.Unlock()
+		return acp.PromptResponse{}, fmt.Errorf("session agent is unavailable after a fail-closed rebuild")
+	}
 	if sess.rec != nil {
 		var entryImages []session.EntryImage
 		for _, p := range imageParts {
@@ -917,7 +1094,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 	// Reset per-turn approval-reviewer state (denial circuit breaker) at the
 	// start of each user turn.
 	sess.approvalState.OnTurnStart()
-	result := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.env.GoalStore, sess.tracer, sess.tokenUsage)
+	result := runner.Run(promptCtx, ag, history, sess.h, sess.rec, sess.todoStore, sess.env.GoalStore, sess.tracer, sess.tokenUsage)
 
 	sess.mu.Lock()
 	if len(result.Messages) > 0 {
@@ -987,47 +1164,26 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 		sess.mu.Unlock()
 		return acp.SetSessionModeResponse{}, nil
 	}
-
-	sess.mode = newMode
-	// Apply the approval axis: Full access flips to auto-approve; Approval, Plan, and Auto use manual approval.
-	sess.approvalState.SetSessionMode(sm)
-	if sess.rec != nil {
-		sess.rec.RecordModeChange(sm.String())
+	if err := sess.commitModeLocked(sm); err != nil {
+		sess.mu.Unlock()
+		config.Logger().Printf("[acp] mode switch to %s failed: %v", newMode, err)
+		return acp.SetSessionModeResponse{}, fmt.Errorf("failed to switch session mode safely")
 	}
-
-	// Apply the tool/prompt axis: Plan uses the read-only set; Approval, Auto, and Full access
-	// share the full set (they differ only on the approval axis above).
-	var sysPrompt string
-	var toolList []tool.BaseTool
-	if sm.IsPlan() {
-		sysPrompt = sess.planPrompt
-		toolList = sess.planTools
-	} else {
-		sysPrompt = sess.normalPrompt
-		toolList = sess.allTools
-	}
-
-	if sess.createAgent != nil {
-		if newAg, err := sess.createAgent(sysPrompt, toolList, sm.IsPlan()); err == nil {
-			sess.ag = newAg
-			config.Logger().Printf("[acp] agent recreated for mode %s", newMode)
-		} else {
-			config.Logger().Printf("[acp] agent recreation failed: %v", err)
-		}
-	}
-
 	sess.mu.Unlock()
+	config.Logger().Printf("[acp] agent recreated for mode %s", newMode)
 
 	// Notify the client of the mode change (outside of lock).
-	if err := a.conn.SessionUpdate(context.Background(), acp.SessionNotification{
-		SessionId: params.SessionId,
-		Update: acp.SessionUpdate{
-			CurrentModeUpdate: &acp.SessionCurrentModeUpdate{
-				CurrentModeId: newMode,
+	if a.conn != nil {
+		if err := a.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+			SessionId: params.SessionId,
+			Update: acp.SessionUpdate{
+				CurrentModeUpdate: &acp.SessionCurrentModeUpdate{
+					CurrentModeId: newMode,
+				},
 			},
-		},
-	}); err != nil {
-		config.Logger().Printf("[acp] SetSessionMode update error: %v", err)
+		}); err != nil {
+			config.Logger().Printf("[acp] SetSessionMode update error: %v", err)
+		}
 	}
 
 	return acp.SetSessionModeResponse{}, nil
@@ -1063,9 +1219,12 @@ func (a *acpAgent) ListSessions(_ context.Context, params acp.ListSessionsReques
 	return acp.ListSessionsResponse{Sessions: sessions}, nil
 }
 
-func (a *acpAgent) SetSessionConfigOption(_ context.Context, params acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+func (a *acpAgent) SetSessionConfigOption(ctx context.Context, params acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	config.Logger().Printf("[acp] SetSessionConfigOption")
-	return acp.SetSessionConfigOptionResponse{}, nil
+	if params.Boolean == nil {
+		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unsupported session config option value")
+	}
+	return a.setSessionToolConfigOption(ctx, params.Boolean)
 }
 
 // CloseSession implements the session/close method.
@@ -1127,9 +1286,12 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 	// Reconstruct full message history (including tool calls/results).
 	resumeState := session.ReconstructState(entries)
 	history := session.PruneOldToolOutputs(resumeState.History, 2)
+	// Read authorization independently from tolerant history reconstruction.
+	// A malformed trailing revoke must never revive a previous Full access mode.
+	restoredMode := restoredSessionMode(resumeUUID, "acp-load")
 
 	sess, err := a.buildAgentSession(
-		ctx, cfg, pwd, params.SessionId, rec, history, resumeState.Agent,
+		ctx, cfg, pwd, params.SessionId, rec, history, resumeState.Agent, restoredMode,
 	)
 	if err != nil {
 		return acp.LoadSessionResponse{}, err
@@ -1149,7 +1311,9 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 	// response is returned so clients have registered the session first.
 	a.scheduleSlashCommandsBroadcast(params.SessionId, sess)
 
-	return acp.LoadSessionResponse{}, nil
+	return acp.LoadSessionResponse{
+		Modes: acpModes(sess.mode), ConfigOptions: acpSessionConfigOptions(sess),
+	}, nil
 }
 
 // ResumeSession implements the session/resume method.
@@ -1159,15 +1323,25 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 
 	// Extract the internal session UUID from the ACP session ID.
 	resumeUUID := strings.TrimPrefix(string(params.SessionId), "sess_")
+	restoredMode := restoredSessionMode(resumeUUID, "acp-resume")
 
 	a.mu.Lock()
 	if sess, ok := a.sessions[params.SessionId]; ok {
+		sess.mu.Lock()
+		if err := sess.restoreModeLocked(restoredMode); err != nil {
+			sess.mu.Unlock()
+			a.mu.Unlock()
+			return acp.ResumeSessionResponse{}, fmt.Errorf("restore session mode safely: %w", err)
+		}
+		sess.mu.Unlock()
 		// Session already in memory — broadcast slash commands after the
 		// response so the reconnecting client receives the update.
 		s := sess
 		a.mu.Unlock()
 		a.scheduleSlashCommandsBroadcast(params.SessionId, s)
-		return acp.ResumeSessionResponse{Modes: acpModes(s.mode)}, nil
+		return acp.ResumeSessionResponse{
+			Modes: acpModes(s.mode), ConfigOptions: acpSessionConfigOptions(s),
+		}, nil
 	}
 	a.mu.Unlock()
 
@@ -1197,35 +1371,23 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	var history []*schema.Message
 	var goalSnap *session.GoalSnapshot
 	var resumedAgent string
-	restoredMode := mode.Approval
 	if entries, err := session.LoadSession(resumeUUID); err == nil {
 		resumeState := session.ReconstructState(entries)
 		history = session.PruneOldToolOutputs(resumeState.History, 2)
 		goalSnap = resumeState.Goal
 		resumedAgent = resumeState.Agent
-		// Restore the saved mode (Approval/Auto/Full access as-is; Plan normalized to
-		// Approval so the reloaded full-tool agent is not stranded in read-only plan tools).
-		restoredMode = mode.Parse(resumeState.Mode)
-		if restoredMode == mode.Plan {
-			restoredMode = mode.Approval
-		}
 		config.Logger().Printf("[acp] ResumeSession: loaded %d history messages for %s", len(history), params.SessionId)
 	} else {
 		config.Logger().Printf("[acp] ResumeSession: could not load history for %s: %v", params.SessionId, err)
 	}
 
 	sess, err := a.buildAgentSession(
-		ctx, cfg, pwd, params.SessionId, rec, history, resumedAgent,
+		ctx, cfg, pwd, params.SessionId, rec, history, resumedAgent, restoredMode,
 	)
 	if err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}
 	sess.env.GoalStore.RestoreFromSnapshot(goalSnap)
-	// Apply the restored approval axis; Approval/Full access both use the full-tool agent
-	// already built above, so no rebuild is needed.
-	sess.approvalState.SetSessionMode(restoredMode)
-	sess.mode = acpModeID(restoredMode)
-
 	a.mu.Lock()
 	a.sessions[params.SessionId] = sess
 	a.mu.Unlock()
@@ -1233,7 +1395,9 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	config.Logger().Printf("[acp] Session resumed: %s", params.SessionId)
 	a.scheduleSlashCommandsBroadcast(params.SessionId, sess)
 
-	return acp.ResumeSessionResponse{Modes: acpModes(sess.mode)}, nil
+	return acp.ResumeSessionResponse{
+		Modes: acpModes(sess.mode), ConfigOptions: acpSessionConfigOptions(sess),
+	}, nil
 }
 
 // Logout implements the logout method.

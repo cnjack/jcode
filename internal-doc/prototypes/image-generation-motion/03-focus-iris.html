@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>图片生成动效 03 · 对焦光阑</title>
+  <style>
+    :root {
+      --paper: #f3f1eb;
+      --surface: #fbfaf6;
+      --ink: #191a18;
+      --muted: #6f716d;
+      --line: #c9c9c2;
+      --line-strong: #8c8e88;
+      --card: #e7e7e1;
+      --card-ink: #232421;
+      --accent: #ef522f;
+      --accent-cool: #168b87;
+      --shadow: rgba(27, 28, 25, 0.14);
+      --radius-card: 26px;
+      --ease-lock: cubic-bezier(0.2, 0.82, 0.2, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-height: 100%;
+      background: var(--paper);
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    }
+
+    button,
+    a {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+    }
+
+    .page {
+      width: min(1100px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 26px 0 56px;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+    }
+
+    .back-link::before {
+      content: "\2190";
+      color: var(--accent);
+      font-size: 17px;
+      line-height: 1;
+      transition: transform 160ms ease;
+    }
+
+    .back-link:hover,
+    .back-link:focus-visible {
+      color: var(--ink);
+    }
+
+    .back-link:hover::before {
+      transform: translateX(-3px);
+    }
+
+    .back-link:focus-visible,
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+      gap: 52px;
+      align-items: end;
+      padding: 58px 0 32px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--accent);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 720px;
+      margin: 0;
+      font-family: "Iowan Old Style", "Songti SC", serif;
+      font-size: clamp(40px, 6vw, 72px);
+      font-weight: 600;
+      line-height: 0.98;
+      letter-spacing: -0.045em;
+    }
+
+    .intro-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.85;
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: 46px;
+      padding-top: 38px;
+    }
+
+    .controls {
+      align-self: start;
+      position: sticky;
+      top: 24px;
+    }
+
+    fieldset {
+      margin: 0 0 24px;
+      padding: 0;
+      border: 0;
+    }
+
+    legend,
+    .control-label {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .segmented {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .segmented.ratios {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .control-button,
+    .replay-button,
+    .motion-button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 650;
+      transition:
+        border-color 150ms ease,
+        color 150ms ease,
+        background-color 150ms ease,
+        transform 150ms ease;
+    }
+
+    .control-button:hover,
+    .replay-button:hover,
+    .motion-button:hover {
+      border-color: var(--line-strong);
+      transform: translateY(-1px);
+    }
+
+    .control-button[aria-pressed="true"],
+    .motion-button[aria-pressed="true"] {
+      border-color: var(--ink);
+      background: var(--ink);
+      color: var(--surface);
+    }
+
+    .replay-button,
+    .motion-button {
+      width: 100%;
+      margin-top: 6px;
+    }
+
+    .motion-button {
+      background: transparent;
+    }
+
+    .live-status {
+      min-height: 20px;
+      margin: 22px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .live-status strong {
+      color: var(--ink);
+    }
+
+    .stage {
+      position: relative;
+      display: grid;
+      min-height: 570px;
+      place-items: center;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 32px;
+      background: var(--surface);
+      box-shadow: 0 24px 70px var(--shadow);
+    }
+
+    .stage::before,
+    .stage::after {
+      position: absolute;
+      content: "";
+      pointer-events: none;
+    }
+
+    .stage::before {
+      width: 36px;
+      height: 1px;
+      top: 22px;
+      left: 22px;
+      background: var(--line-strong);
+      box-shadow: 0 8px 0 var(--line), 0 16px 0 var(--line);
+    }
+
+    .stage::after {
+      width: 8px;
+      height: 8px;
+      right: 24px;
+      bottom: 24px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: -16px 0 0 var(--line), -32px 0 0 var(--line);
+    }
+
+    .media-card {
+      --focus-size: 52%;
+      position: relative;
+      width: min(300px, calc(100vw - 92px));
+      aspect-ratio: 1;
+      overflow: hidden;
+      isolation: isolate;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-card);
+      background: var(--card);
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.8) inset,
+        0 18px 34px rgba(35, 36, 33, 0.13);
+      transition:
+        width 320ms var(--ease-lock),
+        aspect-ratio 320ms var(--ease-lock),
+        border-radius 320ms var(--ease-lock);
+    }
+
+    .media-card[data-ratio="portrait"] {
+      width: min(228px, calc(100vw - 112px));
+      aspect-ratio: 9 / 16;
+      border-radius: 28px;
+    }
+
+    .media-card[data-ratio="landscape"] {
+      width: min(430px, calc(100vw - 72px));
+      aspect-ratio: 16 / 9;
+      border-radius: 24px;
+    }
+
+    .signal-field,
+    .flash,
+    .focus-rig,
+    .capture-ring {
+      position: absolute;
+      inset: 0;
+    }
+
+    .signal-field {
+      z-index: -2;
+    }
+
+    .signal-dot {
+      position: absolute;
+      left: var(--x);
+      top: var(--y);
+      width: var(--size);
+      height: var(--size);
+      border-radius: 50%;
+      background: var(--card-ink);
+      opacity: var(--opacity);
+      animation: signal-echo 3.6s var(--ease-lock) infinite;
+      animation-delay: var(--delay);
+    }
+
+    .media-card[data-state="saving"] .signal-dot {
+      animation: signal-settle 2.4s var(--ease-lock) infinite;
+    }
+
+    .focus-rig {
+      z-index: 1;
+      width: var(--focus-size);
+      height: var(--focus-size);
+      margin: auto;
+      animation: focus-hunt 4.8s var(--ease-lock) infinite;
+      will-change: transform;
+    }
+
+    .media-card[data-ratio="portrait"] .focus-rig {
+      --focus-size: 62%;
+      height: 36%;
+    }
+
+    .media-card[data-ratio="landscape"] .focus-rig {
+      width: 36%;
+      height: 62%;
+    }
+
+    .media-card[data-state="saving"] .focus-rig {
+      animation: focus-lock 2.4s var(--ease-lock) infinite;
+    }
+
+    .corner {
+      position: absolute;
+      width: 25%;
+      height: 25%;
+      border-color: var(--card-ink);
+      border-style: solid;
+      border-width: 0;
+    }
+
+    .corner::after {
+      position: absolute;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      content: "";
+      opacity: 0;
+      transform: scale(0.3);
+    }
+
+    .corner.top-left {
+      top: 0;
+      left: 0;
+      border-top-width: 2px;
+      border-left-width: 2px;
+    }
+
+    .corner.top-left::after {
+      top: -3px;
+      left: -3px;
+    }
+
+    .corner.top-right {
+      top: 0;
+      right: 0;
+      border-top-width: 2px;
+      border-right-width: 2px;
+    }
+
+    .corner.top-right::after {
+      top: -3px;
+      right: -3px;
+    }
+
+    .corner.bottom-left {
+      bottom: 0;
+      left: 0;
+      border-bottom-width: 2px;
+      border-left-width: 2px;
+    }
+
+    .corner.bottom-left::after {
+      bottom: -3px;
+      left: -3px;
+    }
+
+    .corner.bottom-right {
+      right: 0;
+      bottom: 0;
+      border-right-width: 2px;
+      border-bottom-width: 2px;
+    }
+
+    .corner.bottom-right::after {
+      right: -3px;
+      bottom: -3px;
+    }
+
+    .media-card[data-state="saving"] .corner::after {
+      animation: lock-point 2.4s var(--ease-lock) infinite;
+    }
+
+    .axis {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      background: var(--line-strong);
+      opacity: 0.7;
+    }
+
+    .axis.horizontal {
+      width: 34%;
+      height: 1px;
+      transform: translate(-50%, -50%) scaleX(0.24);
+      animation: axis-x 3.1s var(--ease-lock) infinite;
+    }
+
+    .axis.vertical {
+      width: 1px;
+      height: 34%;
+      transform: translate(-50%, -50%) scaleY(0.24);
+      animation: axis-y 3.1s var(--ease-lock) infinite 160ms;
+    }
+
+    .media-card[data-state="saving"] .axis {
+      background: var(--accent);
+      animation: axis-lock 2.4s var(--ease-lock) infinite;
+    }
+
+    .aperture {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 74px;
+      height: 74px;
+      transform: translate(-50%, -50%);
+    }
+
+    .aperture-blade {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      transform: rotate(var(--angle));
+    }
+
+    .aperture-blade::before {
+      position: absolute;
+      width: 34px;
+      height: 13px;
+      border: 1px solid color-mix(in srgb, var(--card-ink) 68%, transparent);
+      background: color-mix(in srgb, var(--surface) 80%, transparent);
+      clip-path: polygon(0 8%, 100% 0, 78% 100%, 10% 78%);
+      content: "";
+      transform: translate(15px, -50%) scaleX(0.82);
+      transform-origin: left center;
+      animation: blade-breathe 2.8s var(--ease-lock) infinite;
+      animation-delay: var(--delay);
+    }
+
+    .media-card[data-state="saving"] .aperture-blade::before {
+      animation: blade-close 2.4s var(--ease-lock) infinite;
+    }
+
+    .aperture-core {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 15px;
+      height: 15px;
+      border: 2px solid var(--card-ink);
+      border-radius: 50%;
+      background: var(--card);
+      transform: translate(-50%, -50%);
+      animation: core-read 2.8s var(--ease-lock) infinite;
+    }
+
+    .media-card[data-state="saving"] .aperture-core {
+      background: var(--card-ink);
+      animation: core-capture 2.4s var(--ease-lock) infinite;
+    }
+
+    .capture-ring {
+      z-index: 0;
+      width: 104px;
+      height: 104px;
+      margin: auto;
+      border: 1px solid var(--accent-cool);
+      border-radius: 50%;
+      opacity: 0;
+      transform: scale(0.6);
+    }
+
+    .media-card[data-state="saving"] .capture-ring {
+      animation: capture-ring 2.4s var(--ease-lock) infinite;
+    }
+
+    .flash {
+      z-index: 4;
+      background: var(--surface);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .media-card[data-state="saving"] .flash {
+      animation: capture-flash 2.4s linear infinite;
+    }
+
+    @keyframes focus-hunt {
+      0%, 100% { transform: translate3d(-7%, 4%, 0) scale(0.78); }
+      24% { transform: translate3d(8%, -6%, 0) scale(0.92); }
+      49% { transform: translate3d(-3%, -3%, 0) scale(0.84); }
+      72%, 84% { transform: translate3d(0, 0, 0) scale(1); }
+    }
+
+    @keyframes focus-lock {
+      0%, 18%, 100% { transform: scale(0.92); }
+      36% { transform: scale(1.04); }
+      52%, 82% { transform: scale(1); }
+    }
+
+    @keyframes signal-echo {
+      0%, 100% { opacity: 0.06; transform: scale(0.7); }
+      46%, 64% { opacity: var(--opacity); transform: scale(1); }
+    }
+
+    @keyframes signal-settle {
+      0%, 24% { opacity: var(--opacity); transform: scale(1); }
+      58%, 100% { opacity: 0.06; transform: scale(0.55); }
+    }
+
+    @keyframes axis-x {
+      0%, 100% { transform: translate(-50%, -50%) scaleX(0.24); opacity: 0.24; }
+      48%, 68% { transform: translate(-50%, -50%) scaleX(1); opacity: 0.72; }
+    }
+
+    @keyframes axis-y {
+      0%, 100% { transform: translate(-50%, -50%) scaleY(0.24); opacity: 0.24; }
+      48%, 68% { transform: translate(-50%, -50%) scaleY(1); opacity: 0.72; }
+    }
+
+    @keyframes axis-lock {
+      0%, 24%, 100% { opacity: 0.18; transform: translate(-50%, -50%) scale(0.3); }
+      42%, 76% { opacity: 0.9; transform: translate(-50%, -50%) scale(1); }
+    }
+
+    @keyframes blade-breathe {
+      0%, 100% { opacity: 0.42; transform: translate(18px, -50%) scaleX(0.68); }
+      44%, 66% { opacity: 0.96; transform: translate(12px, -50%) scaleX(0.96); }
+    }
+
+    @keyframes blade-close {
+      0%, 20%, 100% { opacity: 0.55; transform: translate(14px, -50%) scaleX(0.88); }
+      45%, 74% { opacity: 1; transform: translate(3px, -50%) scaleX(0.48); }
+    }
+
+    @keyframes core-read {
+      0%, 100% { transform: translate(-50%, -50%) scale(0.72); opacity: 0.55; }
+      46%, 68% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    }
+
+    @keyframes core-capture {
+      0%, 28%, 100% { transform: translate(-50%, -50%) scale(1); }
+      48%, 72% { transform: translate(-50%, -50%) scale(0.22); }
+    }
+
+    @keyframes lock-point {
+      0%, 30%, 100% { opacity: 0; transform: scale(0.3); }
+      46%, 78% { opacity: 1; transform: scale(1); }
+    }
+
+    @keyframes capture-ring {
+      0%, 30% { opacity: 0; transform: scale(0.55); }
+      46% { opacity: 0.82; }
+      76%, 100% { opacity: 0; transform: scale(1.65); }
+    }
+
+    @keyframes capture-flash {
+      0%, 50%, 100% { opacity: 0; }
+      53% { opacity: 0.48; }
+      58% { opacity: 0; }
+    }
+
+    body[data-motion="reduced"] .media-card *,
+    body[data-motion="reduced"] .media-card *::before,
+    body[data-motion="reduced"] .media-card *::after {
+      animation: none !important;
+      transition-duration: 0.01ms !important;
+    }
+
+    body[data-motion="reduced"] .focus-rig {
+      transform: none;
+    }
+
+    body[data-motion="reduced"] .signal-dot {
+      opacity: 0.16;
+      transform: scale(0.8);
+    }
+
+    body[data-motion="reduced"] .axis.horizontal {
+      transform: translate(-50%, -50%) scaleX(0.8);
+    }
+
+    body[data-motion="reduced"] .axis.vertical {
+      transform: translate(-50%, -50%) scaleY(0.8);
+    }
+
+    body[data-motion="reduced"] .corner::after {
+      opacity: 1;
+      transform: scale(0.8);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .media-card *,
+      .media-card *::before,
+      .media-card *::after {
+        animation: none !important;
+        transition-duration: 0.01ms !important;
+      }
+
+      .focus-rig {
+        transform: none;
+      }
+
+      .signal-dot {
+        opacity: 0.16;
+        transform: scale(0.8);
+      }
+
+      .axis.horizontal {
+        transform: translate(-50%, -50%) scaleX(0.8);
+      }
+
+      .axis.vertical {
+        transform: translate(-50%, -50%) scaleY(0.8);
+      }
+
+      .corner::after {
+        opacity: 1;
+        transform: scale(0.8);
+      }
+
+      .back-link::before,
+      .control-button,
+      .replay-button,
+      .motion-button {
+        transition: none;
+      }
+    }
+
+    @media (max-width: 780px) {
+      .intro,
+      .demo-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .intro {
+        gap: 22px;
+        padding-top: 42px;
+      }
+
+      .demo-grid {
+        gap: 26px;
+      }
+
+      .controls {
+        position: static;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 18px;
+      }
+
+      .controls .status-copy {
+        grid-column: 1 / -1;
+      }
+
+      .stage {
+        min-height: 520px;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .page {
+        width: min(100% - 20px, 1100px);
+        padding-top: 18px;
+      }
+
+      .controls {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: clamp(38px, 14vw, 58px);
+      }
+
+      .stage {
+        min-height: 500px;
+        border-radius: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <a class="back-link" href="index.html">返回动效方案列表</a>
+
+    <header class="intro">
+      <div>
+        <p class="eyebrow">Motion study 03 / focus iris</p>
+        <h1>对焦，随后收束。</h1>
+      </div>
+      <p class="intro-copy">
+        生成阶段像相机持续寻找主体：取景框在画面内微移，光阑呼吸，离散信号逐步聚拢。
+        保存阶段四角锁定，光圈快速收束并完成一次克制的快门闪白。卡片内部不出现任何文字。
+      </p>
+    </header>
+
+    <section class="demo-grid" aria-label="对焦光阑动效演示">
+      <aside class="controls" aria-label="演示控制">
+        <fieldset>
+          <legend>状态</legend>
+          <div class="segmented" data-control="state">
+            <button class="control-button" type="button" data-value="generating" aria-pressed="true">生成中</button>
+            <button class="control-button" type="button" data-value="saving" aria-pressed="false">保存中</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>图片比例</legend>
+          <div class="segmented ratios" data-control="ratio">
+            <button class="control-button" type="button" data-value="square" aria-pressed="true">方形</button>
+            <button class="control-button" type="button" data-value="portrait" aria-pressed="false">竖图</button>
+            <button class="control-button" type="button" data-value="landscape" aria-pressed="false">横图</button>
+          </div>
+        </fieldset>
+
+        <button class="replay-button" id="replay" type="button">重播当前动效</button>
+        <button class="motion-button" id="motion-toggle" type="button" aria-pressed="false">模拟减少动态</button>
+
+        <div class="status-copy">
+          <p class="control-label" style="margin-top: 24px;">当前预览</p>
+          <p class="live-status" id="live-status" aria-live="polite">
+            <strong>生成中</strong> · 方形 · 完整动态
+          </p>
+        </div>
+      </aside>
+
+      <div class="stage">
+        <div
+          class="media-card"
+          id="media-card"
+          data-state="generating"
+          data-ratio="square"
+          role="img"
+          aria-label="方形图片正在生成，对焦光阑动画"
+        >
+          <div class="signal-field" id="signal-field" aria-hidden="true"></div>
+          <div class="capture-ring" aria-hidden="true"></div>
+
+          <div class="focus-rig" aria-hidden="true">
+            <span class="corner top-left"></span>
+            <span class="corner top-right"></span>
+            <span class="corner bottom-left"></span>
+            <span class="corner bottom-right"></span>
+            <span class="axis horizontal"></span>
+            <span class="axis vertical"></span>
+
+            <span class="aperture">
+              <span class="aperture-blade" style="--angle: 0deg; --delay: -0.00s;"></span>
+              <span class="aperture-blade" style="--angle: 45deg; --delay: -0.08s;"></span>
+              <span class="aperture-blade" style="--angle: 90deg; --delay: -0.16s;"></span>
+              <span class="aperture-blade" style="--angle: 135deg; --delay: -0.24s;"></span>
+              <span class="aperture-blade" style="--angle: 180deg; --delay: -0.32s;"></span>
+              <span class="aperture-blade" style="--angle: 225deg; --delay: -0.40s;"></span>
+              <span class="aperture-blade" style="--angle: 270deg; --delay: -0.48s;"></span>
+              <span class="aperture-blade" style="--angle: 315deg; --delay: -0.56s;"></span>
+              <span class="aperture-core"></span>
+            </span>
+          </div>
+
+          <div class="flash" aria-hidden="true"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const card = document.getElementById('media-card');
+      const field = document.getElementById('signal-field');
+      const live = document.getElementById('live-status');
+      const replay = document.getElementById('replay');
+      const motionToggle = document.getElementById('motion-toggle');
+
+      const stateNames = { generating: '生成中', saving: '保存中' };
+      const ratioNames = { square: '方形', portrait: '竖图', landscape: '横图' };
+      const ratioAria = { square: '方形', portrait: '竖向', landscape: '横向' };
+      let state = 'generating';
+      let ratio = 'square';
+      let reduced = false;
+
+      for (let index = 0; index < 34; index += 1) {
+        const dot = document.createElement('span');
+        dot.className = 'signal-dot';
+        dot.style.setProperty('--x', `${6 + ((index * 37) % 89)}%`);
+        dot.style.setProperty('--y', `${7 + ((index * 53) % 87)}%`);
+        dot.style.setProperty('--size', `${1 + (index % 3)}px`);
+        dot.style.setProperty('--opacity', `${(0.12 + (index % 5) * 0.055).toFixed(3)}`);
+        dot.style.setProperty('--delay', `${-((index % 9) * 0.23).toFixed(2)}s`);
+        field.appendChild(dot);
+      }
+
+      function updateStatus() {
+        const motionName = reduced ? '减少动态' : '完整动态';
+        const actionName = state === 'generating' ? '生成' : '保存';
+        live.innerHTML = `<strong>${stateNames[state]}</strong> · ${ratioNames[ratio]} · ${motionName}`;
+        card.setAttribute('aria-label', `${ratioAria[ratio]}图片正在${actionName}，对焦光阑${reduced ? '静态示意' : '动画'}`);
+      }
+
+      function select(group, value) {
+        document.querySelectorAll(`[data-control="${group}"] [data-value]`).forEach((button) => {
+          button.setAttribute('aria-pressed', String(button.dataset.value === value));
+        });
+      }
+
+      function restart() {
+        const animations = card.getAnimations ? card.getAnimations({ subtree: true }) : [];
+        if (animations.length > 0) {
+          animations.forEach((animation) => {
+            animation.cancel();
+            animation.play();
+          });
+          return;
+        }
+        const current = card.dataset.state;
+        card.dataset.state = '';
+        requestAnimationFrame(() => {
+          card.dataset.state = current;
+        });
+      }
+
+      document.querySelector('[data-control="state"]').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-value]');
+        if (!button) return;
+        state = button.dataset.value;
+        card.dataset.state = state;
+        select('state', state);
+        updateStatus();
+        restart();
+      });
+
+      document.querySelector('[data-control="ratio"]').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-value]');
+        if (!button) return;
+        ratio = button.dataset.value;
+        card.dataset.ratio = ratio;
+        select('ratio', ratio);
+        updateStatus();
+      });
+
+      replay.addEventListener('click', restart);
+
+      motionToggle.addEventListener('click', () => {
+        reduced = !reduced;
+        document.body.dataset.motion = reduced ? 'reduced' : 'full';
+        motionToggle.setAttribute('aria-pressed', String(reduced));
+        motionToggle.textContent = reduced ? '恢复完整动态' : '模拟减少动态';
+        updateStatus();
+      });
+
+      updateStatus();
+    })();
+  </script>
+</body>
+</html>

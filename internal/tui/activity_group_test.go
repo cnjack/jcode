@@ -108,6 +108,59 @@ func TestReplayLegacyEntriesKeepStringPath(t *testing.T) {
 	}
 }
 
+func TestGeneratedImageUsesStandaloneTimelineAndShowsProgress(t *testing.T) {
+	m := newToolTestModel()
+	m.Update(ToolCallMsg{
+		Name: "generate_image", Title: "Generate image", ToolCallID: "img-1", Standalone: true,
+	})
+	if groups := findGroupLines(&m); len(groups) != 0 {
+		t.Fatalf("standalone image call was folded into an activity group: %v", groups)
+	}
+	if _, ok := m.toolLines["img-1"]; !ok {
+		t.Fatal("standalone image call was not tracked for terminal updates")
+	}
+	m.Update(ToolProgressMsg{Name: "generate_image", ToolCallID: "img-1", Phase: "generating"})
+	visible := false
+	for i := range m.lines {
+		if strings.Contains(m.lines[i].text, "Generating image") {
+			visible = true
+		}
+	}
+	if !visible {
+		t.Fatal("image generation progress was not rendered")
+	}
+	m.Update(ToolResultMsg{Name: "generate_image", ToolCallID: "img-1", Output: "JCode engine path: /tmp/image.png"})
+	var resultVisible bool
+	for i := range m.lines {
+		if m.lines[i].tool != nil && strings.Contains(m.lines[i].tool.output, "JCode engine path") {
+			resultVisible = true
+		}
+	}
+	if !resultVisible {
+		t.Fatal("standalone image result did not keep its engine path output")
+	}
+}
+
+func TestReplayKeepsGeneratedImageOutsideActivityGroups(t *testing.T) {
+	m := newToolTestModel()
+	m.Update(SessionResumedMsg{UUID: "image-session", Entries: []SessionEntry{
+		{Type: string(session.EntryToolCall), Name: "generate_image", Args: `{"prompt":"desk"}`, ToolCallID: "img-r1"},
+		{Type: string(session.EntryToolResult), Name: "generate_image", Output: `{"outcome":"succeeded"}`, ToolCallID: "img-r1"},
+	}})
+	if groups := findGroupLines(&m); len(groups) != 0 {
+		t.Fatalf("replayed generated image was folded into an activity group: %v", groups)
+	}
+	var resultBox bool
+	for i := range m.lines {
+		if m.lines[i].tool != nil && m.lines[i].tool.name == "generate_image" {
+			resultBox = true
+		}
+	}
+	if !resultBox {
+		t.Fatal("replayed generated image lost its standalone result")
+	}
+}
+
 // TestReplayUnresolvedMemberInterrupted asserts a recorded call that never
 // got a result (session died mid-run) is frozen as interrupted so the group
 // still collapses.

@@ -95,6 +95,37 @@ func TestSaveConfigRenameFailurePreservesExistingFile(t *testing.T) {
 	}
 }
 
+func TestSaveConfigRequiresDirectoryDurabilityBeforePublishingRevision(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, configDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{Model: "new/model"}
+	syncErr := errors.New("injected directory sync failure")
+	err := saveConfigWithSync(cfg, os.Rename, func(path string) error {
+		if path != dir {
+			t.Fatalf("sync path = %q, want %q", path, dir)
+		}
+		return syncErr
+	})
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("saveConfigWithSync() error = %v, want directory sync failure", err)
+	}
+	if cfg.diskRevision != "" {
+		t.Fatalf("failed durability barrier published disk revision %q", cfg.diskRevision)
+	}
+	data, readErr := os.ReadFile(filepath.Join(dir, configFile))
+	if readErr != nil {
+		t.Fatalf("read renamed config: %v", readErr)
+	}
+	if !strings.Contains(string(data), `"model": "new/model"`) {
+		t.Fatalf("rename did not commit new config before durability failure: %s", data)
+	}
+}
+
 func assertConfigPermission(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 	info, err := os.Stat(path)

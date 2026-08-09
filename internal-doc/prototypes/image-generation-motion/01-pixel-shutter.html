@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>图片生成动效 01 · 像素快门</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f4f4f1;
+      --surface: #fbfbf9;
+      --surface-raised: #ffffff;
+      --ink: #20201e;
+      --muted: #74746f;
+      --faint: #aaa9a3;
+      --line: #d9d8d2;
+      --line-strong: #c5c4bd;
+      --accent: #242421;
+      --radius-card: 22px;
+      --radius-control: 12px;
+      --shadow: 0 18px 50px rgba(36, 36, 31, 0.08), 0 2px 8px rgba(36, 36, 31, 0.04);
+      font-family: "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-width: 320px;
+      min-height: 100dvh;
+      margin: 0;
+      background:
+        radial-gradient(circle at 15% 10%, rgba(255, 255, 255, 0.94), transparent 28rem),
+        var(--page);
+      color: var(--ink);
+    }
+
+    button,
+    a {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(100% - 36px, 1040px);
+      margin: 0 auto;
+      padding: 28px 0 64px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .back {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 560;
+      text-decoration: none;
+      transition: color 180ms ease, transform 180ms ease;
+    }
+
+    .back::before {
+      content: "←";
+      font-size: 15px;
+      line-height: 1;
+    }
+
+    .back:hover {
+      color: var(--ink);
+      transform: translate3d(-2px, 0, 0);
+    }
+
+    .back:focus-visible,
+    button:focus-visible {
+      outline: 2px solid var(--ink);
+      outline-offset: 3px;
+    }
+
+    .prototype-id {
+      color: var(--faint);
+      font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+      gap: 56px;
+      padding: 56px 0 40px;
+      align-items: end;
+    }
+
+    h1 {
+      max-width: 12ch;
+      margin: 0;
+      font-size: clamp(34px, 5.4vw, 64px);
+      font-weight: 660;
+      letter-spacing: -0.055em;
+      line-height: 0.98;
+      text-wrap: balance;
+    }
+
+    .intro p {
+      max-width: 38rem;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.8;
+      text-wrap: pretty;
+    }
+
+    .workbench {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 230px;
+      min-height: 510px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .stage {
+      position: relative;
+      display: grid;
+      min-height: 510px;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .stage::before {
+      position: absolute;
+      inset: 0;
+      content: "";
+      background-image: radial-gradient(circle, rgba(61, 61, 56, 0.1) 0 1px, transparent 1.3px);
+      background-position: center;
+      background-size: 18px 18px;
+      mask-image: radial-gradient(circle at center, black, transparent 73%);
+      opacity: 0.55;
+      pointer-events: none;
+    }
+
+    .image-card {
+      position: relative;
+      display: grid;
+      width: 16rem;
+      aspect-ratio: 1;
+      place-items: center;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-card);
+      background: rgba(236, 236, 231, 0.9);
+      box-shadow: 0 12px 30px rgba(36, 36, 31, 0.08);
+      transition:
+        width 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        aspect-ratio 360ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .image-card[data-ratio="landscape"] {
+      width: 18rem;
+      aspect-ratio: 16 / 9;
+    }
+
+    .image-card[data-ratio="portrait"] {
+      width: 12rem;
+      aspect-ratio: 9 / 16;
+    }
+
+    .image-card::before {
+      position: absolute;
+      inset: 0;
+      content: "";
+      background-image: radial-gradient(circle, rgba(65, 65, 60, 0.16) 0 1px, transparent 1.4px);
+      background-size: 16px 16px;
+      mask-image: radial-gradient(circle at 44% 45%, black 0, transparent 72%);
+      opacity: 0.58;
+      pointer-events: none;
+    }
+
+    .pixel-shutter {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      width: clamp(76px, 35%, 104px);
+      aspect-ratio: 1;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 4px;
+      transform: translate3d(0, 0, 0) rotate(-2deg);
+    }
+
+    .pixel {
+      aspect-ratio: 1;
+      border: 1px solid rgba(48, 48, 44, 0.16);
+      border-radius: 4px;
+      background: rgba(255, 255, 252, 0.72);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+      opacity: 0.08;
+      transform: var(--from);
+      will-change: transform, opacity;
+      animation: pixel-generate 3.2s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+      animation-delay: var(--delay);
+    }
+
+    .image-card[data-state="saving"] .pixel {
+      animation-name: pixel-save;
+      animation-duration: 4.6s;
+      animation-direction: alternate;
+    }
+
+    .pixel-shutter:not(.is-playing) .pixel {
+      animation: none;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .controls {
+      position: relative;
+      z-index: 2;
+      padding: 28px 24px;
+      border-left: 1px solid var(--line);
+      background: rgba(250, 250, 247, 0.94);
+    }
+
+    .control-group + .control-group {
+      margin-top: 28px;
+    }
+
+    .control-label {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .segmented {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-control);
+      background: #eeeee9;
+    }
+
+    .segmented.is-ratio {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .segment {
+      min-height: 34px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 570;
+      cursor: pointer;
+      transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 120ms ease;
+    }
+
+    .segment:hover {
+      color: var(--ink);
+    }
+
+    .segment:active {
+      transform: scale(0.97);
+    }
+
+    .segment[aria-pressed="true"] {
+      background: var(--surface-raised);
+      color: var(--ink);
+      box-shadow: 0 1px 5px rgba(36, 36, 31, 0.1);
+    }
+
+    .replay {
+      width: 100%;
+      min-height: 38px;
+      margin-top: 30px;
+      border: 1px solid var(--accent);
+      border-radius: 10px;
+      background: var(--accent);
+      color: #fafaf7;
+      font-size: 12px;
+      font-weight: 620;
+      cursor: pointer;
+      transition: transform 150ms ease, opacity 150ms ease;
+    }
+
+    .replay:hover {
+      opacity: 0.86;
+    }
+
+    .replay:active {
+      transform: scale(0.98);
+    }
+
+    .note {
+      margin: 18px 2px 0;
+      color: var(--faint);
+      font-size: 11px;
+      line-height: 1.65;
+    }
+
+    @keyframes pixel-generate {
+      0%, 12%, 100% {
+        opacity: 0.06;
+        transform: var(--from);
+      }
+      38%, 62% {
+        opacity: 0.82;
+        transform: translate3d(0, 0, 0) scale(1);
+      }
+      84% {
+        opacity: 0.16;
+        transform: translate3d(0, 0, 0) scale(0.62);
+      }
+    }
+
+    @keyframes pixel-save {
+      0% {
+        opacity: 0.26;
+        transform: var(--save-from);
+      }
+      58%, 100% {
+        opacity: 0.72;
+        transform: translate3d(0, 0, 0) scale(0.94);
+      }
+    }
+
+    @media (max-width: 720px) {
+      .intro {
+        grid-template-columns: 1fr;
+        gap: 24px;
+      }
+
+      .workbench {
+        grid-template-columns: 1fr;
+      }
+
+      .controls {
+        border-top: 1px solid var(--line);
+        border-left: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+
+      .pixel {
+        animation: none !important;
+        opacity: 0.58;
+        transform: translate3d(0, 0, 0) scale(0.9);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <nav class="topbar" aria-label="原型导航">
+      <a class="back" href="./index.html">返回动效索引</a>
+      <span class="prototype-id">Motion study / 01</span>
+    </nav>
+
+    <section class="intro" aria-labelledby="page-title">
+      <h1 id="page-title">像素快门</h1>
+      <p>一个无文字的图片生成反馈：25 枚方片从中心向外依次显现，形成短暂的数字快门。生成态保持呼吸节奏，保存态减速并趋于完整，避免普通旋转加载器的工具感。</p>
+    </section>
+
+    <section class="workbench" aria-label="像素快门交互预览">
+      <div class="stage">
+        <div class="image-card" data-state="generating" data-ratio="square" role="img" aria-label="图片正在生成">
+          <div class="pixel-shutter is-playing" aria-hidden="true"></div>
+          <span class="sr-only" role="status" aria-live="polite">图片正在生成</span>
+        </div>
+      </div>
+
+      <aside class="controls" aria-label="动效控制">
+        <div class="control-group">
+          <span class="control-label">过程</span>
+          <div class="segmented" role="group" aria-label="生成过程">
+            <button class="segment" type="button" data-state-option="generating" aria-pressed="true">生成</button>
+            <button class="segment" type="button" data-state-option="saving" aria-pressed="false">保存</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <span class="control-label">画幅</span>
+          <div class="segmented is-ratio" role="group" aria-label="图片比例">
+            <button class="segment" type="button" data-ratio-option="portrait" aria-pressed="false">竖</button>
+            <button class="segment" type="button" data-ratio-option="square" aria-pressed="true">方</button>
+            <button class="segment" type="button" data-ratio-option="landscape" aria-pressed="false">横</button>
+          </div>
+        </div>
+
+        <button class="replay" type="button">重播动效</button>
+        <p class="note">卡片内部不显示文字、时长或模型信息。系统开启“减少动态效果”后，方片保持静态构图。</p>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const card = document.querySelector('.image-card')
+      const shutter = document.querySelector('.pixel-shutter')
+      const liveStatus = document.querySelector('[role="status"]')
+      const stateButtons = [...document.querySelectorAll('[data-state-option]')]
+      const ratioButtons = [...document.querySelectorAll('[data-ratio-option]')]
+      const replay = document.querySelector('.replay')
+
+      if (!card || !shutter || !liveStatus || !replay) return
+
+      for (let index = 0; index < 25; index += 1) {
+        const row = Math.floor(index / 5)
+        const column = index % 5
+        const distance = Math.abs(row - 2) + Math.abs(column - 2)
+        const towardCenterX = (2 - column) * 5
+        const towardCenterY = (2 - row) * 5
+        const pixel = document.createElement('span')
+        pixel.className = 'pixel'
+        pixel.style.setProperty('--delay', `${-3200 + distance * 74}ms`)
+        pixel.style.setProperty('--from', `translate3d(${towardCenterX}px, ${towardCenterY}px, 0) scale(0.38)`)
+        pixel.style.setProperty('--save-from', `translate3d(${towardCenterX * 0.3}px, ${towardCenterY * 0.3}px, 0) scale(0.72)`)
+        shutter.append(pixel)
+      }
+
+      function select(buttons, selected) {
+        for (const button of buttons) {
+          button.setAttribute('aria-pressed', String(button === selected))
+        }
+      }
+
+      function restart() {
+        shutter.classList.remove('is-playing')
+        void shutter.offsetWidth
+        shutter.classList.add('is-playing')
+      }
+
+      for (const button of stateButtons) {
+        button.addEventListener('click', () => {
+          const state = button.dataset.stateOption
+          card.dataset.state = state
+          const isSaving = state === 'saving'
+          const label = isSaving ? '图片正在保存' : '图片正在生成'
+          card.setAttribute('aria-label', label)
+          liveStatus.textContent = label
+          select(stateButtons, button)
+          restart()
+        })
+      }
+
+      for (const button of ratioButtons) {
+        button.addEventListener('click', () => {
+          card.dataset.ratio = button.dataset.ratioOption
+          select(ratioButtons, button)
+        })
+      }
+
+      replay.addEventListener('click', restart)
+    })()
+  </script>
+</body>
+</html>

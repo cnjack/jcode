@@ -279,6 +279,7 @@ func mergeProjectFields(base, overlay *Config) {
 	// --- SECURITY DENYLIST ---
 	// The following fields are intentionally NOT merged from project config:
 	//   - Providers / Models (API keys, base URLs, headers)
+	//   - ImageModel / Media (global billable route and managed-storage limits)
 	//   - Telemetry (Langfuse secrets)
 	//   - Cloud (relay credentials, E2EE keys)
 	//   - SSHAliases / DockerAliases (remote access credentials)

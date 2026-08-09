@@ -7,7 +7,11 @@ package handler
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
+
+	"github.com/cnjack/jcode/internal/toolstate"
 )
 
 // AgentEventHandler is the primary abstraction between the agent runner and the
@@ -60,13 +64,16 @@ type AgentEventHandler interface {
 // group concurrent invocations; a single-tool message still forms a batch
 // (BatchSize == 1).
 type ToolCallEvent struct {
-	Name       string
-	Args       string
-	ToolCallID string
-	BatchID    string    // batch identity: one assistant message = one batch
-	BatchIndex int       // 0-based position inside the batch
-	BatchSize  int       // number of tool calls in the batch
-	StartedAt  time.Time // when the runner announced the call
+	Name        string
+	Args        string
+	ToolCallID  string
+	Surface     ToolSurface
+	Phase       ToolPhase
+	OperationID string
+	BatchID     string    // batch identity: one assistant message = one batch
+	BatchIndex  int       // 0-based position inside the batch
+	BatchSize   int       // number of tool calls in the batch
+	StartedAt   time.Time // when the runner announced the call
 }
 
 // ToolResultEvent describes a completed tool execution.
@@ -82,7 +89,62 @@ type ToolResultEvent struct {
 	// Denied is true when the user rejected this tool call at the approval
 	// prompt. UIs should render this as "declined" (e.g. strikethrough), not
 	// as an execution error.
-	Denied bool
+	Denied      bool
+	Surface     ToolSurface
+	Phase       ToolPhase
+	OperationID string
+	Outcome     ToolOutcome
+	ErrorCode   string
+	Provider    string
+	Model       string
+	Artifacts   []ArtifactRef
+}
+
+type ToolSurface = toolstate.Surface
+
+const (
+	ToolSurfaceActivity   = toolstate.SurfaceActivity
+	ToolSurfaceStandalone = toolstate.SurfaceStandalone
+)
+
+type ToolPhase = toolstate.Phase
+
+const (
+	ToolPhaseQueued     = toolstate.PhaseQueued
+	ToolPhaseGenerating = toolstate.PhaseGenerating
+	ToolPhaseSaving     = toolstate.PhaseSaving
+	ToolPhaseSucceeded  = toolstate.PhaseSucceeded
+	ToolPhaseFailed     = toolstate.PhaseFailed
+	ToolPhaseCancelled  = toolstate.PhaseCancelled
+	ToolPhaseUncertain  = toolstate.PhaseUncertain
+)
+
+type ToolOutcome = toolstate.Outcome
+
+const (
+	ToolOutcomeSucceeded = toolstate.OutcomeSucceeded
+	ToolOutcomeFailed    = toolstate.OutcomeFailed
+	ToolOutcomeCancelled = toolstate.OutcomeCancelled
+	ToolOutcomeUncertain = toolstate.OutcomeUncertain
+)
+
+// ArtifactRef is the safe, transport-facing subset of an Artifact record.
+// It intentionally contains no absolute path or provider source URL.
+type ArtifactRef = toolstate.ArtifactRef
+
+// ToolProgressEvent is an additive status update for long-running tools. It is
+// delivered through an optional interface so older/custom handlers continue to
+// satisfy AgentEventHandler without changes.
+type ToolProgressEvent = toolstate.ProgressEvent
+
+type ToolProgressHandler interface {
+	OnToolProgress(ToolProgressEvent)
+}
+
+func EmitToolProgress(h AgentEventHandler, event ToolProgressEvent) {
+	if progress, ok := h.(ToolProgressHandler); ok {
+		progress.OnToolProgress(event)
+	}
 }
 
 // TokenUsage carries token usage info to the UI surfaces.
@@ -112,12 +174,118 @@ type TokenUsage struct {
 
 // ApprovalRequest describes a tool that needs user permission.
 type ApprovalRequest struct {
-	ToolName    string
-	ToolArgs    string
-	ToolCallID  string // unique ID of this tool invocation (from the LLM)
-	IsExternal  bool   // true when accessing paths outside workpath
-	WorkerName  string // non-empty for teammate agents
-	WorkerColor string
+	ToolName        string
+	ToolArgs        string
+	ToolCallID      string // unique ID of this tool invocation (from the LLM)
+	IsExternal      bool   // true when accessing paths outside workpath
+	WorkerName      string // non-empty for teammate agents
+	WorkerColor     string
+	ApprovalClass   string
+	OperationID     string
+	CapabilityKey   string
+	Provider        string
+	Model           string
+	BillableSummary *BillableApprovalSummary
+	// Options are runner-issued opaque, one-shot decisions for a structured
+	// approval. Transports must present and return these exact IDs; they must
+	// never mint replacements or coerce the decision back to a boolean.
+	Options []ApprovalOption
+	// AllowApproveAll is false for billable/external operations whose grant
+	// must be bounded to the exact immutable intent.
+	AllowApproveAll bool
+}
+
+type ApprovalOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Kind        string `json:"kind,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// BillableApprovalOptionIDs validates the transport-neutral option contract
+// for an externally billable request. Exactly one allow-once and one deny
+// option are required; blanket grants and custom decisions are forbidden.
+func BillableApprovalOptionIDs(options []ApprovalOption) (allowOnceID, denyID string, err error) {
+	if len(options) != 2 {
+		return "", "", fmt.Errorf("billable approval requires exactly two opaque options")
+	}
+	for _, option := range options {
+		if strings.TrimSpace(option.ID) == "" {
+			return "", "", fmt.Errorf("billable approval option id is required")
+		}
+		switch option.Kind {
+		case "allow_once":
+			if allowOnceID != "" {
+				return "", "", fmt.Errorf("billable approval has duplicate allow-once options")
+			}
+			allowOnceID = option.ID
+		case "deny":
+			if denyID != "" {
+				return "", "", fmt.Errorf("billable approval has duplicate deny options")
+			}
+			denyID = option.ID
+		default:
+			return "", "", fmt.Errorf("billable approval option kind %q is not allowed", option.Kind)
+		}
+	}
+	if allowOnceID == "" || denyID == "" || allowOnceID == denyID {
+		return "", "", fmt.Errorf("billable approval options are invalid")
+	}
+	return allowOnceID, denyID, nil
+}
+
+type BillableApprovalSummary struct {
+	Capability   string `json:"capability,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Size         string `json:"size,omitempty"`
+	Count        int    `json:"count,omitempty"`
+	Billable     bool   `json:"billable,omitempty"`
+	HasReference bool   `json:"has_reference,omitempty"`
+}
+
+func formatBillableApprovalSummary(summary *BillableApprovalSummary) string {
+	if summary == nil {
+		return "External provider request"
+	}
+	count := summary.Count
+	if count <= 0 {
+		count = 1
+	}
+	parts := []string{
+		"Capability: " + summary.Capability,
+		"Provider: " + summary.Provider,
+		"Model: " + summary.Model,
+		fmt.Sprintf("Count: %d", count),
+	}
+	if summary.Size != "" {
+		parts = append(parts, "Size: "+summary.Size)
+	}
+	if summary.HasReference {
+		parts = append(parts, "Reference image: yes")
+	}
+	if summary.Billable {
+		parts = append(parts, "This request may incur provider charges.")
+	}
+	return strings.Join(parts, "\n")
+}
+
+func billableApprovalTitle(summary *BillableApprovalSummary) string {
+	if summary == nil {
+		return "Approve external provider request"
+	}
+	action := "Approve external provider request"
+	switch summary.Capability {
+	case "image.generate":
+		action = "Generate image"
+	case "web.search":
+		action = "Use provider web search"
+	}
+	target := strings.Trim(strings.Join([]string{summary.Provider, summary.Model}, " / "), " /")
+	if target != "" {
+		action += " with " + target
+	}
+	return action
 }
 
 // ApprovalMode mirrors tui.ApprovalMode so that handler consumers don't import tui.
@@ -130,6 +298,7 @@ const (
 
 // ApprovalResponse is what the UI returns for an approval request.
 type ApprovalResponse struct {
-	Approved bool
-	Mode     ApprovalMode
+	Approved         bool
+	Mode             ApprovalMode
+	ResolvedOptionID string
 }

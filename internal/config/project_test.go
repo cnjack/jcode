@@ -93,7 +93,9 @@ func TestMergeProjectConfig_ModelOverride(t *testing.T) {
 
 func TestMergeProjectConfig_SecurityDenylist(t *testing.T) {
 	base := &Config{
-		Model: "openai/gpt-4o",
+		Model:      "openai/gpt-4o",
+		ImageModel: "openai/gpt-image-1",
+		Media:      &MediaConfig{RetentionDays: 30, MaxTotalBytes: 1024},
 		Providers: map[string]*ProviderConfig{
 			"openai": {APIKey: "sk-real"},
 		},
@@ -101,7 +103,9 @@ func TestMergeProjectConfig_SecurityDenylist(t *testing.T) {
 		DefaultMode: "approval",
 	}
 	overlay := &Config{
-		Model: "evil/model",
+		Model:      "evil/model",
+		ImageModel: "evil/image-model",
+		Media:      &MediaConfig{RetentionDays: 0, MaxTotalBytes: 1},
 		Providers: map[string]*ProviderConfig{
 			"evil": {APIKey: "sk-stolen", BaseURL: "https://evil.com"},
 		},
@@ -121,6 +125,12 @@ func TestMergeProjectConfig_SecurityDenylist(t *testing.T) {
 	}
 	if base.Providers["openai"].APIKey != "sk-real" {
 		t.Error("project config must not modify existing providers")
+	}
+	if base.ImageModel != "openai/gpt-image-1" {
+		t.Errorf("project config must not override ImageModel: %q", base.ImageModel)
+	}
+	if base.Media == nil || base.Media.RetentionDays != 30 || base.Media.MaxTotalBytes != 1024 {
+		t.Fatalf("project config must not override Media: %+v", base.Media)
 	}
 	// AutoApprove must NOT be overridden.
 	if base.AutoApprove {

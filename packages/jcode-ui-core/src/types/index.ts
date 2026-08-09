@@ -103,6 +103,39 @@ export interface ToolDisplayInfo {
 
 export type ToolStatus = 'running' | 'done' | 'error'
 
+/** Timeline surface requested by a tool from its initial tool_call event. */
+export type ToolSurface = 'activity' | 'standalone'
+
+/**
+ * Durable image-tool lifecycle. `terminal` is intentionally separate from the
+ * outcome so reducers can enforce monotonic ordering without guessing whether
+ * a terminal call succeeded, failed, was cancelled, or became uncertain.
+ */
+export type ToolPhase = 'queued' | 'generating' | 'saving' | 'terminal'
+export type ToolOutcome = 'succeeded' | 'failed' | 'cancelled' | 'uncertain'
+
+export type ArtifactStorageKind = 'workspace' | 'managed'
+
+/** Safe, opaque reference to an Artifact. It never contains pixels or paths
+ * outside the storage-kind-relative fields below. */
+export interface ArtifactRef {
+  id: string
+  storage: ArtifactStorageKind
+  /** Storage-kind-relative key. Never an absolute path or provider URL. */
+  key: string
+  title: string
+  kind: string
+  media_type: string
+  size: number
+  width?: number
+  height?: number
+  provider?: string
+  model?: string
+  operation_id?: string
+  tool_call_id?: string
+  shareable?: boolean
+}
+
 /** Structured stdout/stderr for execute-style tools (dual-channel UI path). */
 export interface ToolStreams {
   stdout?: string
@@ -135,6 +168,8 @@ export interface ToolCall {
   id: string
   /** Backend tool_call_id for precise result matching. */
   toolCallID?: string
+  /** Runner-owned generation-operation id. Never inferred from toolCallID. */
+  operationID?: string
   name: string
   args: string
   output?: string
@@ -142,6 +177,20 @@ export interface ToolCall {
   displayOutput?: string
   error?: string
   status: ToolStatus
+  /** Initial timeline surface. Standalone tools are hard Activity boundaries. */
+  surface?: ToolSurface
+  /** Monotonic operation phase. Image tools start queued. */
+  phase?: ToolPhase
+  /** Required for terminal image operations. */
+  outcome?: ToolOutcome
+  /** Typed backend error classification; the UI never parses `error`. */
+  errorCode?: string
+  /** Immutable provider/model snapshot for this operation. These never derive
+   * from the host's currently selected image model. */
+  provider?: string
+  model?: string
+  /** Opaque, structured result references. Duplicate ids are ignored. */
+  artifacts?: ArtifactRef[]
   /** User rejected this call at the approval prompt. Rendered struck-through
    *  and muted (declined ≠ failed) — status stays 'done', not 'error'. */
   denied?: boolean
@@ -255,6 +304,19 @@ export interface ApprovalOption {
   description?: string
 }
 
+/** Safe, bounded summary for billable external approvals. Full prompt/tool
+ * args deliberately stay out of the approval DOM. */
+export interface BillableApprovalSummary {
+  /** Stable provider capability key (for example image.generate or web.search). */
+  capability?: string
+  provider?: string
+  model?: string
+  size?: string
+  count?: number
+  billable?: boolean
+  has_reference?: boolean
+}
+
 /**
  * A pending approval gate. While `resolved` is falsy the UI shows the decision
  * controls; once resolved it collapses to an inline note.
@@ -272,6 +334,10 @@ export interface Approval {
   tool_call_id?: string
   /** Target outside the workspace root — UI flags it prominently. */
   is_external: boolean
+  /** Policy class supplied by the backend (e.g. billable_external). */
+  approvalClass?: string
+  /** Structured, non-secret summary for billable approval copy. */
+  billableSummary?: BillableApprovalSummary
   resolved?: boolean
   approved?: boolean
   /** True while a resolve request is in flight (disables controls). */

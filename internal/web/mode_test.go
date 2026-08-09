@@ -4,31 +4,47 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
 
+	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/runner"
+	"github.com/cnjack/jcode/internal/session"
 )
 
 // newModeTestServer builds a minimal Server exercising only handleSwitchMode,
 // recording the planMode flag every agent rebuild is asked for.
-func newModeTestServer(rebuilt *[]bool) *Server {
-	return &Server{
-		Engine: &Engine{
-			approvalState: runner.NewApprovalStateWithMode("/tmp", mode.Approval),
-			mode:          "approval",
-			rebuildForMode: func(planMode bool) (*adk.ChatModelAgent, error) {
-				*rebuilt = append(*rebuilt, planMode)
-				return nil, nil
-			},
-		},
-		wsBroker: NewWSBroker(),
+func newModeTestServer(t *testing.T, rebuilt *[]bool) *Server {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	recorder, err := session.NewRecorder(t.TempDir(), "provider-a", "model-a")
+	if err != nil {
+		t.Fatal(err)
 	}
+	t.Cleanup(recorder.Close)
+	eng := &Engine{
+		taskID:        recorder.UUID(),
+		recorder:      recorder,
+		handler:       handler.NewWebHandler(),
+		approvalState: runner.NewApprovalStateWithMode("/tmp", mode.Approval),
+		mode:          "approval",
+		rebuildForMode: func(planMode bool) (*adk.ChatModelAgent, error) {
+			*rebuilt = append(*rebuilt, planMode)
+			return nil, nil
+		},
+	}
+	s := &Server{Engine: eng, wsBroker: NewWSBroker()}
+	eng.handler.SetModePromotionCallback(func() error {
+		return s.syncModeAfterApproval(eng, true, true)
+	})
+	return s
 }
 
 func postMode(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
@@ -40,7 +56,7 @@ func postMode(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
 
 func TestWebSwitchMode(t *testing.T) {
 	var rebuilt []bool
-	s := newModeTestServer(&rebuilt)
+	s := newModeTestServer(t, &rebuilt)
 
 	cases := []struct {
 		body         string
@@ -76,11 +92,18 @@ func TestWebSwitchMode(t *testing.T) {
 			t.Errorf("%s: rebuilt=%v, want exactly [%v]", c.body, rebuilt, c.wantPlanArg)
 		}
 	}
+	entries, err := session.LoadSession(s.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := session.ReconstructState(entries).Mode; got != mode.Approval.String() {
+		t.Fatalf("durable mode = %q, want %q", got, mode.Approval.String())
+	}
 }
 
 func TestWebSwitchModeRejectsGarbage(t *testing.T) {
 	var rebuilt []bool
-	s := newModeTestServer(&rebuilt)
+	s := newModeTestServer(t, &rebuilt)
 	rec := postMode(t, s, `{"mode":"banana"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("garbage mode should be 400, got %d", rec.Code)
@@ -92,7 +115,7 @@ func TestWebSwitchModeRejectsGarbage(t *testing.T) {
 
 func TestWebSwitchModeRejectsRemovedAskMode(t *testing.T) {
 	var rebuilt []bool
-	s := newModeTestServer(&rebuilt)
+	s := newModeTestServer(t, &rebuilt)
 	rec := postMode(t, s, `{"mode":"ask"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("removed ask mode should be 400, got %d", rec.Code)
@@ -101,7 +124,7 @@ func TestWebSwitchModeRejectsRemovedAskMode(t *testing.T) {
 
 func TestWebSwitchModeRejectsRemovedAutopilotMode(t *testing.T) {
 	var rebuilt []bool
-	s := newModeTestServer(&rebuilt)
+	s := newModeTestServer(t, &rebuilt)
 	rec := postMode(t, s, `{"mode":"autopilot"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("removed autopilot mode should be 400, got %d", rec.Code)
@@ -110,7 +133,7 @@ func TestWebSwitchModeRejectsRemovedAutopilotMode(t *testing.T) {
 
 func TestWebSwitchModeSameValueIsNoOp(t *testing.T) {
 	var rebuilt []bool
-	s := newModeTestServer(&rebuilt)
+	s := newModeTestServer(t, &rebuilt)
 	rec := postMode(t, s, `{"mode":"approval"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("same mode: code=%d body=%q", rec.Code, rec.Body.String())
@@ -152,8 +175,11 @@ func TestWebHandleApprovalAllowAllSyncsMode(t *testing.T) {
 	}
 
 	var rebuilt []bool
-	s := newModeTestServer(&rebuilt)
+	s := newModeTestServer(t, &rebuilt)
 	s.handler = h
+	h.SetModePromotionCallback(func() error {
+		return s.syncModeAfterApproval(s.Engine, true, true)
+	})
 
 	// --- "Allow all" promotes the selector to Full access. ---
 	rec := httptest.NewRecorder()
@@ -208,12 +234,19 @@ func TestWebHandleApprovalAllowAllSyncsMode(t *testing.T) {
 }
 
 func TestApproveAllWaitsForAgentRebuildAndPreservesRefreshedAgent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	recorder, err := session.NewRecorder(t.TempDir(), "provider-a", "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(recorder.Close)
 	oldAgent := new(adk.ChatModelAgent)
 	refreshedAgent := new(adk.ChatModelAgent)
 	rebuildStarted := make(chan struct{})
 	releaseRebuild := make(chan struct{})
 	eng := &Engine{
 		taskID:       "active",
+		recorder:     recorder,
 		agent:        oldAgent,
 		mode:         mode.Approval.String(),
 		providerName: "provider-a",
@@ -231,11 +264,10 @@ func TestApproveAllWaitsForAgentRebuildAndPreservesRefreshedAgent(t *testing.T) 
 	<-rebuildStarted
 
 	approveStarted := make(chan struct{})
-	approveDone := make(chan struct{})
+	approveDone := make(chan error, 1)
 	go func() {
 		close(approveStarted)
-		s.syncModeAfterApproval(eng, true, true)
-		close(approveDone)
+		approveDone <- s.syncModeAfterApproval(eng, true, true)
 	}()
 	<-approveStarted
 
@@ -257,7 +289,10 @@ func TestApproveAllWaitsForAgentRebuildAndPreservesRefreshedAgent(t *testing.T) 
 		t.Fatal(err)
 	}
 	select {
-	case <-approveDone:
+	case err := <-approveDone:
+		if err != nil {
+			t.Fatal(err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("approve-all did not resume after the agent rebuild completed")
 	}
@@ -268,4 +303,190 @@ func TestApproveAllWaitsForAgentRebuildAndPreservesRefreshedAgent(t *testing.T) 
 		t.Fatalf("final engine agent=%p mode=%q revision=%d, want refreshed agent=%p mode=%q revision=2",
 			eng.agent, eng.mode, eng.agentRevision, refreshedAgent, mode.FullAccess.String())
 	}
+}
+
+func TestWebSwitchModeJournalFailureDoesNotPublishElevation(t *testing.T) {
+	var rebuilt []bool
+	s := newModeTestServer(t, &rebuilt)
+	badHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(badHome, ".jcode"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", badHome)
+
+	rec := postMode(t, s, `{"mode":"full_access"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("code=%d body=%q, want 500", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), badHome) || !strings.Contains(rec.Body.String(), "failed to persist mode change") {
+		t.Fatalf("response leaked storage detail or lost safe error: %q", rec.Body.String())
+	}
+	if got := s.curMode(); got != mode.Approval.String() {
+		t.Fatalf("engine mode=%q after failed commit, want approval", got)
+	}
+	if got := s.approvalState.GetSessionMode(); got != mode.Approval {
+		t.Fatalf("approval state=%v after failed commit, want approval", got)
+	}
+	if len(rebuilt) != 1 || rebuilt[0] {
+		t.Fatalf("candidate rebuild=%v, want one unpublished non-plan agent", rebuilt)
+	}
+}
+
+func TestWebAllowAllJournalFailureDoesNotReachRunnerOrPromote(t *testing.T) {
+	var rebuilt []bool
+	s := newModeTestServer(t, &rebuilt)
+	h := handler.NewWebHandler()
+	s.handler = h
+	h.SetModePromotionCallback(func() error {
+		return s.syncModeAfterApproval(s.Engine, true, true)
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	response := make(chan handler.ApprovalResponse, 1)
+	requestErr := make(chan error, 1)
+	go func() {
+		got, err := h.RequestApproval(ctx, handler.ApprovalRequest{ToolName: "execute"})
+		if err != nil {
+			requestErr <- err
+			return
+		}
+		response <- got
+	}()
+	var approvalID string
+	select {
+	case event := <-h.Events():
+		approvalID = event.Data.(handler.WebApprovalRequestData).ID
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for approval request")
+	}
+
+	badHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(badHome, ".jcode"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", badHome)
+	rec := httptest.NewRecorder()
+	s.handleApproval(rec, httptest.NewRequest(http.MethodPost, "/api/approval", strings.NewReader(
+		`{"id":"`+approvalID+`","approved":true,"approve_all":true}`,
+	)))
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "failed to persist mode change") {
+		t.Fatalf("code=%d body=%q, want opaque persistence error", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), badHome) {
+		t.Fatalf("response leaked storage path: %q", rec.Body.String())
+	}
+	select {
+	case got := <-response:
+		t.Fatalf("runner received an unpersisted allow-all response: %+v", got)
+	case err := <-requestErr:
+		t.Fatalf("approval request unexpectedly ended before cancellation: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := s.curMode(); got != mode.Approval.String() {
+		t.Fatalf("engine mode=%q after failed allow-all commit", got)
+	}
+	if got := s.approvalState.GetMode(); got != handler.ModeManual {
+		t.Fatalf("approval axis=%v after failed allow-all commit", got)
+	}
+}
+
+func TestWebResumeUsesTaskModeInsteadOfActiveFullAccess(t *testing.T) {
+	s := stubFactoryServer(t)
+	project := t.TempDir()
+	approvalID := recordModeTestSession(t, project, mode.Approval)
+	fullAccessID := recordModeTestSession(t, project, mode.FullAccess)
+	planID := recordModeTestSession(t, project, mode.Plan)
+	corruptID := recordModeTestSession(t, project, mode.FullAccess)
+	sessionsDir, err := config.SessionsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	corruptFile, err := os.OpenFile(filepath.Join(sessionsDir, corruptID+".json"), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := corruptFile.WriteString(`{"type":"mode_change"` + "\n"); err != nil {
+		_ = corruptFile.Close()
+		t.Fatal(err)
+	}
+	if err := corruptFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	originalFactory := s.newEngine
+	builtModes := make(map[string]string)
+	s.newEngine = func(taskID, pwd, modeStr string) (*EngineConfig, error) {
+		builtModes[taskID] = modeStr
+		cfg, err := originalFactory(taskID, pwd, modeStr)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ApprovalState = runner.NewApprovalStateWithMode(pwd, mode.Parse(modeStr))
+		return cfg, nil
+	}
+
+	active, err := s.buildLocalEngine(fullAccessID, project, mode.FullAccess.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.setActiveEngine(active)
+
+	resume := func(sessionID string) *Engine {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		body := `{"session_id":"` + sessionID + `","pwd":"` + project + `"}`
+		s.handleNewSession(rec, httptest.NewRequest(http.MethodPost, "/api/sessions", strings.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("resume %s: code=%d body=%q", sessionID, rec.Code, rec.Body.String())
+		}
+		eng := s.activeEngine()
+		if eng == nil || eng.taskID != sessionID {
+			t.Fatalf("resume %s focused engine %#v", sessionID, eng)
+		}
+		return eng
+	}
+
+	approvalEngine := resume(approvalID)
+	if got := builtModes[approvalID]; got != mode.Approval.String() {
+		t.Fatalf("approval task factory mode=%q, inherited active Full access", got)
+	}
+	if got := approvalEngine.curMode(); got != mode.Approval.String() {
+		t.Fatalf("approval task engine mode=%q", got)
+	}
+	if got := approvalEngine.approvalState.GetMode(); got != handler.ModeManual {
+		t.Fatalf("approval task approval axis=%v, want manual", got)
+	}
+	if got := active.curMode(); got != mode.FullAccess.String() {
+		t.Fatalf("restoring task A mutated task B mode to %q", got)
+	}
+
+	planEngine := resume(planID)
+	if got := builtModes[planID]; got != mode.Approval.String() {
+		t.Fatalf("saved Plan factory mode=%q, want normalized approval", got)
+	}
+	if got := planEngine.curMode(); got != mode.Approval.String() {
+		t.Fatalf("saved Plan engine mode=%q, want approval", got)
+	}
+
+	corruptEngine := resume(corruptID)
+	if got := builtModes[corruptID]; got != mode.Approval.String() {
+		t.Fatalf("corrupt mode journal factory mode=%q, want fail-closed approval", got)
+	}
+	if got := corruptEngine.approvalState.GetMode(); got != handler.ModeManual {
+		t.Fatalf("corrupt mode journal approval axis=%v, want manual", got)
+	}
+}
+
+func recordModeTestSession(t *testing.T, project string, sessionMode mode.SessionMode) string {
+	t.Helper()
+	recorder, err := session.NewRecorder(project, "provider-a", "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recorder.Close()
+	if err := recorder.RecordModeChangeStrict(sessionMode.String()); err != nil {
+		t.Fatal(err)
+	}
+	return recorder.UUID()
 }

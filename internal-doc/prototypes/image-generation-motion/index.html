@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JCode 图片生成动效方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f3f3f0;
+      --surface: #fbfbf8;
+      --ink: #1d1d1a;
+      --muted: #777770;
+      --hairline: #d2d2cb;
+      --wash: #e9e9e4;
+      --signal: #f06a2a;
+      --shadow: 0 18px 55px rgb(32 32 27 / 8%);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(var(--hairline) 1px, transparent 1px),
+        linear-gradient(90deg, var(--hairline) 1px, transparent 1px),
+        var(--paper);
+      background-size: 4rem 4rem;
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      background: var(--paper);
+      opacity: .88;
+    }
+
+    main {
+      position: relative;
+      width: min(74rem, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 4.5rem 0 5rem;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: .72rem;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 2.5rem;
+      height: 1px;
+      content: "";
+      background: var(--signal);
+    }
+
+    h1 {
+      max-width: 11ch;
+      margin: 1.5rem 0 1rem;
+      font-size: clamp(2.8rem, 7vw, 6.8rem);
+      font-weight: 620;
+      letter-spacing: -.07em;
+      line-height: .92;
+    }
+
+    .lede {
+      max-width: 42rem;
+      margin: 0 0 3.5rem;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.8;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .study {
+      position: relative;
+      overflow: hidden;
+      min-height: 26rem;
+      border: 1px solid var(--hairline);
+      border-radius: 1.25rem;
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      color: inherit;
+      text-decoration: none;
+      box-shadow: 0 1px 0 rgb(255 255 255 / 80%);
+      transition: transform .35s cubic-bezier(.2,.8,.2,1), box-shadow .35s ease, border-color .35s ease;
+    }
+
+    .study:hover,
+    .study:focus-visible {
+      z-index: 1;
+      border-color: #a5a59c;
+      outline: none;
+      box-shadow: var(--shadow);
+      transform: translateY(-5px);
+    }
+
+    .study__preview {
+      display: grid;
+      height: 17rem;
+      place-items: center;
+      border-bottom: 1px solid var(--hairline);
+      background: var(--wash);
+    }
+
+    .study__body { padding: 1.25rem 1.35rem 1.45rem; }
+
+    .study__index {
+      color: var(--signal);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: .68rem;
+      letter-spacing: .12em;
+    }
+
+    .study h2 {
+      margin: .5rem 0 .4rem;
+      font-size: 1.35rem;
+      font-weight: 620;
+      letter-spacing: -.025em;
+    }
+
+    .study p {
+      margin: 0;
+      color: var(--muted);
+      font-size: .84rem;
+      line-height: 1.65;
+    }
+
+    .open {
+      position: absolute;
+      right: 1.35rem;
+      bottom: 1.35rem;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: .72rem;
+      letter-spacing: .08em;
+    }
+
+    .mini {
+      position: relative;
+      display: grid;
+      width: 9rem;
+      aspect-ratio: 1;
+      place-items: center;
+      overflow: hidden;
+      border: 1px solid #c7c7c0;
+      border-radius: 1rem;
+      background: #f1f1ee;
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / 80%);
+    }
+
+    .pixels {
+      display: grid;
+      width: 4.5rem;
+      grid-template-columns: repeat(3, 1fr);
+      gap: .32rem;
+    }
+
+    .pixels i {
+      aspect-ratio: 1;
+      border: 1px solid #bdbdb5;
+      border-radius: .22rem;
+      background: #fafaf7;
+      opacity: .2;
+      transform: scale(.35);
+      animation: pixel 2.8s cubic-bezier(.45,0,.2,1) infinite;
+    }
+
+    .pixels i:nth-child(5) { animation-delay: -.42s; }
+    .pixels i:nth-child(2), .pixels i:nth-child(4), .pixels i:nth-child(6), .pixels i:nth-child(8) { animation-delay: -.28s; }
+
+    .slices { width: 5.5rem; }
+    .slices i {
+      display: block;
+      height: .44rem;
+      margin: .26rem 0;
+      border: 1px solid #bdbdb5;
+      border-radius: 999px;
+      background: #fafaf7;
+      opacity: .2;
+      animation: slice 2.6s cubic-bezier(.16,1,.3,1) infinite;
+    }
+    .slices i:nth-child(odd) { --from: -1.25rem; transform: translateX(-1.25rem); }
+    .slices i:nth-child(even) { --from: 1.25rem; transform: translateX(1.25rem); }
+    .slices i:nth-child(2) { animation-delay: -.18s; }
+    .slices i:nth-child(3) { animation-delay: -.36s; }
+    .slices i:nth-child(4) { animation-delay: -.54s; }
+    .slices i:nth-child(5) { animation-delay: -.72s; }
+    .slices i:nth-child(6) { animation-delay: -.9s; }
+
+    .iris i {
+      position: absolute;
+      width: 2.2rem;
+      height: 2.2rem;
+      border-color: #999990;
+      border-style: solid;
+      opacity: .4;
+      animation: iris 3.1s cubic-bezier(.2,.8,.2,1) infinite;
+    }
+    .iris i:nth-child(1) { --x: .35rem; --y: .35rem; top: 2.3rem; left: 2.3rem; border-width: 1px 0 0 1px; }
+    .iris i:nth-child(2) { --x: -.35rem; --y: .35rem; top: 2.3rem; right: 2.3rem; border-width: 1px 1px 0 0; animation-delay: -.2s; }
+    .iris i:nth-child(3) { --x: -.35rem; --y: -.35rem; right: 2.3rem; bottom: 2.3rem; border-width: 0 1px 1px 0; animation-delay: -.4s; }
+    .iris i:nth-child(4) { --x: .35rem; --y: -.35rem; bottom: 2.3rem; left: 2.3rem; border-width: 0 0 1px 1px; animation-delay: -.6s; }
+    .iris b {
+      width: .45rem;
+      height: .45rem;
+      border-radius: 50%;
+      background: var(--signal);
+      opacity: .45;
+      animation: blink 3.1s ease infinite;
+    }
+
+    .weave::before,
+    .weave::after {
+      position: absolute;
+      inset: 2.4rem;
+      content: "";
+      background: repeating-linear-gradient(90deg, transparent 0 .48rem, #aaa9a1 .5rem .55rem, transparent .57rem 1rem);
+      opacity: .25;
+      animation: weave-x 3.4s cubic-bezier(.16,1,.3,1) infinite;
+      transform-origin: center;
+    }
+    .weave::after {
+      background: repeating-linear-gradient(0deg, transparent 0 .48rem, #aaa9a1 .5rem .55rem, transparent .57rem 1rem);
+      animation-name: weave-y;
+    }
+
+    @keyframes pixel {
+      0%, 12%, 100% { opacity: .16; transform: scale(.35); }
+      42%, 62% { opacity: .82; transform: scale(1); }
+      84% { opacity: .18; transform: scale(.6); }
+    }
+    @keyframes slice {
+      0%, 100% { opacity: .12; transform: translateX(var(--from, -1.25rem)) scaleX(.55); }
+      44%, 68% { opacity: .8; transform: translateX(0) scaleX(1); }
+    }
+    @keyframes iris {
+      0%, 100% { opacity: .18; transform: translate(0,0) scale(.72); }
+      45%, 68% { opacity: .82; transform: translate(var(--x,0),var(--y,0)) scale(1); }
+    }
+    @keyframes blink { 0%,100% { opacity:.15; transform:scale(.5) } 52% { opacity:.75; transform:scale(1) } }
+    @keyframes weave-x { 0%,100% { opacity:.08; transform:scaleX(.22) } 45%,68% { opacity:.42; transform:scaleX(1) } }
+    @keyframes weave-y { 0%,100% { opacity:.08; transform:scaleY(.22) } 45%,68% { opacity:.42; transform:scaleY(1) } }
+
+    @media (max-width: 760px) {
+      main { padding-top: 2.5rem; }
+      .grid { grid-template-columns: 1fr; }
+      .study { min-height: 24rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      .pixels i, .slices i, .iris i, .iris b { opacity: .55; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">JCode · Motion study 04</div>
+    <h1>图片生成<br>动效方向</h1>
+    <p class="lede">四套独立 HTML 原型。卡片内部坚持无文字、无百分比；每套都可切换生成/保存状态与图片比例，方便直接判断哪一种最适合聊天流。</p>
+
+    <section class="grid" aria-label="动效方案">
+      <a class="study" href="01-pixel-shutter.html">
+        <div class="study__preview"><div class="mini"><span class="pixels"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div>
+        <div class="study__body"><span class="study__index">01 / RECOMMENDED</span><h2>像素快门</h2><p>像素从中心向外成像。识别度最高，也最贴近“图片正在形成”。</p><span class="open">打开方案 ↗</span></div>
+      </a>
+
+      <a class="study" href="02-film-slices.html">
+        <div class="study__preview"><div class="mini"><span class="slices"><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div>
+        <div class="study__body"><span class="study__index">02 / CINEMATIC</span><h2>胶片切片</h2><p>横向条带错位拼合。节奏更利落，适合横图与高频生成场景。</p><span class="open">打开方案 ↗</span></div>
+      </a>
+
+      <a class="study" href="03-focus-iris.html">
+        <div class="study__preview"><div class="mini iris"><i></i><i></i><i></i><i></i><b></b></div></div>
+        <div class="study__body"><span class="study__index">03 / OPTICAL</span><h2>光圈锁定</h2><p>四角取景框逐步锁定中心。更像专业影像工具，动作最克制。</p><span class="open">打开方案 ↗</span></div>
+      </a>
+
+      <a class="study" href="04-scan-weave.html">
+        <div class="study__preview"><div class="mini weave"></div></div>
+        <div class="study__body"><span class="study__index">04 / TECHNICAL</span><h2>扫描织网</h2><p>横纵信号线交织成像。技术感最强，保存阶段会收束成稳定网格。</p><span class="open">打开方案 ↗</span></div>
+      </a>
+    </section>
+  </main>
+</body>
+</html>

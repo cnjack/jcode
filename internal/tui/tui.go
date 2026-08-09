@@ -150,16 +150,19 @@ type Model struct {
 
 	pendingPrompts []string
 
-	approvalPending     bool
-	approvalToolName    string
-	approvalToolArgs    string
-	approvalRespChan    chan ToolApprovalResponse
-	approvalIsExternal  bool   // Whether this is an external path access
-	approvalWorkerName  string // Non-empty for teammate approval
-	approvalWorkerColor string // Teammate color
-	approvalMode        ApprovalMode
-	approvalSelected    int                      // 0=Approve, 1=ApproveAll, 2=Reject
-	approvalQueue       []ToolApprovalRequestMsg // queued requests when dialog is already active
+	approvalPending         bool
+	approvalToolName        string
+	approvalToolArgs        string
+	approvalRespChan        chan ToolApprovalResponse
+	approvalIsExternal      bool   // Whether this is an external path access
+	approvalIsBillable      bool   // Whether this is a bounded provider request
+	approvalWorkerName      string // Non-empty for teammate approval
+	approvalWorkerColor     string // Teammate color
+	approvalAllowApproveAll bool
+	approvalOptions         []ToolApprovalOption
+	approvalMode            ApprovalMode
+	approvalSelected        int                      // 0=Approve, 1=ApproveAll, 2=Reject
+	approvalQueue           []ToolApprovalRequestMsg // queued requests when dialog is already active
 
 	envLabel    string
 	agentMode   AgentMode
@@ -202,12 +205,11 @@ type Model struct {
 	cancelPending  bool // true when cancel-agent dialog is showing
 	cancelSelected int  // 0=Cancel, 1=Wait
 
-	// OnApprovalModeChange is called when the user promotes to auto-approve via the
-	// approval dialog's "Approve All". It updates the backend ApprovalState's
-	// approval axis directly (no agent rebuild), which is the correct fast path for
-	// a mid-run approval-only change. The unified Shift+Tab selector instead flows
-	// through modeSelectCh so it can also swap tools/prompt.
-	OnApprovalModeChange func(enabled bool)
+	// OnApprovalModeChange is called before the approval dialog's "Approve All"
+	// response is released. The command layer prepares the target agent, commits
+	// the mode journal, and publishes backend state; an error keeps the dialog
+	// pending and the selector unchanged.
+	OnApprovalModeChange func(enabled bool) error
 
 	// Command autocomplete suggestions
 	cmdSuggestionActive bool
@@ -423,10 +425,9 @@ func (m Model) inputActive() bool {
 // ModelOption configures a Model before the BubbleTea program starts.
 type ModelOption func(*Model)
 
-// WithApprovalModeChange sets the callback invoked when the user promotes to
-// auto-approve via the approval dialog's "Approve All". The callback directly
-// updates the backend ApprovalState atomically, bypassing the event loop.
-func WithApprovalModeChange(fn func(bool)) ModelOption {
+// WithApprovalModeChange sets the durable commit callback invoked when the user
+// promotes to auto-approve via the approval dialog's "Approve All".
+func WithApprovalModeChange(fn func(bool) error) ModelOption {
 	return func(m *Model) {
 		m.OnApprovalModeChange = fn
 	}
@@ -465,21 +466,23 @@ func (m *Model) applySelectorMode(sm mode.SessionMode) {
 	}
 }
 
-// promoteToFullAccess handles the approval dialog's "Approve all": it flips the
-// approval axis to auto and pushes the same change to the backend
-// ApprovalState. The pill's unified mode follows only outside Plan — inside
-// Plan the read-only tool axis still names the mode, and the backend keeps the
-// plan tool set until the plan is approved, at which point applyModeSwitch
-// sends a ModeSelectedMsg carrying the promoted mode.
-func (m *Model) promoteToFullAccess() {
-	m.approvalMode = ModeAuto
-	if m.agentMode != ModePlanning {
-		m.sessionMode = mode.FullAccess
-	}
+// promoteToFullAccess handles the approval dialog's "Approve all" as a durable
+// mode transition. It updates local selector state only after the command layer
+// confirms that the candidate Full access agent and journal commit succeeded.
+func (m *Model) promoteToFullAccess() error {
+	// The callback prepares the candidate agent and fsyncs the mode journal.
+	// Keep this dialog and every queued approval untouched unless that durable
+	// commit succeeds; otherwise the runner must not observe ModeAuto.
 	if m.OnApprovalModeChange != nil {
-		m.OnApprovalModeChange(true)
+		if err := m.OnApprovalModeChange(true); err != nil {
+			return err
+		}
 	}
+	m.approvalMode = ModeAuto
+	m.agentMode = ModeNormal
+	m.sessionMode = mode.FullAccess
 	m.invalidateFooterCache()
+	return nil
 }
 
 // WithVersion sets the version string displayed in the bottom hint bar.

@@ -1,5 +1,7 @@
-// Package artifact owns session-scoped, explicitly registered workspace
-// deliverables. It stores metadata only; file content remains in the workspace.
+// Package artifact owns session-scoped deliverables. Workspace artifacts keep
+// their content in the registered workspace; managed artifacts keep validated
+// content below JCode's private artifact root. Persisted metadata never contains
+// an absolute path or file content.
 package artifact
 
 import (
@@ -47,6 +49,16 @@ const (
 	StatusError       Status = "error"
 )
 
+// StorageKind identifies the trusted backend used for an artifact. The empty
+// value is deliberately interpreted as workspace so records written by older
+// JCode versions retain their original behavior.
+type StorageKind string
+
+const (
+	StorageWorkspace StorageKind = "workspace"
+	StorageManaged   StorageKind = "managed"
+)
+
 const (
 	MaxInlineTextSize   int64 = 5 << 20
 	MaxInlineBinarySize int64 = 25 << 20
@@ -58,17 +70,81 @@ const (
 // Record is the metadata persisted in a session entry and exposed to the Web
 // UI. It intentionally contains neither an absolute path nor file content.
 type Record struct {
-	ID           string    `json:"id"`
-	SessionID    string    `json:"session_id"`
-	RelativePath string    `json:"relative_path"`
-	Title        string    `json:"title"`
-	Kind         Kind      `json:"kind"`
-	MediaType    string    `json:"media_type"`
-	Size         int64     `json:"size"`
-	Revision     int       `json:"revision"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	Status       Status    `json:"status"`
-	Focus        bool      `json:"focus,omitempty"`
+	ID               string      `json:"id"`
+	SessionID        string      `json:"session_id"`
+	StorageKind      StorageKind `json:"storage_kind,omitempty"`
+	RelativePath     string      `json:"relative_path,omitempty"`
+	RelativeKey      string      `json:"relative_key,omitempty"`
+	Title            string      `json:"title"`
+	Kind             Kind        `json:"kind"`
+	MediaType        string      `json:"media_type"`
+	Size             int64       `json:"size"`
+	Width            int         `json:"width,omitempty"`
+	Height           int         `json:"height,omitempty"`
+	SHA256           string      `json:"sha256,omitempty"`
+	ProviderID       string      `json:"provider_id,omitempty"`
+	ModelID          string      `json:"model_id,omitempty"`
+	ParentArtifactID string      `json:"parent_artifact_id,omitempty"`
+	OperationID      string      `json:"operation_id,omitempty"`
+	ToolCallID       string      `json:"tool_call_id,omitempty"`
+	Revision         int         `json:"revision"`
+	UpdatedAt        time.Time   `json:"updated_at"`
+	Status           Status      `json:"status"`
+	// Focus is never omitted: false is a deliberate instruction to keep the
+	// Artifact unseen without stealing the active panel, while older clients
+	// may treat an absent field as the legacy focus=true behavior.
+	Focus     bool `json:"focus"`
+	Shareable bool `json:"shareable,omitempty"`
+}
+
+// EffectiveStorageKind preserves the v1 contract: a missing storage_kind is a
+// workspace record, never a managed key guessed from other fields.
+func (r Record) EffectiveStorageKind() StorageKind {
+	if r.StorageKind == "" {
+		return StorageWorkspace
+	}
+	return r.StorageKind
+}
+
+// EffectiveShareable preserves the v1 workspace contract. Workspace Artifacts
+// predate the persisted shareable bit and remain shareable; managed media is
+// fail-closed unless a future storage policy explicitly opts it in.
+func (r Record) EffectiveShareable() bool {
+	if r.EffectiveStorageKind() == StorageWorkspace {
+		return true
+	}
+	return r.Shareable
+}
+
+// Ref is the transport-safe, path-free projection returned by tools and live
+// events. Content remains accessible only through Service.Open/Resolve.
+type Ref struct {
+	ID               string      `json:"id"`
+	StorageKind      StorageKind `json:"storage_kind"`
+	RelativeKey      string      `json:"relative_key,omitempty"`
+	Title            string      `json:"title"`
+	Kind             Kind        `json:"kind"`
+	MediaType        string      `json:"media_type"`
+	Size             int64       `json:"size"`
+	Width            int         `json:"width,omitempty"`
+	Height           int         `json:"height,omitempty"`
+	SHA256           string      `json:"sha256,omitempty"`
+	ProviderID       string      `json:"provider_id,omitempty"`
+	ModelID          string      `json:"model_id,omitempty"`
+	ParentArtifactID string      `json:"parent_artifact_id,omitempty"`
+	OperationID      string      `json:"operation_id,omitempty"`
+	ToolCallID       string      `json:"tool_call_id,omitempty"`
+	Shareable        bool        `json:"shareable,omitempty"`
+}
+
+func (r Record) Ref() Ref {
+	return Ref{
+		ID: r.ID, StorageKind: r.EffectiveStorageKind(), RelativeKey: r.RelativeKey, Title: r.Title,
+		Kind: r.Kind, MediaType: r.MediaType, Size: r.Size, Width: r.Width,
+		Height: r.Height, SHA256: r.SHA256, ProviderID: r.ProviderID, ModelID: r.ModelID,
+		ParentArtifactID: r.ParentArtifactID, OperationID: r.OperationID, ToolCallID: r.ToolCallID,
+		Shareable: r.EffectiveShareable(),
+	}
 }
 
 type RegisterRequest struct {
@@ -89,10 +165,11 @@ type Recorder interface {
 type Loader func(sessionID string) ([]Record, error)
 
 type Service struct {
-	loader Loader
-	now    func() time.Time
-	mu     sync.Mutex
-	shards map[string]*sessionShard
+	loader      Loader
+	now         func() time.Time
+	managedRoot string
+	mu          sync.Mutex
+	shards      map[string]*sessionShard
 }
 
 type sessionShard struct {
@@ -102,10 +179,20 @@ type sessionShard struct {
 }
 
 func NewService(loader Loader, now func() time.Time) *Service {
+	return NewServiceWithManagedRoot(loader, now, defaultManagedRoot())
+}
+
+// NewServiceWithManagedRoot is intended for isolated runtimes and tests. The
+// supplied path is the trusted root itself; callers must not derive it from a
+// model or HTTP request.
+func NewServiceWithManagedRoot(loader Loader, now func() time.Time, managedRoot string) *Service {
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{loader: loader, now: now, shards: make(map[string]*sessionShard)}
+	return &Service{
+		loader: loader, now: now, managedRoot: filepath.Clean(managedRoot),
+		shards: make(map[string]*sessionShard),
+	}
 }
 
 func (s *Service) shard(sessionID string) *sessionShard {
@@ -175,8 +262,10 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest, recorder Re
 	}
 	record := Record{
 		ID: id, SessionID: req.SessionID, RelativePath: validated.relativePath,
-		Title: title, Kind: kind, MediaType: mediaType, Size: validated.info.Size(),
+		StorageKind: StorageWorkspace,
+		Title:       title, Kind: kind, MediaType: mediaType, Size: validated.info.Size(),
 		Revision: revision, UpdatedAt: s.now().UTC(), Status: StatusAvailable, Focus: req.Focus,
+		Shareable: true,
 	}
 	if err := recorder.RecordArtifact(record); err != nil {
 		return Record{}, fmt.Errorf("persist artifact metadata: %w", err)
@@ -186,6 +275,39 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest, recorder Re
 }
 
 func (s *Service) List(ctx context.Context, sessionID, workspace string) ([]Record, error) {
+	records, err := s.listRecords(sessionID, false)
+	if err != nil {
+		return nil, err
+	}
+	for i := range records {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		s.refreshRecordStatus(ctx, workspace, &records[i])
+	}
+	sortArtifactRecords(records)
+	return records, nil
+}
+
+// ListManaged returns only content rooted under JCode's private managed
+// storage. It intentionally accepts no workspace path, making it safe for an
+// SSH/Docker task whose workspace path belongs to a different host.
+func (s *Service) ListManaged(ctx context.Context, sessionID string) ([]Record, error) {
+	records, err := s.listRecords(sessionID, true)
+	if err != nil {
+		return nil, err
+	}
+	for i := range records {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		s.refreshRecordStatus(ctx, "", &records[i])
+	}
+	sortArtifactRecords(records)
+	return records, nil
+}
+
+func (s *Service) listRecords(sessionID string, managedOnly bool) ([]Record, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
@@ -197,32 +319,22 @@ func (s *Service) List(ctx context.Context, sessionID, workspace string) ([]Reco
 	}
 	records := make([]Record, 0, len(shard.records))
 	for _, record := range shard.records {
+		if managedOnly && record.EffectiveStorageKind() != StorageManaged {
+			continue
+		}
 		records = append(records, record)
 	}
 	shard.mu.Unlock()
+	return records, nil
+}
 
-	for i := range records {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		validated, err := validateWorkspaceFile(workspace, records[i].RelativePath)
-		switch {
-		case err == nil:
-			records[i].Status = StatusAvailable
-			records[i].Size = validated.info.Size()
-		case errors.Is(err, os.ErrNotExist):
-			records[i].Status = StatusMissing
-		default:
-			records[i].Status = StatusError
-		}
-	}
+func sortArtifactRecords(records []Record) {
 	sort.Slice(records, func(i, j int) bool {
 		if records[i].UpdatedAt.Equal(records[j].UpdatedAt) {
 			return records[i].ID < records[j].ID
 		}
 		return records[i].UpdatedAt.After(records[j].UpdatedAt)
 	})
-	return records, nil
 }
 
 // Resolve revalidates a registered artifact at the time of use and returns its
@@ -242,13 +354,25 @@ func (s *Service) Resolve(ctx context.Context, sessionID, workspace, artifactID 
 	if !ok {
 		return Record{}, "", os.ErrNotExist
 	}
-	validated, err := validateWorkspaceFile(workspace, record.RelativePath)
-	if err != nil {
-		return record, "", err
+	switch record.EffectiveStorageKind() {
+	case StorageWorkspace:
+		validated, err := validateWorkspaceFile(workspace, record.RelativePath)
+		if err != nil {
+			return record, "", err
+		}
+		record.Size = validated.info.Size()
+		record.Status = StatusAvailable
+		return record, validated.absolutePath, nil
+	case StorageManaged:
+		fileRecord, file, err := s.openManaged(ctx, sessionID, record)
+		if err != nil {
+			return record, "", err
+		}
+		_ = file.Close()
+		return fileRecord, s.managedAbsolutePath(fileRecord), nil
+	default:
+		return record, "", fmt.Errorf("unsupported artifact storage kind %q", record.StorageKind)
 	}
-	record.Size = validated.info.Size()
-	record.Status = StatusAvailable
-	return record, validated.absolutePath, nil
 }
 
 // Open returns a read-only file descriptor constrained by os.Root. Unlike a
@@ -266,7 +390,16 @@ func (s *Service) Open(ctx context.Context, sessionID, workspace, artifactID str
 	}
 	record, ok := shard.records[artifactID]
 	shard.mu.Unlock()
-	if !ok || sensitivePath(record.RelativePath) {
+	if !ok {
+		return Record{}, nil, os.ErrNotExist
+	}
+	if record.EffectiveStorageKind() == StorageManaged {
+		return s.openManaged(ctx, sessionID, record)
+	}
+	if record.EffectiveStorageKind() != StorageWorkspace {
+		return record, nil, fmt.Errorf("unsupported artifact storage kind %q", record.StorageKind)
+	}
+	if sensitivePath(record.RelativePath) {
 		return Record{}, nil, os.ErrNotExist
 	}
 	validated, err := validateWorkspaceFile(workspace, record.RelativePath)

@@ -1050,6 +1050,18 @@
   color: var(--jcode-color-foreground);
   line-height: 1.35;
 }
+.jcode-approval-card__summary {
+  color: var(--jcode-color-foreground);
+  font-family: var(--jcode-font-mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+.jcode-approval-card__cost {
+  max-width: 32rem;
+  color: var(--jcode-color-warning-fg);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
 .jcode-approval-card__target {
   display: inline-block;
   max-width: min(100%, 22rem);
@@ -1124,6 +1136,12 @@
   margin-top: 0.85rem;
   padding-top: 0.75rem;
   border-top: 1px solid color-mix(in srgb, var(--jcode-color-border) 80%, transparent);
+}
+.jcode-approval-card__actions--billable .jcode-btn-deny {
+  margin-left: 0;
+}
+.jcode-approval-card__actions--billable .jcode-btn-allow {
+  margin-left: auto;
 }
 .jcode-approval-resolved {
   display: flex;
@@ -1530,7 +1548,6 @@
     margin-top: 0.15rem;
   }
 }
-
 
 /* ─── Reasoning disclosure ─── */
 .jcode-reasoning {

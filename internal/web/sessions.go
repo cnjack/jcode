@@ -8,6 +8,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/tools"
 )
@@ -243,6 +244,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 			s.deleteEngine(id)
 		} else {
 			// Not running (guarded above): safe to close the recorder now.
+			eng.toolOverrideMu.Lock()
 			eng.emu.Lock()
 			if eng.recorder != nil && eng.recorder.UUID() == id {
 				eng.recorder.Close()
@@ -250,6 +252,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 				eng.history = nil
 			}
 			eng.emu.Unlock()
+			eng.toolOverrideMu.Unlock()
 		}
 	}
 
@@ -411,6 +414,36 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resume mode is task-owned authorization state. Load it before asking the
+	// factory to build an agent so this task can never inherit the foreground
+	// task's Full access mode (or Server.activeMode) during a restart. As in the
+	// TUI and ACP, a saved Plan resumes as Approval: the plan remains in session
+	// history, while the agent comes back with the normal tool set and per-call
+	// approval instead of being stranded in a read-only planning agent.
+	var entries []session.Entry
+	var restoredState *session.SessionState
+	restoredMode := mode.Approval
+	buildMode := s.activeMode()
+	if req.SessionID != "" {
+		var loadErr error
+		entries, loadErr = session.LoadSession(req.SessionID)
+		if loadErr != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
+		restoredState = session.ReconstructState(entries)
+		savedMode, modeErr := session.LoadSessionModeStrict(req.SessionID)
+		if modeErr != nil {
+			// Conversational replay may salvage a damaged transcript, but mode is
+			// authorization state. A line that cannot be parsed might be a newer
+			// revoke, so restore the safe default and keep details in the local log.
+			config.Logger().Printf("[web] resume: mode journal unavailable for %s; restoring approval: %v", req.SessionID, modeErr)
+		} else {
+			restoredMode = restoredWebSessionMode(savedMode)
+		}
+		buildMode = restoredMode.String()
+	}
+
 	// Each new/resumed task gets its OWN engine (env, agent, recorder, handler),
 	// so it runs independently of every other task.
 	pwd := req.Pwd
@@ -419,25 +452,15 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 			pwd = a.pwd
 		}
 	}
-	eng, err := s.buildLocalEngine(req.SessionID, pwd, s.activeMode())
+	eng, err := s.buildLocalEngine(req.SessionID, pwd, buildMode)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	// Resume: hydrate the fresh engine with the persisted conversation/todos/goal.
-	var entries []session.Entry
 	if req.SessionID != "" {
-		var lerr error
-		entries, lerr = session.LoadSession(req.SessionID)
-		if lerr != nil {
-			// Stale/nonexistent session id: don't silently register a phantom empty
-			// engine under it — tear the just-built engine down and report not-found.
-			s.deleteEngine(eng.taskID)
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
-			return
-		}
-		st := session.ReconstructState(entries)
+		st := restoredState
 		if eng.rebuildForRole != nil {
 			eng.rebuildMu.Lock()
 			provider, model, _ := eng.modelSnapshot()
@@ -455,6 +478,9 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		eng.emu.Lock()
 		eng.history = st.History
 		eng.emu.Unlock()
+		if eng.approvalState != nil {
+			eng.approvalState.SetSessionMode(restoredMode)
+		}
 		if eng.todoStore != nil {
 			items := make([]tools.TodoItem, len(st.Todos))
 			for i, t := range st.Todos {
@@ -488,4 +514,12 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	// Resume: one-shot reply (entries + goal + todos + status) so the client
 	// repaints without follow-up round trips.
 	s.writeResumeReply(w, eng, entries)
+}
+
+func restoredWebSessionMode(saved string) mode.SessionMode {
+	restored := mode.Parse(saved)
+	if restored == mode.Plan {
+		return mode.Approval
+	}
+	return restored
 }

@@ -9,7 +9,15 @@
  */
 
 import type { ComponentType } from 'react'
-import type { ToolCall, ToolDisplayInfo, ToolStatus } from '../types/index.js'
+import type {
+  ArtifactRef,
+  ToolCall,
+  ToolDisplayInfo,
+  ToolOutcome,
+  ToolPhase,
+  ToolStatus,
+  ToolSurface,
+} from '../types/index.js'
 
 export type { ToolStatus }
 
@@ -26,6 +34,15 @@ export interface ToolRendererProps {
   /** Error string if the tool failed. */
   error?: string
   status: ToolStatus
+  surface?: ToolSurface
+  phase?: ToolPhase
+  outcome?: ToolOutcome
+  errorCode?: string
+  operationID?: string
+  provider?: string
+  model?: string
+  artifacts?: ArtifactRef[]
+  startedAt?: number
   /** Pre-extracted display metadata (title/subtitle/icon). May be absent. */
   displayInfo?: ToolDisplayInfo
   /** Nested subagent calls — renderers decide whether to recurse. */
@@ -36,6 +53,33 @@ export interface ToolRendererProps {
   meta?: ToolCall['meta']
   /** Dual-channel presentation (execute). */
   presentation?: ToolCall['presentation']
+}
+
+/** Map a ToolCall to the renderer contract. Shared by the collapsible shell
+ * and standalone timeline surfaces so lifecycle fields cannot drift. */
+export function toolCallToRendererProps(tool: ToolCall): ToolRendererProps {
+  return {
+    name: tool.name,
+    args: tool.args,
+    output: tool.output,
+    displayOutput: tool.displayOutput,
+    error: tool.error,
+    status: tool.status,
+    surface: tool.surface,
+    phase: tool.phase,
+    outcome: tool.outcome,
+    errorCode: tool.errorCode,
+    operationID: tool.operationID,
+    provider: tool.provider,
+    model: tool.model,
+    artifacts: tool.artifacts,
+    startedAt: tool.startedAt,
+    displayInfo: tool.displayInfo,
+    children: tool.children,
+    streams: tool.streams,
+    meta: tool.meta,
+    presentation: tool.presentation,
+  }
 }
 
 /** A tool renderer is just a React component. */

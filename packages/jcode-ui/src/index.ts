@@ -73,6 +73,12 @@ export type {
 } from './components/TaskList.js'
 export { Artifact } from './components/Artifact.js'
 export type { ArtifactProps } from './components/Artifact.js'
+export { GeneratedImageCard } from './components/GeneratedImageCard.js'
+export type {
+  GeneratedImageCardProps,
+  GeneratedImageCardStrings,
+  GeneratedImageState,
+} from './components/GeneratedImageCard.js'
 
 // Markdown pipeline (same renderer Message uses).
 export { renderMarkdown } from './lib/markdown.js'
@@ -95,6 +101,10 @@ export type {
   ExploringGroup,
   TurnChangesSummary,
   TurnFileChange,
+  ArtifactRef,
+  ToolPhase,
+  ToolOutcome,
+  ToolSurface,
 } from 'jcode-ui-core'
 export {
   isMessageItem,

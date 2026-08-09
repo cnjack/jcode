@@ -13,12 +13,24 @@
  */
 
 import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit'
-import type { ThreadItem, Message, ToolCall, Approval, TokenSnapshot, Goal, TodoItem, QueuedMessage, AskUserQuestion } from 'jcode-ui-core'
+import type {
+  ArtifactRef,
+  ThreadItem,
+  Message,
+  ToolCall,
+  Approval,
+  TokenSnapshot,
+  Goal,
+  TodoItem,
+  QueuedMessage,
+  AskUserQuestion,
+} from 'jcode-ui-core'
 import { api } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
 import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
 import { i18n, setLocale, SUPPORTED_LOCALES } from '../i18n'
 import { hydrateTheme } from '../lib/useTheme'
+import { mergeToolLifecycle, normalizeWireLifecycle, settleIncompleteImageTool } from './toolLifecycle'
 
 // ─── seq counter (stable DOM identity across streaming updates) ───
 let _seq = 0
@@ -39,6 +51,427 @@ function isNewerTs(candidate: string, current: string | undefined): boolean {
   const cur = Date.parse(current)
   if (Number.isNaN(cur)) return true
   return ct > cur
+}
+
+interface ReplayGenerationOperation {
+  operationID: string
+  toolCallID?: string
+  state: NonNullable<SessionEntry['operation_state']>
+  artifactIDs: string[]
+  errorCode?: string
+  provider?: string
+  model?: string
+}
+
+/** Rebuild the visible transcript from the durable JSONL contract. Operation
+ * entries win over generic tool_result strings; a same-operation Artifact is
+ * the next strongest proof of success. */
+export function replayTimeline(entries: SessionEntry[], sessionRunning: boolean): ThreadItem[] {
+  const artifactsByID = replayArtifacts(entries)
+  const occurrenceIndex = replayOperationsByOccurrence(entries)
+  const timeline: ThreadItem[] = []
+  const pendingToolCalls = new Map<string, ToolCall>()
+  const unresolvedToolCalls = new Set<ToolCall>()
+  const toolsByOperationID = new Map<string, ToolCall>()
+
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+    const e = entries[entryIndex]
+    if (e.type === 'session_start' && e.agent) {
+      timeline.push({
+        kind: 'message',
+        seq: nextSeq(),
+        data: {
+          id: genId('agent'),
+          role: 'system',
+          content: i18n.t('chat.agent.changedTo', { name: e.agent }),
+          level: 'notice',
+          timestamp: ts(e.timestamp),
+        },
+      })
+    } else if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
+      timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
+    } else if (e.type === 'assistant' && e.content) {
+      timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
+    } else if (e.type === 'agent_change') {
+      timeline.push({
+        kind: 'message',
+        seq: nextSeq(),
+        data: {
+          id: genId('agent'),
+          role: 'system',
+          content: e.agent
+            ? i18n.t('chat.agent.changedTo', { name: e.agent })
+            : i18n.t('chat.agent.changedToDefault'),
+          level: 'notice',
+          timestamp: ts(e.timestamp),
+        },
+      })
+    } else if (e.type === 'tool_call' && e.name) {
+      const operation = occurrenceIndex.operations.get(entryIndex)
+      const tc: ToolCall = {
+        id: genId('tc'),
+        toolCallID: e.tool_call_id,
+        operationID: operation?.operationID || occurrenceIndex.operationIDs.get(entryIndex),
+        name: e.name,
+        args: e.args || '',
+        status: 'running',
+        surface: e.name === 'generate_image' ? 'standalone' : undefined,
+        phase: e.name === 'generate_image' ? 'queued' : undefined,
+        timestamp: ts(e.timestamp),
+        displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
+        batchId: e.batch_id,
+        batchIndex: e.batch_index,
+        batchSize: e.batch_size,
+        startedAt: e.started_at,
+      }
+      if (e.name === 'generate_image') reconcileReplayImage(tc, operation, artifactsByID)
+      timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
+      if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
+      unresolvedToolCalls.add(tc)
+      if (tc.operationID) toolsByOperationID.set(tc.operationID, tc)
+    } else if (e.type === 'tool_result') {
+      const tc = findReplayTool(e, pendingToolCalls, toolsByOperationID, timeline)
+      if (!tc) continue
+      if (e.operation_id && !toolsByOperationID.has(e.operation_id) && (!tc.operationID || tc.operationID === e.operation_id)) {
+        tc.operationID = e.operation_id
+        toolsByOperationID.set(e.operation_id, tc)
+      }
+      applyReplayToolResult(tc, e, artifactsByID)
+      unresolvedToolCalls.delete(tc)
+      if (e.tool_call_id && pendingToolCalls.get(e.tool_call_id) === tc) {
+        pendingToolCalls.delete(e.tool_call_id)
+      }
+    }
+  }
+
+  for (const tc of unresolvedToolCalls) {
+    if (tc.name === 'generate_image') {
+      if (!sessionRunning) settleIncompleteImageTool(tc)
+    } else {
+      tc.status = 'done'
+    }
+  }
+  return timeline
+}
+
+function replayArtifacts(entries: SessionEntry[]): Map<string, ArtifactRef> {
+  const records = new Map<string, { revision: number; ref: ArtifactRef }>()
+  for (const e of entries) {
+    if (e.type !== 'artifact' || !e.artifact_id) continue
+    const revision = e.artifact_revision ?? 0
+    if ((records.get(e.artifact_id)?.revision ?? -1) > revision) continue
+    records.set(e.artifact_id, {
+      revision,
+      ref: {
+        id: e.artifact_id,
+        storage: e.artifact_storage_kind === 'managed' ? 'managed' : 'workspace',
+        key: e.artifact_key || e.artifact_path || '',
+        title: e.artifact_title || 'Generated image',
+        kind: e.artifact_kind || 'image',
+        media_type: e.artifact_media_type || 'application/octet-stream',
+        size: e.artifact_size ?? 0,
+        width: e.artifact_width || undefined,
+        height: e.artifact_height || undefined,
+        provider: e.artifact_provider_id || undefined,
+        model: e.artifact_model_id || undefined,
+        operation_id: e.operation_id || undefined,
+        tool_call_id: e.tool_call_id || undefined,
+        shareable: e.artifact_shareable || undefined,
+      },
+    })
+  }
+  return new Map([...records].map(([id, record]) => [id, record.ref]))
+}
+
+interface ReplayToolOccurrence {
+  entryIndex: number
+  name: string
+  toolCallID: string
+  operationID?: string
+  operation?: ReplayGenerationOperation
+}
+
+interface ReplayOccurrenceIndex {
+  operations: Map<number, ReplayGenerationOperation>
+  operationIDs: Map<number, string>
+}
+
+/** Bind durable generation evidence to one concrete tool-call occurrence.
+ *
+ * Tool-call IDs come from the model and are not guaranteed to be unique across
+ * turns. A session-wide `tool_call_id -> operation` map therefore lets a later
+ * turn rewrite an earlier card. The JSONL append order gives us a stronger
+ * contract: a new tool_call opens an occurrence, its matching tool_result (or
+ * another call reusing the ID) closes that interval, and the first operation
+ * observed inside the interval permanently binds its opaque operation ID to
+ * that occurrence. Later journal transitions may then find the same host by
+ * operation ID even after its tool_result was appended. */
+function replayOperationsByOccurrence(entries: SessionEntry[]): ReplayOccurrenceIndex {
+  const occurrences: ReplayToolOccurrence[] = []
+  const openByToolCall = new Map<string, ReplayToolOccurrence>()
+  const byOperationID = new Map<string, ReplayToolOccurrence>()
+
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+    const e = entries[entryIndex]
+    if (e.type === 'tool_call' && e.name === 'generate_image' && e.tool_call_id) {
+      const occurrence: ReplayToolOccurrence = {
+        entryIndex,
+        name: e.name,
+        toolCallID: e.tool_call_id,
+      }
+      occurrences.push(occurrence)
+      // Reuse without a result still starts a new occurrence. Do not let later
+      // evidence leak back into the abandoned interval.
+      openByToolCall.set(e.tool_call_id, occurrence)
+      continue
+    }
+    if (e.type === 'tool_result' && e.tool_call_id) {
+      const open = openByToolCall.get(e.tool_call_id)
+      const matchesOpenName = !!open && (!e.name || e.name === open.name)
+      let operationHost = e.operation_id ? byOperationID.get(e.operation_id) : undefined
+      if (open && matchesOpenName && e.operation_id && !operationHost && !open.operationID) {
+        // A denied/pre-dispatch result can be the first durable record carrying
+        // an operation identity. Bind it before closing the interval so a
+        // duplicate late result cannot fall through to a later reused call ID.
+        open.operationID = e.operation_id
+        byOperationID.set(e.operation_id, open)
+        operationHost = open
+      }
+      if (
+        open &&
+        matchesOpenName &&
+        (!operationHost || operationHost === open) &&
+        (!e.operation_id || !open.operationID || e.operation_id === open.operationID)
+      ) {
+        openByToolCall.delete(e.tool_call_id)
+      }
+      continue
+    }
+    if (e.type !== 'generation_operation' || !e.operation_id || !e.tool_call_id || !e.operation_state) continue
+
+    let occurrence = byOperationID.get(e.operation_id)
+    if (!occurrence) {
+      occurrence = openByToolCall.get(e.tool_call_id)
+      // The first operation is the immutable host identity for this occurrence.
+      // A second operation ID inside the same interval is corrupt/ambiguous and
+      // must not replace it.
+      if (!occurrence || (occurrence.operationID && occurrence.operationID !== e.operation_id)) continue
+      occurrence.operationID = e.operation_id
+      byOperationID.set(e.operation_id, occurrence)
+    }
+    if (occurrence.toolCallID !== e.tool_call_id || occurrence.operationID !== e.operation_id) continue
+
+    const candidate: ReplayGenerationOperation = {
+      operationID: e.operation_id,
+      toolCallID: e.tool_call_id,
+      state: e.operation_state,
+      artifactIDs: e.artifact_ids ?? [],
+      errorCode: e.error_code,
+      provider: e.operation_capability_key?.provider_profile_id,
+      model: e.operation_capability_key?.model_id,
+    }
+    const current = occurrence.operation
+    if (!current || operationRank(candidate.state) >= operationRank(current.state)) {
+      occurrence.operation = candidate
+    }
+  }
+
+  const byEntryIndex = new Map<number, ReplayGenerationOperation>()
+  const operationIDs = new Map<number, string>()
+  for (const occurrence of occurrences) {
+    if (occurrence.operation) byEntryIndex.set(occurrence.entryIndex, occurrence.operation)
+    if (occurrence.operationID) operationIDs.set(occurrence.entryIndex, occurrence.operationID)
+  }
+  return { operations: byEntryIndex, operationIDs }
+}
+
+function operationRank(state: ReplayGenerationOperation['state']): number {
+  if (state === 'succeeded' || state === 'failed' || state === 'uncertain') return 4
+  if (state === 'saving') return 3
+  if (state === 'accepted') return 2
+  return 1
+}
+
+function reconcileReplayImage(
+  tool: ToolCall,
+  operation: ReplayGenerationOperation | undefined,
+  artifactsByID: Map<string, ArtifactRef>,
+): void {
+  if (!operation) return
+  const artifacts = [...artifactsByID.values()].filter((artifact) =>
+    operation.artifactIDs.includes(artifact.id) || artifact.operation_id === operation.operationID,
+  )
+  if (operation.state === 'succeeded' || operation.state === 'failed' || operation.state === 'uncertain') {
+    mergeToolLifecycle(tool, {
+      operationID: operation.operationID,
+      phase: 'terminal',
+      outcome: operation.state,
+      errorCode: operation.errorCode,
+      provider: operation.provider,
+      model: operation.model,
+      artifacts,
+    })
+    return
+  }
+  if (artifacts.length > 0) {
+    mergeToolLifecycle(tool, {
+      operationID: operation.operationID,
+      phase: 'terminal',
+      outcome: 'succeeded',
+      provider: operation.provider || artifacts[0]?.provider,
+      model: operation.model || artifacts[0]?.model,
+      artifacts,
+    })
+    return
+  }
+  // Keep a non-terminal journal state non-terminal until the whole replay has
+  // been scanned. A later terminal tool_result outranks it; only an unmatched
+  // historical call is settled to uncertain in the final pending pass.
+  mergeToolLifecycle(tool, {
+    operationID: operation.operationID,
+    phase: operation.state === 'saving' ? 'saving' : 'generating',
+    errorCode: operation.errorCode,
+    provider: operation.provider,
+    model: operation.model,
+  })
+}
+
+function findReplayTool(
+  e: SessionEntry,
+  pending: Map<string, ToolCall>,
+  byOperationID: Map<string, ToolCall>,
+  timeline: ThreadItem[],
+): ToolCall | undefined {
+  if (e.operation_id) {
+    const exact = byOperationID.get(e.operation_id)
+    if (exact && (!e.tool_call_id || exact.toolCallID === e.tool_call_id)) return exact
+    if (e.tool_call_id) {
+      const open = pending.get(e.tool_call_id)
+      if (open && (!open.operationID || open.operationID === e.operation_id)) return open
+      return undefined
+    }
+  }
+  if (e.tool_call_id) return pending.get(e.tool_call_id)
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const item = timeline[i]
+    if (item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') return item.data
+  }
+  return undefined
+}
+
+function applyReplayToolResult(tool: ToolCall, e: SessionEntry, artifactsByID: Map<string, ArtifactRef>): void {
+  tool.output = e.output || ''
+  tool.error = e.error || ''
+  tool.denied = e.denied || undefined
+  if (e.duration_ms !== undefined && tool.meta?.duration_ms === undefined) {
+    tool.meta = { ...(tool.meta || {}), duration_ms: e.duration_ms }
+  }
+  if (tool.name !== 'generate_image') {
+    tool.status = e.error ? 'error' : 'done'
+    return
+  }
+  // A terminal journal state already won during the first replay pass.
+  if (tool.phase === 'terminal') return
+  const artifacts = (e.artifact_ids ?? []).map((id) => artifactsByID.get(id)).filter((artifact): artifact is ArtifactRef => !!artifact)
+  const wire = normalizeWireLifecycle(e.outcome as Parameters<typeof normalizeWireLifecycle>[0] | undefined)
+  const outcome = wire.outcome ?? (e.denied ? 'cancelled' : artifacts.length > 0 ? 'succeeded' : e.error ? 'failed' : 'uncertain')
+  mergeToolLifecycle(tool, {
+    operationID: e.operation_id,
+    phase: 'terminal',
+    outcome,
+    errorCode: e.error_code || (e.error ? 'legacy_tool_error' : undefined),
+    provider: e.provider,
+    model: e.model,
+    artifacts,
+  })
+}
+
+function lifecycleHostIndex(
+  timeline: readonly ThreadItem[],
+  toolCallID: string,
+  operationID?: string,
+  name?: string,
+): number {
+  // Once an operation ID exists it is the strongest host identity, including
+  // for late/duplicate events that arrive after the occurrence is terminal.
+  if (operationID) {
+    for (let i = timeline.length - 1; i >= 0; i--) {
+      const item = timeline[i]
+      if (
+        item.kind === 'tool' &&
+        item.data.toolCallID === toolCallID &&
+        item.data.operationID === operationID &&
+        (!name || item.data.name === name)
+      ) return i
+    }
+  }
+
+  // An operation's first lifecycle event may bind only the latest live,
+  // unbound occurrence. A terminal historical card that merely reused the
+  // model-supplied call ID is never a host for a new operation.
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const item = timeline[i]
+    if (
+      item.kind === 'tool' &&
+      item.data.toolCallID === toolCallID &&
+      (!name || item.data.name === name) &&
+      item.data.status === 'running' &&
+      item.data.phase !== 'terminal' &&
+      (!operationID || !item.data.operationID || item.data.operationID === operationID)
+    ) return i
+  }
+  return -1
+}
+
+/** True only when a typed lifecycle event has a concrete occurrence to
+ * update. Used by the WS bridge to distinguish a dropped initial tool_call
+ * frame from a duplicate event for an older operation. */
+export function hasToolLifecycleHost(
+  timeline: readonly ThreadItem[],
+  toolCallID: string,
+  operationID?: string,
+  name?: string,
+): boolean {
+  return lifecycleHostIndex(timeline, toolCallID, operationID, name) >= 0
+}
+
+interface ResolvedToolFields {
+  name: string
+  output?: string
+  displayOutput?: string
+  error?: string
+  denied?: boolean
+  durationMs?: number
+  streams?: ToolCall['streams']
+  meta?: ToolCall['meta']
+  presentation?: ToolCall['presentation']
+}
+
+function applyResolvedToolFields(tool: ToolCall, fields: ResolvedToolFields): void {
+  tool.output = fields.output
+  tool.displayOutput = fields.displayOutput
+  tool.error = fields.error
+  // Denied (user rejection) is a distinct state from error; a result always
+  // clears the awaiting-approval highlight.
+  tool.denied = fields.denied || undefined
+  tool.awaitingApproval = undefined
+  if (fields.streams) tool.streams = fields.streams
+  if (fields.meta) tool.meta = fields.meta
+  // Merge the event-level duration into meta when meta lacks one (falling back
+  // to the local startedAt delta) so finished rows show an accurate duration.
+  const duration =
+    tool.meta?.duration_ms ??
+    fields.durationMs ??
+    (tool.startedAt ? Date.now() - tool.startedAt : undefined)
+  if (duration !== undefined) tool.meta = { ...(tool.meta || {}), duration_ms: duration }
+  if (fields.presentation) {
+    tool.presentation = fields.presentation
+    tool.displayInfo = {
+      ...(tool.displayInfo || { title: fields.name }),
+      kind: fields.presentation.kind || tool.displayInfo?.kind,
+      collapsible: fields.presentation.collapsible ?? tool.displayInfo?.collapsible,
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -140,6 +573,9 @@ const chatSlice = createSlice({
           batchIndex?: number
           batchSize?: number
           startedAt?: number
+          surface?: ToolCall['surface']
+          phase?: ToolCall['phase']
+          operationID?: string
         }
       },
     ) {
@@ -160,8 +596,34 @@ const chatSlice = createSlice({
         batchSize: a.payload.batchSize,
         // Fallback to the local clock so the live elapsed badge always works.
         startedAt: a.payload.startedAt ?? Date.now(),
+        surface: a.payload.surface ?? (a.payload.name === 'generate_image' ? 'standalone' : undefined),
+        phase: a.payload.phase ?? (a.payload.name === 'generate_image' ? 'queued' : undefined),
+        operationID: a.payload.operationID,
       }
       s.timeline.push({ kind: 'tool', data: tc, seq: nextSeq() })
+    },
+    progressToolCall(
+      s,
+      a: { payload: { name?: string; toolCallID: string; operationID?: string; phase?: ToolCall['phase']; outcome?: ToolCall['outcome']; errorCode?: string; provider?: string; model?: string; artifacts?: ArtifactRef[] } },
+    ) {
+      const index = lifecycleHostIndex(
+        s.timeline,
+        a.payload.toolCallID,
+        a.payload.operationID,
+        a.payload.name,
+      )
+      if (index < 0) return
+      const item = s.timeline[index]
+      if (item.kind !== 'tool') return
+      mergeToolLifecycle(item.data, {
+        operationID: a.payload.operationID,
+        phase: a.payload.phase,
+        outcome: a.payload.outcome,
+        errorCode: a.payload.errorCode,
+        provider: a.payload.provider,
+        model: a.payload.model,
+        artifacts: a.payload.artifacts,
+      })
     },
     resolveToolCall(
       s,
@@ -177,10 +639,59 @@ const chatSlice = createSlice({
           streams?: ToolCall['streams']
           meta?: ToolCall['meta']
           presentation?: ToolCall['presentation']
+          operationID?: string
+          phase?: ToolCall['phase']
+          outcome?: ToolCall['outcome']
+          errorCode?: string
+          provider?: string
+          model?: string
+          artifacts?: ArtifactRef[]
         }
       },
     ) {
-      const { toolCallID, name, output, displayOutput, error, denied, durationMs, streams, meta, presentation } = a.payload
+      const {
+        toolCallID,
+        name,
+        output,
+        displayOutput,
+        error,
+        denied,
+        durationMs,
+        streams,
+        meta,
+        presentation,
+        operationID,
+        phase,
+        outcome,
+        errorCode,
+        provider,
+        model,
+        artifacts,
+      } = a.payload
+      const typedLifecycle = name === 'generate_image' || !!operationID || !!outcome || !!artifacts?.length
+      if (toolCallID && typedLifecycle) {
+        const index = lifecycleHostIndex(s.timeline, toolCallID, operationID, name)
+        if (index < 0) return
+        const item = s.timeline[index]
+        if (item.kind !== 'tool') return
+        const resolvedOutcome = outcome ?? (
+          denied ? 'cancelled' : artifacts?.length ? 'succeeded' : error ? 'failed' : 'uncertain'
+        )
+        const merged = mergeToolLifecycle(item.data, {
+          operationID,
+          phase: phase ?? 'terminal',
+          outcome: resolvedOutcome,
+          errorCode,
+          provider,
+          model,
+          artifacts,
+        })
+        if (merged === 'operation_mismatch' || merged === 'stale') return
+        applyResolvedToolFields(item.data, {
+          name, output, displayOutput, error, denied, durationMs, streams, meta, presentation,
+        })
+        return
+      }
       // Match by toolCallID (precise) or by the last running tool with this name.
       for (let i = s.timeline.length - 1; i >= 0; i--) {
         const item = s.timeline[i]
@@ -188,34 +699,9 @@ const chatSlice = createSlice({
         const match = toolCallID ? item.data.toolCallID === toolCallID : item.data.name === name && item.data.status === 'running'
         if (match) {
           item.data.status = error ? 'error' : (meta?.exit_code !== undefined && meta.exit_code !== 0 ? 'error' : 'done')
-          item.data.output = output
-          item.data.displayOutput = displayOutput
-          item.data.error = error
-          // Denied (user rejection) is a distinct state from error; a result
-          // always clears the awaiting-approval highlight.
-          item.data.denied = denied || undefined
-          item.data.awaitingApproval = undefined
-          if (streams) item.data.streams = streams
-          if (meta) item.data.meta = meta
-          // Merge the event-level duration into meta when meta lacks one
-          // (falling back to the local startedAt delta) so finished rows can
-          // always show an accurate duration badge.
-          const duration =
-            item.data.meta?.duration_ms ??
-            durationMs ??
-            (item.data.startedAt ? Date.now() - item.data.startedAt : undefined)
-          if (duration !== undefined) {
-            item.data.meta = { ...(item.data.meta || {}), duration_ms: duration }
-          }
-          if (presentation) {
-            item.data.presentation = presentation
-            // Merge presentation collapsible/kind into displayInfo for grouping.
-            item.data.displayInfo = {
-              ...(item.data.displayInfo || { title: name }),
-              kind: presentation.kind || item.data.displayInfo?.kind,
-              collapsible: presentation.collapsible ?? item.data.displayInfo?.collapsible,
-            }
-          }
+          applyResolvedToolFields(item.data, {
+            name, output, displayOutput, error, denied, durationMs, streams, meta, presentation,
+          })
           break
         }
       }
@@ -263,11 +749,12 @@ const chatSlice = createSlice({
           break
         }
       }
-      // Mark any lingering running tools as done (and drop any stale
-      // awaiting-approval highlight — the run is over).
+      // Generic tools keep their historical done fallback. Image operations
+      // require a typed terminal outcome and never become implicit successes.
       for (const item of s.timeline) {
         if (item.kind === 'tool' && item.data.status === 'running') {
-          item.data.status = 'done'
+          if (item.data.name === 'generate_image') settleIncompleteImageTool(item.data)
+          else item.data.status = 'done'
         }
         if (item.kind === 'tool' && item.data.awaitingApproval) {
           item.data.awaitingApproval = undefined
@@ -389,11 +876,12 @@ const chatSlice = createSlice({
       const item = s.timeline.find((i) => i.kind === 'approval' && i.data.id === a.payload.id)
       if (item && item.kind === 'approval') item.data.resolving = a.payload.resolving
     },
-    resolveApprovalItem(s, a: { payload: { id: string; approved: boolean } }) {
+    resolveApprovalItem(s, a: { payload: { id: string; approved: boolean; optionId?: string } }) {
       const item = s.timeline.find((i) => i.kind === 'approval' && i.data.id === a.payload.id)
       if (item && item.kind === 'approval') {
         item.data.resolved = true
         item.data.approved = a.payload.approved
+        item.data.resolvedOptionId = a.payload.optionId
         item.data.resolving = false
         // Clear the awaiting-approval highlight on the gated tool row (the
         // denied strikethrough, if any, arrives with the tool_result).
@@ -535,6 +1023,8 @@ interface ModelState {
   modelName: string
   // config.small_model as "provider/model"; '' = unset (follow the main model).
   smallModel: string
+  // Global image-generation role as "provider/model"; independent from chat.
+  imageModel: string
   mode: AgentMode
   providers: ProviderInfo[]
   favoriteModels: string[]
@@ -552,6 +1042,7 @@ const initialModel: ModelState = {
   providerName: '',
   modelName: '',
   smallModel: '',
+  imageModel: '',
   mode: 'approval',
   providers: [],
   favoriteModels: [],
@@ -575,7 +1066,7 @@ function syncImageSupport(s: ModelState) {
     .find((p) => p.id === s.providerName)
     ?.models.find((m) => m.id === s.modelName)
   if (cur) {
-    s.imageSupport = !!cur.image_support
+    s.imageSupport = cur.input_modalities?.includes('image') ?? !!cur.image_support
   } else if (s.providers.length > 0) {
     // Providers are loaded but the current model isn't among them (e.g. set
     // via automation to an unlisted model) — don't carry the previous model's
@@ -598,6 +1089,9 @@ const modelSlice = createSlice({
     },
     setSmallModel(s, a: { payload: string }) {
       s.smallModel = a.payload
+    },
+    setImageModel(s, a: { payload: string }) {
+      s.imageModel = a.payload
     },
     setMode(s, a: { payload: AgentMode }) {
       s.mode = a.payload
@@ -896,6 +1390,31 @@ export const resolveApproval = createAsyncThunk(
   },
 )
 
+export const resolveApprovalOption = createAsyncThunk(
+  'approval/resolveOption',
+  async (payload: { id: string; optionId: string }, { dispatch, getState }) => {
+    dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: true }))
+    const state = getState() as RootState
+    const item = state.chat.timeline.find((entry) => entry.kind === 'approval' && entry.data.id === payload.id)
+    const approval = item?.kind === 'approval' ? item.data as Approval & { task_id?: string } : undefined
+    const option = approval?.options?.find((candidate) => candidate.id === payload.optionId)
+    if (!approval || !option) {
+      dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: false }))
+      return
+    }
+    try {
+      await api.approvalOption(payload.id, payload.optionId, approval.task_id)
+      dispatch(chatActions.resolveApprovalItem({
+        id: payload.id,
+        approved: option.kind !== 'deny',
+        optionId: payload.optionId,
+      }))
+    } catch {
+      dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: false }))
+    }
+  },
+)
+
 export const submitAskUser = createAsyncThunk(
   'askUser/submit',
   async (payload: { id: string; answers: import('jcode-ui-core').AskUserAnswer[] }, { dispatch, getState }) => {
@@ -968,9 +1487,14 @@ export const loadModels = createAsyncThunk('model/loadModels', async (_, { dispa
   dispatch(modelActions.setProviders(data.providers || []))
   dispatch(modelActions.setProvider(data.current.provider))
   dispatch(modelActions.setModel(data.current.model))
+  dispatch(modelActions.setImageModel(
+    data.current_image?.provider && data.current_image?.model
+      ? `${data.current_image.provider}/${data.current_image.model}`
+      : '',
+  ))
   const provider = data.providers.find((p) => p.id === data.current.provider)
   const model = provider?.models.find((m) => m.id === data.current.model)
-  dispatch(modelActions.setImageSupport(!!model?.image_support))
+  dispatch(modelActions.setImageSupport(model?.input_modalities?.includes('image') ?? !!model?.image_support))
 })
 
 export const loadAgents = createAsyncThunk('model/loadAgents', async (_, { dispatch }) => {
@@ -1070,6 +1594,10 @@ export const reconcilePendingInteractions = createAsyncThunk('chat/reconcilePend
         tool_args: req.tool_args,
         tool_call_id: req.tool_call_id,
         is_external: req.is_external,
+        approvalClass: req.approval_class,
+        options: req.options,
+        billableSummary: req.billable_summary,
+        resolvedOptionId: req.resolved_option_id,
       }
       ;(approval as Approval & { task_id?: string }).task_id = req.task_id
       dispatch(chatActions.addApprovalRequest(approval))
@@ -1141,92 +1669,11 @@ export const loadSession = createAsyncThunk(
       // Clear the UI before rebuilding.
       dispatch(chatActions.clearChat())
 
-      // Rebuild the timeline from entries.
-      const timeline: ThreadItem[] = []
-      const pendingToolCalls = new Map<string, ToolCall>()
-      for (const e of entries || []) {
-        if (e.type === 'session_start' && e.agent) {
-          timeline.push({
-            kind: 'message',
-            seq: nextSeq(),
-            data: {
-              id: genId('agent'),
-              role: 'system',
-              content: i18n.t('chat.agent.changedTo', { name: e.agent }),
-              level: 'notice',
-              timestamp: ts(e.timestamp),
-            },
-          })
-        } else if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
-          timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
-        } else if (e.type === 'assistant' && e.content) {
-          timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
-        } else if (e.type === 'agent_change') {
-          timeline.push({
-            kind: 'message',
-            seq: nextSeq(),
-            data: {
-              id: genId('agent'),
-              role: 'system',
-              content: e.agent
-                ? i18n.t('chat.agent.changedTo', { name: e.agent })
-                : i18n.t('chat.agent.changedToDefault'),
-              level: 'notice',
-              timestamp: ts(e.timestamp),
-            },
-          })
-        } else if (e.type === 'tool_call' && e.name) {
-          const tc: ToolCall = {
-            id: genId('tc'),
-            toolCallID: e.tool_call_id,
-            name: e.name,
-            args: e.args || '',
-            status: 'running',
-            timestamp: ts(e.timestamp),
-            displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
-            batchId: e.batch_id,
-            batchIndex: e.batch_index,
-            batchSize: e.batch_size,
-            startedAt: e.started_at,
-          }
-          timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
-          if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
-        } else if (e.type === 'tool_result') {
-          let resolved = false
-          if (e.tool_call_id) {
-            const tc = pendingToolCalls.get(e.tool_call_id)
-            if (tc) {
-              tc.output = e.output || ''
-              tc.error = e.error || ''
-              tc.status = e.error ? 'error' : 'done'
-              tc.denied = e.denied || undefined
-              if (e.duration_ms !== undefined && tc.meta?.duration_ms === undefined) {
-                tc.meta = { ...(tc.meta || {}), duration_ms: e.duration_ms }
-              }
-              pendingToolCalls.delete(e.tool_call_id)
-              resolved = true
-            }
-          }
-          if (!resolved && e.name) {
-            for (let i = timeline.length - 1; i >= 0; i--) {
-              const item = timeline[i]
-              if (item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
-                item.data.output = e.output || ''
-                item.data.error = e.error || ''
-                item.data.status = e.error ? 'error' : 'done'
-                item.data.denied = e.denied || undefined
-                if (e.duration_ms !== undefined && item.data.meta?.duration_ms === undefined) {
-                  item.data.meta = { ...(item.data.meta || {}), duration_ms: e.duration_ms }
-                }
-                break
-              }
-            }
-          }
-        }
-      }
-      // Any tool calls that never got a result (interrupted session) → done.
-      for (const tc of pendingToolCalls.values()) tc.status = 'done'
-
+      const resumedId = resp.session_id || uuid
+      const replayRunning = oneShot
+        ? !!resp.running
+        : !!(getState() as RootState).session.tasks.find((task) => task.uuid === resumedId)?.running
+      const timeline = replayTimeline(entries || [], replayRunning)
       dispatch(chatActions.setTimeline(timeline))
 
       if (oneShot) {
@@ -1249,7 +1696,6 @@ export const loadSession = createAsyncThunk(
         // still be running), then fetch the rest individually — in parallel,
         // and none of it gates the timeline repaint.
         const state = getState() as RootState
-        const resumedId = resp.session_id || uuid
         const running = !!state.session.tasks.find((t) => t.uuid === resumedId)?.running
         dispatch(chatActions.setRunning(running))
         void dispatch(loadStatus())
@@ -1304,89 +1750,7 @@ export const replaySession = createAsyncThunk(
     }
 
     dispatch(chatActions.clearChat())
-    const timeline: ThreadItem[] = []
-    const pendingToolCalls = new Map<string, ToolCall>()
-    for (const e of entries) {
-      if (e.type === 'session_start' && e.agent) {
-        timeline.push({
-          kind: 'message',
-          seq: nextSeq(),
-          data: {
-            id: genId('agent'),
-            role: 'system',
-            content: i18n.t('chat.agent.changedTo', { name: e.agent }),
-            level: 'notice',
-            timestamp: ts(e.timestamp),
-          },
-        })
-      } else if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
-        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
-      } else if (e.type === 'assistant' && e.content) {
-        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
-      } else if (e.type === 'agent_change') {
-        timeline.push({
-          kind: 'message',
-          seq: nextSeq(),
-          data: {
-            id: genId('agent'),
-            role: 'system',
-            content: e.agent
-              ? i18n.t('chat.agent.changedTo', { name: e.agent })
-              : i18n.t('chat.agent.changedToDefault'),
-            level: 'notice',
-            timestamp: ts(e.timestamp),
-          },
-        })
-      } else if (e.type === 'tool_call' && e.name) {
-        const tc: ToolCall = {
-          id: genId('tc'),
-          toolCallID: e.tool_call_id,
-          name: e.name,
-          args: e.args || '',
-          status: 'running',
-          timestamp: ts(e.timestamp),
-          displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
-          batchId: e.batch_id,
-          batchIndex: e.batch_index,
-          batchSize: e.batch_size,
-          startedAt: e.started_at,
-        }
-        timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
-        if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
-      } else if (e.type === 'tool_result') {
-        let resolved = false
-        if (e.tool_call_id) {
-          const tc = pendingToolCalls.get(e.tool_call_id)
-          if (tc) {
-            tc.output = e.output || ''
-            tc.error = e.error || ''
-            tc.status = e.error ? 'error' : 'done'
-            tc.denied = e.denied || undefined
-            if (e.duration_ms !== undefined && tc.meta?.duration_ms === undefined) {
-              tc.meta = { ...(tc.meta || {}), duration_ms: e.duration_ms }
-            }
-            pendingToolCalls.delete(e.tool_call_id)
-            resolved = true
-          }
-        }
-        if (!resolved && e.name) {
-          for (let i = timeline.length - 1; i >= 0; i--) {
-            const item = timeline[i]
-            if (item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
-              item.data.output = e.output || ''
-              item.data.error = e.error || ''
-              item.data.status = e.error ? 'error' : 'done'
-              item.data.denied = e.denied || undefined
-              if (e.duration_ms !== undefined && item.data.meta?.duration_ms === undefined) {
-                item.data.meta = { ...(item.data.meta || {}), duration_ms: e.duration_ms }
-              }
-              break
-            }
-          }
-        }
-      }
-    }
-    for (const tc of pendingToolCalls.values()) tc.status = 'done'
+    const timeline = replayTimeline(entries, false)
     dispatch(chatActions.setTimeline(timeline))
     dispatch(chatActions.setRunning(false))
   },
