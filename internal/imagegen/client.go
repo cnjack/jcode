@@ -29,6 +29,25 @@ const (
 	maxPromptBytes       = 64 << 10
 )
 
+var (
+	xaiImageAspectRatios = []string{
+		"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2",
+		"19.5:9", "9:19.5", "20:9", "9:20", "auto",
+	}
+	xaiImageResolutions = []string{"1k", "2k"}
+)
+
+// XAIImageAspectRatios returns the supported xAI image geometry values without
+// exposing mutable package state to capability consumers.
+func XAIImageAspectRatios() []string {
+	return append([]string(nil), xaiImageAspectRatios...)
+}
+
+// XAIImageResolutions returns the supported xAI resolution values.
+func XAIImageResolutions() []string {
+	return append([]string(nil), xaiImageResolutions...)
+}
+
 // Protocol identifies the upstream image-generation wire protocol.
 type Protocol string
 
@@ -36,6 +55,10 @@ const (
 	// ProtocolOpenAIImages is the POST /images/generations JSON protocol used
 	// by OpenAI and compatible providers such as BigModel.
 	ProtocolOpenAIImages Protocol = "openai_images"
+	// ProtocolXAIImages is xAI's image-generation protocol. Although it shares
+	// the OpenAI Images endpoint shape, its native output controls are
+	// aspect_ratio and resolution rather than size.
+	ProtocolXAIImages Protocol = "xai_images"
 	// ProtocolTokenPlanMultimodal is the synchronous multimodal-generation
 	// protocol exposed by Alibaba Token Plan. It is deliberately distinct from
 	// both OpenAI Images and the general DashScope asynchronous task API.
@@ -77,6 +100,8 @@ type CredentialFunc func(context.Context) (token string, headers map[string]stri
 type Request struct {
 	Prompt         string
 	Size           string
+	AspectRatio    string
+	Resolution     string
 	Quality        string
 	Background     string
 	OutputFormat   string
@@ -106,8 +131,10 @@ type Generator interface {
 	Generate(context.Context, Request) (Result, error)
 }
 
-// Client implements the OpenAI-compatible image generation protocol.
+// Client implements the shared synchronous Images transport with a
+// protocol-specific request encoder.
 type Client struct {
+	protocol      Protocol
 	endpoint      *url.URL
 	apiKey        string
 	headers       map[string]string
@@ -126,6 +153,8 @@ func NewGenerator(cfg ClientConfig) (Generator, error) {
 	switch cfg.Protocol {
 	case ProtocolOpenAIImages:
 		return NewClient(cfg)
+	case ProtocolXAIImages:
+		return NewXAIImagesClient(cfg)
 	case ProtocolTokenPlanMultimodal:
 		return NewTokenPlanMultimodalClient(cfg)
 	default:
@@ -139,6 +168,20 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.Protocol != ProtocolOpenAIImages {
 		return nil, fmt.Errorf("unsupported image protocol %q", cfg.Protocol)
 	}
+	return newClient(cfg)
+}
+
+// NewXAIImagesClient constructs the xAI-native image adapter. Keeping this
+// protocol separate prevents OpenAI-only fields from crossing the managed xAI
+// boundary and makes the approved request match the dispatched payload.
+func NewXAIImagesClient(cfg ClientConfig) (*Client, error) {
+	if cfg.Protocol != ProtocolXAIImages {
+		return nil, fmt.Errorf("unsupported image protocol %q", cfg.Protocol)
+	}
+	return newClient(cfg)
+}
+
+func newClient(cfg ClientConfig) (*Client, error) {
 	if strings.TrimSpace(cfg.Model) == "" {
 		return nil, fmt.Errorf("image model is required")
 	}
@@ -167,7 +210,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		headers[name] = value
 	}
 	return &Client{
-		endpoint: endpoint, apiKey: cfg.APIKey, headers: headers, credential: cfg.Credential,
+		protocol: cfg.Protocol, endpoint: endpoint, apiKey: cfg.APIKey,
+		headers: headers, credential: cfg.Credential,
 		model: strings.TrimSpace(cfg.Model), httpClient: httpClient,
 		maxImageBytes: maxImageBytes, allowHTTP: cfg.AllowInsecureHTTP,
 		assetHosts: assetHosts,
@@ -183,6 +227,14 @@ type openAIRequest struct {
 	OutputFormat   string `json:"output_format,omitempty"`
 	ResponseFormat string `json:"response_format,omitempty"`
 	N              int    `json:"n,omitempty"`
+}
+
+type xAIRequest struct {
+	Model       string `json:"model"`
+	Prompt      string `json:"prompt"`
+	AspectRatio string `json:"aspect_ratio,omitempty"`
+	Resolution  string `json:"resolution,omitempty"`
+	N           int    `json:"n,omitempty"`
 }
 
 type openAIResponse struct {
@@ -205,12 +257,7 @@ func (c *Client) Generate(ctx context.Context, input Request) (Result, error) {
 	if input.Count != 0 && input.Count != 1 {
 		return Result{}, fmt.Errorf("P0 image generation supports exactly one image")
 	}
-	body, err := json.Marshal(openAIRequest{
-		Model: c.model, Prompt: prompt, Size: strings.TrimSpace(input.Size),
-		Quality: strings.TrimSpace(input.Quality), Background: strings.TrimSpace(input.Background),
-		OutputFormat: strings.TrimSpace(input.OutputFormat), ResponseFormat: strings.TrimSpace(input.ResponseFormat),
-		N: 1,
-	})
+	body, err := c.encodeRequest(prompt, input)
 	if err != nil {
 		return Result{}, fmt.Errorf("encode image request: %w", err)
 	}
@@ -284,6 +331,64 @@ func (c *Client) Generate(ctx context.Context, input Request) (Result, error) {
 		result.Images = append(result.Images, generated)
 	}
 	return result, nil
+}
+
+func (c *Client) encodeRequest(prompt string, input Request) ([]byte, error) {
+	switch c.protocol {
+	case ProtocolOpenAIImages:
+		if strings.TrimSpace(input.AspectRatio) != "" || strings.TrimSpace(input.Resolution) != "" {
+			return nil, fmt.Errorf("image request contains options unsupported by OpenAI Images")
+		}
+		return json.Marshal(openAIRequest{
+			Model: c.model, Prompt: prompt, Size: strings.TrimSpace(input.Size),
+			Quality: strings.TrimSpace(input.Quality), Background: strings.TrimSpace(input.Background),
+			OutputFormat: strings.TrimSpace(input.OutputFormat), ResponseFormat: strings.TrimSpace(input.ResponseFormat),
+			N: 1,
+		})
+	case ProtocolXAIImages:
+		if strings.TrimSpace(input.Size) != "" || strings.TrimSpace(input.Quality) != "" ||
+			strings.TrimSpace(input.Background) != "" || strings.TrimSpace(input.OutputFormat) != "" ||
+			strings.TrimSpace(input.ResponseFormat) != "" {
+			return nil, fmt.Errorf("image request contains options unsupported by xAI Images")
+		}
+		aspectRatio := strings.TrimSpace(input.AspectRatio)
+		if !validXAIAspectRatio(aspectRatio) {
+			return nil, fmt.Errorf("unsupported xAI image aspect ratio %q", aspectRatio)
+		}
+		resolution := strings.ToLower(strings.TrimSpace(input.Resolution))
+		if !validXAIResolution(resolution) {
+			return nil, fmt.Errorf("unsupported xAI image resolution %q", resolution)
+		}
+		return json.Marshal(xAIRequest{
+			Model: c.model, Prompt: prompt, AspectRatio: aspectRatio, Resolution: resolution, N: 1,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported image protocol %q", c.protocol)
+	}
+}
+
+func validXAIAspectRatio(value string) bool {
+	if value == "" {
+		return true
+	}
+	for _, supported := range xaiImageAspectRatios {
+		if value == supported {
+			return true
+		}
+	}
+	return false
+}
+
+func validXAIResolution(value string) bool {
+	if value == "" {
+		return true
+	}
+	for _, supported := range xaiImageResolutions {
+		if value == supported {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) resolveImage(ctx context.Context, rawURL, encoded string) (Image, error) {

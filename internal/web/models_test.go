@@ -14,6 +14,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/providerauth"
+	"github.com/cnjack/jcode/internal/providertools"
 )
 
 func TestWebSwitchModelSameValueIsNoOp(t *testing.T) {
@@ -308,7 +309,16 @@ func TestListModelsExposesModalitiesAndExplicitImageCatalog(t *testing.T) {
 }
 
 func TestListModelsExposesManagedXAIImageRole(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".jcode")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	accountJSON := `{"version":1,"methods":{"xai_oauth":{"accounts":{"account-1":{"id":"account-1","login":"grok-user","secret":"refresh-token","authenticated_at":"2026-08-10T00:00:00Z"}},"default_account_id":"account-1"}}}`
+	if err := os.WriteFile(filepath.Join(configDir, "provider-auth.json"), []byte(accountJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cfg := &config.Config{
 		Model:      "xai/grok-4.5",
 		ImageModel: "xai/grok-imagine-image-quality",
@@ -326,9 +336,11 @@ func TestListModelsExposesManagedXAIImageRole(t *testing.T) {
 		Providers []struct {
 			ID     string `json:"id"`
 			Models []struct {
-				ID           string   `json:"id"`
-				Output       []string `json:"output_modalities"`
-				Availability string   `json:"capability_availability"`
+				ID               string   `json:"id"`
+				Output           []string `json:"output_modalities"`
+				Availability     string   `json:"capability_availability"`
+				AspectRatios     []string `json:"image_aspect_ratios"`
+				ImageResolutions []string `json:"image_resolutions"`
 			} `json:"models"`
 		} `json:"providers"`
 	}
@@ -345,12 +357,29 @@ func TestListModelsExposesManagedXAIImageRole(t *testing.T) {
 				if candidate.Availability != "supported" {
 					t.Fatalf("image model %s availability = %q", candidate.ID, candidate.Availability)
 				}
+				if len(candidate.AspectRatios) != 14 || len(candidate.ImageResolutions) != 2 ||
+					candidate.ImageResolutions[0] != "1k" || candidate.ImageResolutions[1] != "2k" {
+					t.Fatalf("image model %s geometry = ratios:%v resolutions:%v", candidate.ID,
+						candidate.AspectRatios, candidate.ImageResolutions)
+				}
 				imageIDs = append(imageIDs, candidate.ID)
 			}
 		}
 	}
 	if len(imageIDs) != 2 || imageIDs[0] != "grok-imagine-image" || imageIDs[1] != "grok-imagine-image-quality" {
 		t.Fatalf("managed xAI image models = %#v", imageIDs)
+	}
+}
+
+func TestConfiguredImageAvailabilityRejectsMissingManagedAccount(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	availability := configuredImageAvailability(&config.ProviderConfig{
+		Auth: &config.ProviderAuthBinding{Method: string(providerauth.MethodXAIOAuth), AccountID: "missing"},
+	}, providertools.ImageModel{
+		Provider: "xai", ID: "grok-imagine-image", Builtin: true, Supported: true,
+	})
+	if availability != "unsupported" {
+		t.Fatalf("missing managed account availability = %q", availability)
 	}
 }
 

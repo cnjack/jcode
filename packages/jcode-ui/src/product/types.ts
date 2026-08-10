@@ -35,6 +35,8 @@ export interface ModelInfo {
   output_modalities?: string[]
   capability_availability?: 'supported' | 'unsupported' | 'unknown'
   image_sizes?: string[]
+  image_aspect_ratios?: string[]
+  image_resolutions?: string[]
   /** How this model exposes its reasoning/thinking controls. */
   reasoning_options?: ReasoningOption[]
 }

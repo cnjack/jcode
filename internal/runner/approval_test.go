@@ -357,6 +357,17 @@ func TestBillableApprovalAutoModeStillPrompts(t *testing.T) {
 	}
 }
 
+func TestBillableApprovalSummaryIncludesNativeImageGeometry(t *testing.T) {
+	summary := billableApprovalSummary(toolpolicy.BillableIntent{
+		CapabilityKey: toolpolicy.CapabilityImageGenerate,
+		Provider:      "xai", Model: "grok-imagine-image-quality", Count: 1,
+		NormalizedArgs: `{"prompt":"private","aspect_ratio":"9:16","resolution":"2k"}`,
+	})
+	if summary.AspectRatio != "9:16" || summary.Resolution != "2k" || summary.Size != "" {
+		t.Fatalf("billable native geometry = %#v", summary)
+	}
+}
+
 func TestBillableApprovalRejectsBareBooleanAndReplayedOption(t *testing.T) {
 	intent := toolpolicy.BillableIntent{
 		OperationID: "host-operation-opaque", ToolCallID: "model-call-opaque",

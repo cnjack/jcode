@@ -81,6 +81,23 @@ describe('ApprovalBanner billable approvals', () => {
     expect(screen.queryByRole('button', { name: /allow/i })).toBeNull()
   })
 
+  it('shows native aspect ratio and resolution before a billable image decision', () => {
+    renderApproval({
+      ...BASE_APPROVAL,
+      billableSummary: {
+        capability: 'image.generate',
+        provider: 'xai',
+        model: 'grok-imagine-image-quality',
+        aspect_ratio: '9:16',
+        resolution: '2k',
+        count: 1,
+        billable: true,
+      },
+    })
+
+    expect(screen.getByText(/xai · grok-imagine-image-quality · 9:16 · 2k · 1 image/)).toBeTruthy()
+  })
+
   it('hides allow when a host cannot return opaque option ids', () => {
     const base = createMockRuntime()
     const { resolveApprovalOption: _resolveApprovalOption, ...actions } = base.actions

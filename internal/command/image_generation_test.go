@@ -2,8 +2,10 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +111,15 @@ func TestConfiguredGenerateImageToolAcceptsManagedXAIAccount(t *testing.T) {
 	info, err := imageTool.Info(context.Background())
 	if err != nil || info == nil || info.Name != "generate_image" {
 		t.Fatalf("tool info=%#v err=%v", info, err)
+	}
+	encoded, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"size"`) ||
+		!strings.Contains(string(encoded), `"aspect_ratio"`) ||
+		!strings.Contains(string(encoded), `"resolution"`) {
+		t.Fatalf("managed xAI tool schema = %s", encoded)
 	}
 }
 

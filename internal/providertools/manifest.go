@@ -36,13 +36,15 @@ func IsProviderSearchMCPServer(name string) bool {
 }
 
 type ImageModel struct {
-	Provider  string   `json:"provider"`
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Protocol  string   `json:"protocol"`
-	Sizes     []string `json:"sizes,omitempty"`
-	Builtin   bool     `json:"builtin"`
-	Supported bool     `json:"supported"`
+	Provider     string   `json:"provider"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Protocol     string   `json:"protocol"`
+	Sizes        []string `json:"sizes,omitempty"`
+	AspectRatios []string `json:"aspect_ratios,omitempty"`
+	Resolutions  []string `json:"resolutions,omitempty"`
+	Builtin      bool     `json:"builtin"`
+	Supported    bool     `json:"supported"`
 }
 
 type ImageRuntime struct {
@@ -235,14 +237,20 @@ func ImageModels(cfg *config.Config) []ImageModel {
 			}
 		}
 		if isManagedXAIProfile(providerID, provider) {
+			aspectRatios := imagegen.XAIImageAspectRatios()
+			resolutions := imagegen.XAIImageResolutions()
 			result = append(result, []ImageModel{
 				{
 					Provider: providerID, ID: "grok-imagine-image", Name: "Grok Imagine Image",
-					Protocol: string(imagegen.ProtocolOpenAIImages), Builtin: true, Supported: true,
+					Protocol:     string(imagegen.ProtocolXAIImages),
+					AspectRatios: append([]string(nil), aspectRatios...),
+					Resolutions:  append([]string(nil), resolutions...), Builtin: true, Supported: true,
 				},
 				{
 					Provider: providerID, ID: "grok-imagine-image-quality", Name: "Grok Imagine Image Quality",
-					Protocol: string(imagegen.ProtocolOpenAIImages), Builtin: true, Supported: true,
+					Protocol:     string(imagegen.ProtocolXAIImages),
+					AspectRatios: append([]string(nil), aspectRatios...),
+					Resolutions:  append([]string(nil), resolutions...), Builtin: true, Supported: true,
 				},
 			}...)
 			continue
@@ -336,7 +344,7 @@ func ResolveImageRuntime(cfg *config.Config) (ImageRuntime, error) {
 	endpoint := provider.ImageEndpoint
 	switch {
 	case managedXAI && isXAIImageModel(modelID):
-		runtime.Protocol = imagegen.ProtocolOpenAIImages
+		runtime.Protocol = imagegen.ProtocolXAIImages
 		runtime.BaseURL = "https://api.x.ai/v1"
 		runtime.AssetHosts = []string{"*.x.ai"}
 	case endpoint != nil && configuredImageModel(endpoint.Models, modelID):
@@ -366,12 +374,26 @@ func ResolveImageRuntime(cfg *config.Config) (ImageRuntime, error) {
 		return ImageRuntime{}, fmt.Errorf("image endpoint base URL is required")
 	}
 	assetHostsDigest := canonicalStringSetDigest(runtime.AssetHosts)
+	capabilityDigest := imageModelCapabilityDigest(cfg, providerID, modelID)
 	runtime.ConfigEpoch = shortFingerprintFields(
 		providerID, modelID, string(runtime.Protocol), runtime.BaseURL,
-		runtime.CredentialFingerprint, headerDigest, assetHostsDigest,
+		runtime.CredentialFingerprint, headerDigest, assetHostsDigest, capabilityDigest,
 		strconv.Itoa(runtime.MaxCallsPerTurn), strconv.Itoa(runtime.MaxCallsPerSession),
 	)
 	return runtime, nil
+}
+
+func imageModelCapabilityDigest(cfg *config.Config, providerID, modelID string) string {
+	for _, candidate := range ImageModels(cfg) {
+		if candidate.Provider == providerID && candidate.ID == modelID {
+			return shortFingerprintFields(
+				canonicalStringSetDigest(candidate.Sizes),
+				canonicalStringSetDigest(candidate.AspectRatios),
+				canonicalStringSetDigest(candidate.Resolutions),
+			)
+		}
+	}
+	return shortFingerprintFields("missing-image-capability")
 }
 
 func isManagedXAIProfile(providerID string, provider *config.ProviderConfig) bool {

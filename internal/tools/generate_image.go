@@ -41,13 +41,17 @@ type GenerateImageDeps struct {
 	DispatchPolicy        session.DispatchPolicy
 	VerifyRuntime         func(context.Context) error
 	SupportedSizes        []string
+	SupportedAspectRatios []string
+	SupportedResolutions  []string
 	Progress              func(toolstate.ProgressEvent)
 	EmitArtifact          func(artifact.Record)
 }
 
 type GenerateImageInput struct {
-	Prompt string `json:"prompt"`
-	Size   string `json:"size,omitempty"`
+	Prompt      string `json:"prompt"`
+	Size        string `json:"size,omitempty"`
+	AspectRatio string `json:"aspect_ratio,omitempty"`
+	Resolution  string `json:"resolution,omitempty"`
 }
 
 type GenerateImageOutput struct {
@@ -66,19 +70,36 @@ type generateImageTool struct {
 }
 
 func NewGenerateImageTool(deps *GenerateImageDeps) tool.InvokableTool {
+	params := map[string]*schema.ParameterInfo{
+		"prompt": {
+			Type: schema.String, Required: true,
+			Desc: "A concrete visual description of the single image to generate.",
+		},
+	}
+	nativeGeometry := deps != nil &&
+		(len(deps.SupportedAspectRatios) > 0 || len(deps.SupportedResolutions) > 0)
+	if !nativeGeometry {
+		params["size"] = &schema.ParameterInfo{
+			Type: schema.String,
+			Desc: "Optional supported image size such as 1024x1024. Defaults to the provider profile's first size.",
+		}
+	}
+	if deps != nil && len(deps.SupportedAspectRatios) > 0 {
+		params["aspect_ratio"] = &schema.ParameterInfo{
+			Type: schema.String, Enum: append([]string(nil), deps.SupportedAspectRatios...),
+			Desc: "Optional output aspect ratio supported by the configured image provider.",
+		}
+	}
+	if deps != nil && len(deps.SupportedResolutions) > 0 {
+		params["resolution"] = &schema.ParameterInfo{
+			Type: schema.String, Enum: append([]string(nil), deps.SupportedResolutions...),
+			Desc: "Optional output resolution supported by the configured image provider.",
+		}
+	}
 	return &generateImageTool{deps: deps, info: &schema.ToolInfo{
-		Name: "generate_image",
-		Desc: `Generate exactly one new image with the configured image model and save it as a managed JCode Artifact. This is an externally billable operation: Ask for approval and Auto require one-time approval, while Full access runs without a prompt. Do not use it to inspect or edit an existing image.`,
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"prompt": {
-				Type: schema.String, Required: true,
-				Desc: "A concrete visual description of the single image to generate.",
-			},
-			"size": {
-				Type: schema.String,
-				Desc: "Optional supported image size such as 1024x1024. Defaults to the provider profile's first size.",
-			},
-		}),
+		Name:        "generate_image",
+		Desc:        `Generate exactly one new image with the configured image model and save it as a managed JCode Artifact. This is an externally billable operation: Ask for approval and Auto require one-time approval, while Full access runs without a prompt. Do not use it to inspect or edit an existing image.`,
+		ParamsOneOf: schema.NewParamsOneOfByParams(params),
 	}}
 }
 
@@ -177,7 +198,8 @@ func (t *generateImageTool) InvokableRun(
 	t.progress(intent, toolstate.PhaseGenerating, "", nil)
 
 	result, generateErr := t.deps.Generator.Generate(ctx, imagegen.Request{
-		Prompt: input.Prompt, Size: input.Size, Count: 1,
+		Prompt: input.Prompt, Size: input.Size, AspectRatio: input.AspectRatio,
+		Resolution: input.Resolution, Count: 1,
 	})
 	if generateErr != nil {
 		outcome, phase, code := classifyGenerationError(generateErr)
@@ -270,21 +292,73 @@ func (t *generateImageTool) parseInput(raw string) (GenerateImageInput, string, 
 	}
 	input.Prompt = strings.TrimSpace(input.Prompt)
 	input.Size = strings.TrimSpace(input.Size)
+	input.AspectRatio = strings.TrimSpace(input.AspectRatio)
+	input.Resolution = strings.ToLower(strings.TrimSpace(input.Resolution))
 	if input.Prompt == "" {
 		return input, "", fmt.Errorf("prompt is required")
 	}
-	if input.Size == "" && len(t.deps.SupportedSizes) > 0 {
-		input.Size = t.deps.SupportedSizes[0]
-	}
-	if input.Size != "" && !containsString(t.deps.SupportedSizes, input.Size) &&
-		len(t.deps.SupportedSizes) > 0 {
-		return input, "", fmt.Errorf("unsupported image size %q", input.Size)
+	nativeGeometry := len(t.deps.SupportedAspectRatios) > 0 || len(t.deps.SupportedResolutions) > 0
+	if nativeGeometry {
+		if input.Size != "" {
+			if input.AspectRatio != "" || input.Resolution != "" {
+				return input, "", fmt.Errorf("size cannot be combined with aspect_ratio or resolution")
+			}
+			aspectRatio, resolution, ok := legacyXAIImageSize(input.Size)
+			if !ok || !containsString(t.deps.SupportedAspectRatios, aspectRatio) ||
+				!containsString(t.deps.SupportedResolutions, resolution) {
+				return input, "", fmt.Errorf("unsupported legacy image size %q", input.Size)
+			}
+			input.Size = ""
+			input.AspectRatio = aspectRatio
+			input.Resolution = resolution
+		}
+		if input.AspectRatio != "" && !containsString(t.deps.SupportedAspectRatios, input.AspectRatio) {
+			return input, "", fmt.Errorf("unsupported image aspect ratio %q", input.AspectRatio)
+		}
+		if input.Resolution != "" && !containsString(t.deps.SupportedResolutions, input.Resolution) {
+			return input, "", fmt.Errorf("unsupported image resolution %q", input.Resolution)
+		}
+	} else {
+		if input.AspectRatio != "" || input.Resolution != "" {
+			return input, "", fmt.Errorf("image provider does not support aspect_ratio or resolution")
+		}
+		if input.Size == "" && len(t.deps.SupportedSizes) > 0 {
+			input.Size = t.deps.SupportedSizes[0]
+		}
+		if input.Size != "" && !containsString(t.deps.SupportedSizes, input.Size) &&
+			len(t.deps.SupportedSizes) > 0 {
+			return input, "", fmt.Errorf("unsupported image size %q", input.Size)
+		}
 	}
 	encoded, err := json.Marshal(input)
 	if err != nil {
 		return input, "", err
 	}
 	return input, string(encoded), nil
+}
+
+// legacyXAIImageSize preserves requests produced by older JCode builds while
+// ensuring the normalized approval intent contains xAI-native controls. The
+// conversion is deliberately explicit: unknown dimensions fail instead of
+// being silently rounded to a different billable output shape.
+func legacyXAIImageSize(size string) (aspectRatio, resolution string, ok bool) {
+	legacy := map[string][2]string{
+		"1024x1024": {"1:1", "1k"},
+		"1792x1024": {"16:9", "1k"},
+		"1024x1792": {"9:16", "1k"},
+		"1536x1024": {"3:2", "1k"},
+		"1024x1536": {"2:3", "1k"},
+		"2048x2048": {"1:1", "2k"},
+		"3584x2048": {"16:9", "2k"},
+		"2048x3584": {"9:16", "2k"},
+		"3072x2048": {"3:2", "2k"},
+		"2048x3072": {"2:3", "2k"},
+	}
+	converted, ok := legacy[strings.ToLower(strings.TrimSpace(size))]
+	if !ok {
+		return "", "", false
+	}
+	return converted[0], converted[1], true
 }
 
 func (t *generateImageTool) startOperation(intent toolpolicy.BillableIntent) (session.GenerationOperation, error) {

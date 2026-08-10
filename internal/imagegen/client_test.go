@@ -119,6 +119,100 @@ func TestOpenAIImagesManagedCredentialFailsClosed(t *testing.T) {
 	}
 }
 
+func TestXAIImagesUsesNativeGeometryWithoutOpenAIFields(t *testing.T) {
+	pixels := pngBytes(t, 16, 9)
+	var request map[string]any
+	httpClient := stubHTTPClient(t, func(r *http.Request) *http.Response {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		return jsonResponse(http.StatusOK, map[string]any{"data": []map[string]string{{
+			"b64_json": base64.StdEncoding.EncodeToString(pixels),
+		}}})
+	})
+	client, err := NewXAIImagesClient(ClientConfig{
+		Protocol: ProtocolXAIImages, BaseURL: "https://api.x.ai/v1", Model: "grok-imagine-image",
+		HTTPClient: httpClient,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Generate(context.Background(), Request{
+		Prompt: "wide orange circle", AspectRatio: "16:9", Resolution: "2K", Count: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Images) != 1 || result.Images[0].Width != 16 || result.Images[0].Height != 9 {
+		t.Fatalf("result = %#v", result)
+	}
+	if request["aspect_ratio"] != "16:9" || request["resolution"] != "2k" || request["n"] != float64(1) {
+		t.Fatalf("xAI request = %#v", request)
+	}
+	for _, forbidden := range []string{"size", "quality", "background", "output_format", "response_format"} {
+		if _, ok := request[forbidden]; ok {
+			t.Fatalf("xAI request contains %q: %#v", forbidden, request)
+		}
+	}
+}
+
+func TestXAIImagesRejectsForeignAndUnknownGeometryBeforeDispatch(t *testing.T) {
+	var dispatched bool
+	client, err := NewXAIImagesClient(ClientConfig{
+		Protocol: ProtocolXAIImages, BaseURL: "https://api.x.ai/v1", Model: "grok-imagine-image",
+		HTTPClient: stubHTTPClient(t, func(_ *http.Request) *http.Response {
+			dispatched = true
+			return jsonResponse(http.StatusOK, map[string]any{})
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []Request{
+		{Prompt: "pixel", Size: "1024x1024"},
+		{Prompt: "pixel", AspectRatio: "7:5"},
+		{Prompt: "pixel", Resolution: "4k"},
+	} {
+		if _, err := client.Generate(context.Background(), input); err == nil {
+			t.Fatalf("Generate(%+v) succeeded", input)
+		}
+	}
+	if dispatched {
+		t.Fatal("invalid xAI request reached the provider")
+	}
+}
+
+func TestXAIImagesQualityModelOmitsOptionalGeometry(t *testing.T) {
+	pixels := pngBytes(t, 1, 1)
+	var request map[string]any
+	client, err := NewXAIImagesClient(ClientConfig{
+		Protocol: ProtocolXAIImages, BaseURL: "https://api.x.ai/v1",
+		Model: "grok-imagine-image-quality",
+		HTTPClient: stubHTTPClient(t, func(r *http.Request) *http.Response {
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			return jsonResponse(http.StatusOK, map[string]any{"data": []map[string]string{{
+				"b64_json": base64.StdEncoding.EncodeToString(pixels),
+			}}})
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Generate(context.Background(), Request{Prompt: "provider defaults"}); err != nil {
+		t.Fatal(err)
+	}
+	if request["model"] != "grok-imagine-image-quality" {
+		t.Fatalf("xAI quality request = %#v", request)
+	}
+	for _, optional := range []string{"aspect_ratio", "resolution", "size"} {
+		if _, ok := request[optional]; ok {
+			t.Fatalf("xAI default request contains %q: %#v", optional, request)
+		}
+	}
+}
+
 func TestOpenAIImagesURLRoundTripDoesNotForwardSecrets(t *testing.T) {
 	pixels := pngBytes(t, 1, 1)
 	var downloadAuth, downloadCustom string

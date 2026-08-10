@@ -442,6 +442,7 @@ provider 返回 URL、base64 或 async task 时，adapter 统一产出受限 byt
 {
   "prompt": "required string",
   "aspect_ratio": "optional provider-neutral enum",
+  "resolution": "optional provider-native validated value",
   "size": "optional validated value",
   "quality": "optional enum"
 }
@@ -454,6 +455,7 @@ provider 返回 URL、base64 或 async task 时，adapter 统一产出受限 byt
 - 属于 approval class `billable_external`，不加入 `noApprovalNeeded`。Ask for approval 与 Auto 不得静默批准；Full access 在 runner 校验 typed intent 与工具身份后直接放行，不产生 ApprovalRequest；
 - 需要审批时，每次审批只对应一次 `(provider profile, endpoint profile, model, normalized args, idempotency key)` 请求，选项只有“仅本次/拒绝”；不提供独立的图片 session grant，Full access 是统一会话模式；
 - P0 schema 不暴露 `count`，请求固定 1，provider 结果必须恰好 1 张；返回 0 或多张均 fail closed；
+- schema 由所选 Image Model 的 capability 构造：xAI 只向 Agent 暴露原生 `aspect_ratio` / `resolution`，通用 OpenAI Images 与 Token Plan 继续暴露 `size`。旧版 xAI `size` 输入必须在审批前显式规范化，不得把两套几何字段同时发送；
 - 不默认暴露给 subagent，防止同一 prompt 并发重复计费；
 - 不自动跨 provider/model fallback；
 - 一个批准动作只生成一个 idempotency key。provider 已接受请求后，网络不确定性不得自动重复提交；只允许用同一个 key 查询/恢复既有 task；

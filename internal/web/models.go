@@ -67,6 +67,14 @@ func configuredImageAvailability(pc *config.ProviderConfig, imageModel providert
 	if pc == nil || (pc.APIKey == "" && !managedXAI) {
 		return "unsupported"
 	}
+	if managedXAI {
+		manager, err := providerauth.Default(config.ConfigDir())
+		if err != nil || manager.ValidateBinding(context.Background(), providerauth.Binding{
+			Method: providerauth.MethodXAIOAuth, AccountID: pc.Auth.AccountID,
+		}) != nil {
+			return "unsupported"
+		}
+	}
 	if !imageModel.Supported {
 		return "unknown"
 	}
@@ -126,6 +134,8 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		OutputModalities       []string                `json:"output_modalities"`
 		CapabilityAvailability string                  `json:"capability_availability"`
 		ImageSizes             []string                `json:"image_sizes,omitempty"`
+		ImageAspectRatios      []string                `json:"image_aspect_ratios,omitempty"`
+		ImageResolutions       []string                `json:"image_resolutions,omitempty"`
 	}
 	type providerInfo struct {
 		ID        string      `json:"id"`
@@ -202,6 +212,8 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 					entry.OutputModalities = appendModality(entry.OutputModalities, "image")
 					entry.CapabilityAvailability = availability
 					entry.ImageSizes = append([]string(nil), imageModel.Sizes...)
+					entry.ImageAspectRatios = append([]string(nil), imageModel.AspectRatios...)
+					entry.ImageResolutions = append([]string(nil), imageModel.Resolutions...)
 					continue
 				}
 				pi.Models = append(pi.Models, modelInfo{
@@ -209,6 +221,8 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 					InputModalities: []string{"text"}, OutputModalities: []string{"image"},
 					CapabilityAvailability: availability,
 					ImageSizes:             append([]string(nil), imageModel.Sizes...),
+					ImageAspectRatios:      append([]string(nil), imageModel.AspectRatios...),
+					ImageResolutions:       append([]string(nil), imageModel.Resolutions...),
 				})
 			}
 		}
@@ -233,6 +247,8 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 				InputModalities: []string{"text"}, OutputModalities: []string{"image"},
 				CapabilityAvailability: configuredImageAvailability(pc, imageModel),
 				ImageSizes:             append([]string(nil), imageModel.Sizes...),
+				ImageAspectRatios:      append([]string(nil), imageModel.AspectRatios...),
+				ImageResolutions:       append([]string(nil), imageModel.Resolutions...),
 			})
 		}
 		result = append(result, pi)

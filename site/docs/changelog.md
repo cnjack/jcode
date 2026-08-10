@@ -15,6 +15,7 @@ For implementation-level detail, see the repository's full [CHANGELOG.md](https:
 - **Live managed model catalogs.** ChatGPT/Codex, Grok, and GitHub Copilot now load the models available to the selected account. Enabled models remain available after restart, and Copilot preserves each model's required Responses or Chat Completions transport.
 - **Provider-backed image generation.** jcode can discover image-capable providers, verify their runtime capabilities, configure image models, and invoke managed provider tools from the same agent workflow used for coding tasks.
 - **Grok Imagine with account sign-in.** Connected xAI accounts can select `grok-imagine-image` or `grok-imagine-image-quality` as the independent Image Model without copying an API key.
+- **Native Grok image geometry.** `generate_image` exposes xAI's supported aspect ratios and `1k`/`2k` resolutions, while older common `size` requests are safely normalized before approval and dispatch.
 - **Durable generated-image artifacts.** Generated images appear as first-class timeline cards and artifacts, with revision and lifecycle state that survives session replay across Web, Desktop, TUI, ACP, and Cloud transport.
 
 #### Changed

@@ -239,6 +239,8 @@ type BillableApprovalSummary struct {
 	Provider     string `json:"provider,omitempty"`
 	Model        string `json:"model,omitempty"`
 	Size         string `json:"size,omitempty"`
+	AspectRatio  string `json:"aspect_ratio,omitempty"`
+	Resolution   string `json:"resolution,omitempty"`
 	Count        int    `json:"count,omitempty"`
 	Billable     bool   `json:"billable,omitempty"`
 	HasReference bool   `json:"has_reference,omitempty"`
@@ -260,6 +262,12 @@ func formatBillableApprovalSummary(summary *BillableApprovalSummary) string {
 	}
 	if summary.Size != "" {
 		parts = append(parts, "Size: "+summary.Size)
+	}
+	if summary.AspectRatio != "" {
+		parts = append(parts, "Aspect ratio: "+summary.AspectRatio)
+	}
+	if summary.Resolution != "" {
+		parts = append(parts, "Resolution: "+summary.Resolution)
 	}
 	if summary.HasReference {
 		parts = append(parts, "Reference image: yes")

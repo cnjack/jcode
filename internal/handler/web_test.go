@@ -71,13 +71,13 @@ func TestWebHandlerBillableApprovalRequiresOpaqueOneTimeOption(t *testing.T) {
 	responseCh := make(chan ApprovalResponse, 1)
 	go func() {
 		response, err := h.RequestApproval(ctx, ApprovalRequest{
-			ToolName: "generate_image", ToolArgs: `{"prompt":"private prompt","size":"1024x1024"}`,
+			ToolName: "generate_image", ToolArgs: `{"prompt":"private prompt","aspect_ratio":"9:16","resolution":"2k"}`,
 			ToolCallID: "call-image-1", ApprovalClass: "billable_external",
 			AllowApproveAll: false,
 			Options:         issuedOptions,
 			BillableSummary: &BillableApprovalSummary{
 				Capability: "image.generate", Provider: "provider", Model: "image-model",
-				Size: "1024x1024", Count: 1, Billable: true,
+				AspectRatio: "9:16", Resolution: "2k", Count: 1, Billable: true,
 			},
 		})
 		if err != nil {
@@ -95,6 +95,9 @@ func TestWebHandlerBillableApprovalRequiresOpaqueOneTimeOption(t *testing.T) {
 	if request.AllowApproveAll || len(request.Options) != 2 || request.Options[0].ID == "" ||
 		request.Options[0].ID == request.Options[1].ID || request.BillableSummary == nil {
 		t.Fatalf("billable request = %#v", request)
+	}
+	if request.BillableSummary.AspectRatio != "9:16" || request.BillableSummary.Resolution != "2k" {
+		t.Fatalf("billable native geometry = %#v", request.BillableSummary)
 	}
 	if request.Options[0].ID != issuedOptions[0].ID || request.Options[1].ID != issuedOptions[1].ID {
 		t.Fatalf("web transport replaced runner option ids: %#v", request.Options)

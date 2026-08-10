@@ -79,7 +79,9 @@ and proves:
 15. xAI image and video entries are separated from chat. The official managed
     xAI image profile pins `api.x.ai/v1/images/generations`, resolves its token
     only at dispatch, and reuses the billable-operation approval, journal,
-    quota, Artifact, and safe-download pipeline;
+    quota, Artifact, and safe-download pipeline. Its adapter emits native
+    `aspect_ratio` and `resolution` fields and never mixes them with OpenAI
+    `size` controls;
 16. the Web/Desktop Provider catalog uses a token-free, account-aware local
     stale-while-revalidate cache. It renders the last successful list before
     the live request completes, retains it on transient failure, and rejects
@@ -90,5 +92,9 @@ and proves:
 The POC is accepted when the focused auth, catalog, model transport and provider
 API tests pass without network access. A manual account-scoped smoke test also
 confirmed that xAI and GitHub Copilot return their live model catalogs, and that
-the connected xAI account can read the official image-generation catalog. No
-billable inference or image-generation request is part of that smoke test.
+the connected xAI account can read the official image-generation catalog. A
+later, explicitly user-authorized one-shot smoke test also confirmed that the
+managed xAI OAuth credential can generate one image without a separate API key;
+the generated asset and credentials were not committed. That billable smoke
+used `grok-imagine-image`; the quality variant is covered by the same local wire
+contract but was not invoked live to avoid a second provider charge.

@@ -274,7 +274,10 @@ func TestResolveImageRuntimeBindsCanonicalHeadersAndRequestConfig(t *testing.T) 
 		},
 		ImageEndpoint: &config.ImageEndpointConfig{
 			Protocol: string(imagegen.ProtocolOpenAIImages), BaseURL: "https://images.example/v1",
-			Models:     []config.ImageModelConfig{{ID: "canvas-1"}, {ID: "canvas-2"}},
+			Models: []config.ImageModelConfig{
+				{ID: "canvas-1", Sizes: []string{"1024x1024"}},
+				{ID: "canvas-2", Sizes: []string{"1024x1024"}},
+			},
 			AssetHosts: []string{"CDN.Example.", "*.media.example"},
 		},
 	}
@@ -355,6 +358,14 @@ func TestResolveImageRuntimeBindsCanonicalHeadersAndRequestConfig(t *testing.T) 
 	}
 	if limitsChanged.ConfigEpoch == assetsChanged.ConfigEpoch {
 		t.Fatal("limit change did not advance config epoch")
+	}
+	provider.ImageEndpoint.Models[1].Sizes = []string{"1024x1536"}
+	capabilityChanged, err := ResolveImageRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capabilityChanged.ConfigEpoch == limitsChanged.ConfigEpoch {
+		t.Fatal("image capability change did not advance config epoch")
 	}
 
 	provider.Headers["x-api-key"] = "conflicting-case-variant"
@@ -456,13 +467,41 @@ func TestManagedXAIImageModelsAndRuntimeArePinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.BaseURL != "https://api.x.ai/v1" || runtime.Protocol != imagegen.ProtocolOpenAIImages ||
+	if runtime.BaseURL != "https://api.x.ai/v1" || runtime.Protocol != imagegen.ProtocolXAIImages ||
 		runtime.APIKey != "" || runtime.AuthMethod != "xai_oauth" || runtime.AccountID != "account-1" ||
 		len(runtime.Headers) != 0 || len(runtime.AssetHosts) != 1 || runtime.AssetHosts[0] != "*.x.ai" {
 		t.Fatalf("managed xAI runtime = %#v", runtime)
 	}
+	for _, model := range models {
+		if model.Protocol != string(imagegen.ProtocolXAIImages) || len(model.AspectRatios) != 14 ||
+			len(model.Resolutions) != 2 || model.Resolutions[0] != "1k" || model.Resolutions[1] != "2k" {
+			t.Fatalf("managed xAI geometry capabilities = %#v", model)
+		}
+	}
 	cfg.ImageModel = "xai/attacker-model"
 	if _, err := ResolveImageRuntime(cfg); err == nil {
 		t.Fatal("managed xAI accepted a configuration-controlled image model")
+	}
+}
+
+func TestCustomXAIImageProtocolIsNotExposedWithoutManagedProfile(t *testing.T) {
+	cfg := &config.Config{
+		ImageModel: "custom/grok-imagine-image",
+		Providers: map[string]*config.ProviderConfig{
+			"custom": {
+				APIKey: "secret",
+				ImageEndpoint: &config.ImageEndpointConfig{
+					Protocol: string(imagegen.ProtocolXAIImages), BaseURL: "https://api.x.ai/v1",
+					Models: []config.ImageModelConfig{{ID: "grok-imagine-image"}},
+				},
+			},
+		},
+	}
+	models := ImageModels(cfg)
+	if len(models) != 1 || models[0].Supported {
+		t.Fatalf("custom xAI protocol unexpectedly supported: %#v", models)
+	}
+	if _, err := ResolveImageRuntime(cfg); err == nil {
+		t.Fatal("custom xAI protocol bypassed the managed profile gate")
 	}
 }

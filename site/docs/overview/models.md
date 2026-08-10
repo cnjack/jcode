@@ -119,7 +119,9 @@ to an arbitrary managed-login Provider. Grok login is the explicit exception:
 the official xAI profile exposes `grok-imagine-image` and
 `grok-imagine-image-quality` as Image Model choices, pins the xAI Images API,
 and resolves the selected account token only when a generation request is
-dispatched. Video models are recognized but are not yet exposed because jcode
+dispatched. For these models, `generate_image` exposes xAI-native
+`aspect_ratio` values plus `resolution` (`1k` or `2k`) instead of sending the
+OpenAI-style `size` field. Video models are recognized but are not yet exposed because jcode
 does not yet implement the asynchronous video workflow.
 
 ## Switch Models Mid-Session

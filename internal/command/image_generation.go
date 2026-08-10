@@ -76,7 +76,7 @@ func configuredGenerateImageTool(
 		return nil, fmt.Errorf("configure image epoch: %w", err)
 	}
 	_ = epoch // parsed here so invalid epochs keep the tool out of the catalog
-	sizes := imageModelSizes(cfg, runtime.Provider, runtime.Model)
+	sizes, aspectRatios, resolutions := imageModelCapabilities(cfg, runtime.Provider, runtime.Model)
 	ledger.SetLimits(runtime.MaxCallsPerTurn, runtime.MaxCallsPerSession)
 	return tools.NewGenerateImageTool(&tools.GenerateImageDeps{
 		Generator: client, ArtifactService: service, Recorder: recorder, Ledger: ledger,
@@ -88,6 +88,7 @@ func configuredGenerateImageTool(
 			Tool: session.SessionToolImageGeneration, MaxPerSession: runtime.MaxCallsPerSession,
 		},
 		VerifyRuntime: imageRuntimeVerifier(runtime, runtimeLoader), SupportedSizes: sizes,
+		SupportedAspectRatios: aspectRatios, SupportedResolutions: resolutions,
 		Progress: func(event handler.ToolProgressEvent) {
 			handler.EmitToolProgress(eventHandler, event)
 		},
@@ -132,11 +133,16 @@ func dispatchedImageOperationCount(sessionID string) (int, error) {
 	return dispatched, nil
 }
 
-func imageModelSizes(cfg *config.Config, providerID, modelID string) []string {
+func imageModelCapabilities(
+	cfg *config.Config,
+	providerID, modelID string,
+) (sizes, aspectRatios, resolutions []string) {
 	for _, model := range providertools.ImageModels(cfg) {
 		if model.Provider == providerID && model.ID == modelID {
-			return append([]string(nil), model.Sizes...)
+			return append([]string(nil), model.Sizes...),
+				append([]string(nil), model.AspectRatios...),
+				append([]string(nil), model.Resolutions...)
 		}
 	}
-	return nil
+	return nil, nil, nil
 }

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Provider capability routing.** Settings now distinguishes chat, image generation, vision input, and provider-bound tools using the exact provider profile, endpoint, protocol, and model. It includes an Image Model picker, provider capability status, a BigModel Search MCP preset, and provider Web Search policy.
 
 ### Changed
+- Grok Imagine generation now uses xAI-native `aspect_ratio` and `resolution` controls (`1k`/`2k`) instead of forwarding OpenAI-style `size`; older common JCode sizes are normalized into the equivalent native controls before approval and dispatch.
 - **Ask User is now a bottom interaction dock.** Pending questions replace the composer and are presented one at a time with paging, recommended and multi-select options, custom answers, skip, submission progress, and retryable errors. Once answered, a compact receipt remains in the conversation timeline.
 - Pending Ask User calls no longer merge into activity groups, and both pending and resolved question surfaces align with the conversation gutter.
 - Fresh blank sessions hide task/session chrome until conversation work exists; loading and persisted sessions keep their controls.
