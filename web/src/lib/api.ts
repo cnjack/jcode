@@ -1,5 +1,6 @@
 // API client for jcode backend — ported from web/src/composables/api.ts.
 import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, ProviderToolPolicy, ImageEndpointConfig, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse, ArtifactRecord, ArtifactShareResult, ArtifactShareSummary } from './types'
+import type { AuthMethod, ProviderAuthBinding, ProviderAuthFlow, ProviderAuthPollResult, ProviderAuthStatus } from './types'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from './automation'
 import { apiBase } from './apiBase'
 import { getAuthToken, notifyAuthExpired } from './authToken'
@@ -373,9 +374,14 @@ export const api = {
   // Setup API
   setupProviders: () =>
     request<SetupProvider[]>('/api/setup/providers'),
-  setupProviderModels: (providerId: string) =>
-    request<SetupModel[]>(`/api/setup/providers/${encodeURIComponent(providerId)}/models`),
-  setupComplete: (data: { provider: string; api_key: string; model?: string; model_reasoning?: boolean; base_url?: string; name?: string; headers?: Record<string, string> }) =>
+  setupProviderModels: (providerId: string, binding?: ProviderAuthBinding) => {
+    const query = new URLSearchParams()
+    if (binding?.method) query.set('auth_method', binding.method)
+    if (binding?.account_id) query.set('account_id', binding.account_id)
+    const suffix = query.size > 0 ? `?${query.toString()}` : ''
+    return request<SetupModel[]>(`/api/setup/providers/${encodeURIComponent(providerId)}/models${suffix}`)
+  },
+  setupComplete: (data: { provider: string; api_key?: string; auth_binding?: ProviderAuthBinding; model?: string; model_reasoning?: boolean; base_url?: string; name?: string; headers?: Record<string, string> }) =>
     request<{ status: string; provider: string; model: string }>('/api/setup/complete', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -391,15 +397,44 @@ export const api = {
   // Provider management
   listProviders: () =>
     request<ProviderDetail[]>('/api/providers'),
+  providerAuthStatus: (method: AuthMethod) =>
+    request<ProviderAuthStatus>(`/api/provider-auth/${encodeURIComponent(method)}`),
+  startProviderAuth: (method: AuthMethod) =>
+    request<ProviderAuthFlow>(`/api/provider-auth/${encodeURIComponent(method)}/start`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  pollProviderAuthFlow: (method: AuthMethod, flowId: string) =>
+    request<ProviderAuthPollResult>(`/api/provider-auth/${encodeURIComponent(method)}/flows/${encodeURIComponent(flowId)}/poll`, {
+      method: 'POST',
+    }),
+  cancelProviderAuthFlow: (method: AuthMethod, flowId: string) =>
+    request<{ status: string }>(`/api/provider-auth/${encodeURIComponent(method)}/flows/${encodeURIComponent(flowId)}`, {
+      method: 'DELETE',
+    }),
+  setProviderAuthDefault: (method: AuthMethod, accountId: string) =>
+    request<ProviderAuthStatus>(`/api/provider-auth/${encodeURIComponent(method)}/default`, {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId }),
+    }),
+  removeProviderAuthAccount: (method: AuthMethod, accountId: string) =>
+    request<ProviderAuthStatus>(`/api/provider-auth/${encodeURIComponent(method)}/accounts/${encodeURIComponent(accountId)}`, {
+      method: 'DELETE',
+    }),
+  logoutProviderAuth: (method: AuthMethod) =>
+    request<ProviderAuthStatus>(`/api/provider-auth/${encodeURIComponent(method)}`, {
+      method: 'DELETE',
+    }),
   // vision is deliberately absent: image support is model metadata, and the
   // backend treats an omitted field as "clear the stored override".
-  addProvider: (data: { id: string; api_key: string; name?: string; model?: string; model_reasoning?: boolean; thinking?: boolean; reasoning_effort?: string; provider_tools?: Record<string, ProviderToolPolicy>; image_endpoint?: ImageEndpointConfig } & ProviderAdvanced) =>
+  addProvider: (data: { id: string; api_key?: string; auth_binding?: ProviderAuthBinding; name?: string; model?: string; model_reasoning?: boolean; thinking?: boolean; reasoning_effort?: string; provider_tools?: Record<string, ProviderToolPolicy>; image_endpoint?: ImageEndpointConfig } & ProviderAdvanced) =>
     request<{ status: string }>('/api/providers', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
   updateProvider: (id: string, data: {
     api_key?: string
+    auth_binding?: ProviderAuthBinding | null
     name?: string
     custom_models?: CustomModelDetail[]
     vision?: boolean

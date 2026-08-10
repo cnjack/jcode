@@ -14,6 +14,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 )
 
@@ -215,6 +216,30 @@ func decodeOptionalBool(raw json.RawMessage, field string) (present bool, value 
 	return true, &decoded, nil
 }
 
+// decodeOptionalProviderAuthBinding preserves the update contract's three
+// states: omitted keeps the current mode, null selects API-key authentication,
+// and an object selects one managed login binding.
+func decodeOptionalProviderAuthBinding(
+	raw json.RawMessage,
+) (present bool, binding *config.ProviderAuthBinding, err error) {
+	if len(raw) == 0 {
+		return false, nil, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return true, nil, nil
+	}
+	var decoded config.ProviderAuthBinding
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return true, nil, fmt.Errorf("invalid auth_binding")
+	}
+	decoded.Method = strings.TrimSpace(decoded.Method)
+	decoded.AccountID = strings.TrimSpace(decoded.AccountID)
+	if decoded.Method == "" {
+		return true, nil, fmt.Errorf("auth_binding.method is required")
+	}
+	return true, &decoded, nil
+}
+
 // handleProviderCatalog returns a provider's browsable model catalog for the
 // "browse directory" UI. For registry providers it lists the built-in models
 // (the official /models endpoint is not reliably complete); for custom
@@ -250,9 +275,11 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 	customSet := make(map[string]*config.CustomModelConfig) // user-defined models by id
 	var apiKey, baseURL string
 	var headers map[string]string
+	var providerConfig *config.ProviderConfig
 	cfg, _ := config.LoadConfig()
 	if cfg != nil {
 		if pc := cfg.GetProviders()[providerID]; pc != nil {
+			providerConfig = pc
 			apiKey, baseURL, headers = pc.APIKey, pc.BaseURL, pc.Headers
 			for _, m := range pc.CustomModels {
 				configured[m.ID] = true
@@ -273,6 +300,12 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 			e.Reasoning = m.Reasoning
 			e.Attachment = m.Attachment
 			e.EffortTiers = m.EffortTiers
+			e.Custom = !m.Managed
+			if m.Managed {
+				e.Added = modelState.IsModelEnabled(
+					config.ModelRef{Provider: providerID, Model: id}, false,
+				)
+			}
 		}
 		return e
 	}
@@ -308,6 +341,69 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 			registryID = hint
 		}
 	}
+
+	// Managed account providers expose an account- and entitlement-specific
+	// catalog. Prefer that live source over the conservative built-in fallback;
+	// it is how Copilot and subscription-backed Codex/xAI accounts advertise the
+	// models this particular login may actually use.
+	if providerConfig != nil && providerConfig.Auth != nil {
+		method, parseErr := parseProviderAuthMethod(providerConfig.Auth.Method)
+		service, serviceErr := s.providerAuthService()
+		if parseErr == nil && serviceErr == nil {
+			liveModels, liveErr := service.Models(r.Context(), providerauth.Binding{
+				Method: method, AccountID: providerConfig.Auth.AccountID,
+			})
+			if liveErr == nil && len(liveModels) > 0 {
+				result := make([]catalogEntry, 0, len(liveModels)+len(configured))
+				seen := make(map[string]bool, len(liveModels))
+				for _, live := range liveModels {
+					if live.Kind != providerauth.ModelKindChat || live.ID == "" || seen[live.ID] {
+						continue
+					}
+					seen[live.ID] = true
+					metadata := managedModelConfigFromLive(s.registry, providerID, live)
+					defaultEnabled := configured[live.ID]
+					if persisted := customSet[live.ID]; persisted != nil && persisted.Managed {
+						defaultEnabled = false
+					}
+					if s.registry != nil {
+						if native := s.registry.GetProvider(providerID); native != nil {
+							if static := native.Models[live.ID]; static != nil {
+								defaultEnabled = static.DefaultEnabled
+							}
+						}
+					}
+					result = append(result, catalogEntry{
+						ID:          live.ID,
+						Name:        metadata.Name,
+						Added:       modelState.IsModelEnabled(config.ModelRef{Provider: providerID, Model: live.ID}, defaultEnabled),
+						Context:     metadata.Context,
+						Reasoning:   metadata.Reasoning,
+						Attachment:  metadata.Attachment,
+						EffortTiers: metadata.EffortTiers,
+						Custom:      false,
+					})
+				}
+				// Keep previously enabled managed models visible during upstream
+				// catalog rollouts so users can disable them or diagnose entitlement
+				// changes without hand-editing config.
+				for id := range configured {
+					if !seen[id] {
+						result = append(result, customEntry(id))
+					}
+				}
+				sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+				writeJSON(w, http.StatusOK, result)
+				return
+			}
+			if liveErr != nil {
+				config.Logger().Printf(
+					"[provider-auth] live model catalog unavailable for %s (error_type=%T); using fallback",
+					method, liveErr,
+				)
+			}
+		}
+	}
 	if s.registry != nil && s.registry.HasProvider(registryID) {
 		models := s.registry.ListProviderModels(registryID, true)
 		result := make([]catalogEntry, 0, len(models))
@@ -318,15 +414,21 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 			// user-set name/context/tiers) rather than the derived registry view —
 			// otherwise effort tiers and other authored fields are lost.
 			if cm := customSet[m.ID]; cm != nil {
+				added := true
+				if cm.Managed {
+					added = modelState.IsModelEnabled(
+						config.ModelRef{Provider: providerID, Model: m.ID}, false,
+					)
+				}
 				result = append(result, catalogEntry{
 					ID:          m.ID,
 					Name:        cm.Name,
-					Added:       true,
+					Added:       added,
 					Context:     cm.Context,
 					Reasoning:   cm.Reasoning,
 					Attachment:  cm.Attachment,
 					EffortTiers: cm.EffortTiers,
-					Custom:      true,
+					Custom:      !cm.Managed,
 				})
 				continue
 			}
@@ -398,6 +500,67 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func managedModelConfigFromLive(
+	registry *model.ModelRegistry,
+	providerID string,
+	live providerauth.Model,
+) config.CustomModelConfig {
+	result := config.CustomModelConfig{
+		ID: live.ID, Name: live.Name, ToolCall: true, Managed: true,
+		Protocol: string(live.Protocol), Vendor: live.Vendor,
+	}
+	if result.Name == "" {
+		result.Name = live.ID
+	}
+	metadata := findManagedModelMetadata(registry, providerID, live.Vendor, live.ID)
+	if metadata == nil {
+		return result
+	}
+	if result.Name == live.ID && metadata.Name != "" {
+		result.Name = metadata.Name
+	}
+	result.ToolCall = metadata.ToolCall
+	result.Reasoning = metadata.Reasoning
+	result.Attachment = metadata.Attachment
+	if metadata.Limit != nil {
+		result.Context = metadata.Limit.Context
+	}
+	for _, option := range metadata.ReasoningOptions {
+		if option.Type == "effort" && len(option.Values) > 0 {
+			result.EffortTiers = append([]string(nil), option.Values...)
+			break
+		}
+	}
+	return result
+}
+
+func findManagedModelMetadata(
+	registry *model.ModelRegistry,
+	providerID string,
+	vendor string,
+	modelID string,
+) *model.RegistryModel {
+	if registry == nil {
+		return nil
+	}
+	for _, candidate := range []string{providerID, strings.ToLower(strings.TrimSpace(vendor))} {
+		if candidate == "" {
+			continue
+		}
+		if provider := registry.GetProvider(candidate); provider != nil {
+			if metadata := provider.Models[modelID]; metadata != nil {
+				return metadata
+			}
+		}
+	}
+	for _, provider := range registry.ListProviders() {
+		if metadata := provider.Models[modelID]; metadata != nil {
+			return metadata
+		}
+	}
+	return nil
+}
+
 // maskSecret hides a secret for display: first 4 and last 4 chars for longer
 // values, "****" for short ones. Used for API keys and header values so the
 // list endpoint never returns plaintext credentials.
@@ -437,6 +600,9 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		Custom          bool                                 `json:"custom,omitempty"`
 		APIKeySet       bool                                 `json:"api_key_set"`
 		APIKey          string                               `json:"api_key,omitempty"` // masked
+		AuthBinding     *config.ProviderAuthBinding          `json:"auth_binding,omitempty"`
+		AuthStatus      *providerauth.Status                 `json:"auth_status,omitempty"`
+		AuthMethods     []string                             `json:"auth_methods,omitempty"`
 		BaseURL         string                               `json:"base_url,omitempty"`
 		Headers         map[string]string                    `json:"headers,omitempty"` // values masked
 		CustomModels    []customModelView                    `json:"custom_models,omitempty"`
@@ -449,12 +615,16 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		Capabilities    []providertools.ProviderCapability   `json:"capabilities"`
 	}
 
+	modelState, _ := config.LoadModelState()
 	result := make([]providerDetail, 0)
 	for id, pc := range cfg.GetProviders() {
 		detail := providerDetail{
 			ID:              id,
 			Name:            pc.Name,
 			APIKeySet:       pc.APIKey != "",
+			AuthBinding:     pc.Auth,
+			AuthStatus:      s.providerAuthStatus(r.Context(), pc.Auth),
+			AuthMethods:     providerAuthMethodsForID(s, id),
 			BaseURL:         pc.BaseURL,
 			Vision:          pc.Vision,
 			Thinking:        pc.Thinking,
@@ -505,7 +675,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		}
 		if !detail.Custom && s.registry != nil && s.registry.HasProvider(id) {
 			for _, m := range s.registry.ListProviderModels(id, true) {
-				if !m.DefaultEnabled {
+				if !modelState.IsModelEnabled(config.ModelRef{Provider: id, Model: m.ID}, m.DefaultEnabled) {
 					continue
 				}
 				if customIDs[m.ID] {
@@ -530,6 +700,9 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, m := range pc.CustomModels {
+			if m.Managed && !modelState.IsModelEnabled(config.ModelRef{Provider: id, Model: m.ID}, false) {
+				continue
+			}
 			if seen[m.ID] {
 				continue
 			}
@@ -541,7 +714,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 				Context:     m.Context,
 				Attachment:  m.Attachment,
 				EffortTiers: m.EffortTiers,
-				Custom:      true,
+				Custom:      !m.Managed,
 			})
 		}
 		if len(cms) > 0 {
@@ -573,6 +746,7 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		Protocol        string                               `json:"protocol,omitempty"`
 		ProviderTools   map[string]config.ProviderToolPolicy `json:"provider_tools,omitempty"`
 		ImageEndpoint   *config.ImageEndpointConfig          `json:"image_endpoint,omitempty"`
+		AuthBinding     *config.ProviderAuthBinding          `json:"auth_binding,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -581,9 +755,28 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	req.ID = strings.TrimSpace(req.ID)
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	req.Model = strings.TrimSpace(req.Model)
-	if req.ID == "" || req.APIKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id and api_key are required"})
+	if req.ID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
 		return
+	}
+	normalizedAuthBinding, err := s.validateProviderBinding(r.Context(), req.ID, req.AuthBinding)
+	if err != nil {
+		writeConfigMutationError(w, err)
+		return
+	}
+	req.AuthBinding = normalizedAuthBinding
+	if req.AuthBinding == nil && req.APIKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "api_key is required for API-key authentication"})
+		return
+	}
+	if req.AuthBinding != nil {
+		// Managed drivers own their endpoint and protected headers. Drop values
+		// from a stale API-key form instead of persisting dormant credentials or
+		// allowing the browser to redirect a bearer token.
+		req.APIKey = ""
+		req.BaseURL = ""
+		req.Headers = nil
+		req.Protocol = ""
 	}
 	if !validReasoningEffort(req.ReasoningEffort) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
@@ -597,6 +790,12 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	imageEndpoint, err := validateImageEndpoint(req.ImageEndpoint)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.AuthBinding != nil && imageEndpoint != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "image_endpoint requires API-key authentication",
+		})
 		return
 	}
 
@@ -626,6 +825,7 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		pc := &config.ProviderConfig{
 			APIKey:          req.APIKey,
 			BaseURL:         req.BaseURL,
+			Auth:            req.AuthBinding,
 			Name:            req.Name,
 			Headers:         cleanHeaders(req.Headers),
 			Vision:          req.Vision,
@@ -732,6 +932,7 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		Protocol        *string                               `json:"protocol,omitempty"`
 		ProviderTools   *map[string]config.ProviderToolPolicy `json:"provider_tools,omitempty"`
 		ImageEndpoint   json.RawMessage                       `json:"image_endpoint,omitempty"`
+		AuthBinding     json.RawMessage                       `json:"auth_binding,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -770,6 +971,18 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	authBindingPresent, authBinding, err := decodeOptionalProviderAuthBinding(req.AuthBinding)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if authBindingPresent {
+		authBinding, err = s.validateProviderBinding(r.Context(), id, authBinding)
+		if err != nil {
+			writeConfigMutationError(w, err)
+			return
+		}
+	}
 
 	// Serialize config RMW + live publish under cfgMu (see Server.cfgMu).
 	s.cfgMu.Lock()
@@ -786,6 +999,16 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 			return newConfigMutationHTTPError(http.StatusNotFound, "provider not found")
 		}
 		mutationRegistry := model.NewModelRegistryWithConfig(cfg)
+		nextAuth := pc.Auth
+		if authBindingPresent {
+			nextAuth = authBinding
+		}
+		if nextAuth != nil && imageEndpointPresent && imageEndpoint != nil {
+			return newConfigMutationHTTPError(
+				http.StatusBadRequest,
+				"image_endpoint requires API-key authentication",
+			)
+		}
 		// Mutate in place so fields not exposed by this endpoint (display name,
 		// custom models, deprecated lists) are preserved untouched.
 		prevHeaders := cleanHeaders(pc.Headers)
@@ -812,6 +1035,15 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		}
 		if imageEndpointPresent {
 			pc.ImageEndpoint = imageEndpoint
+		}
+		if authBindingPresent {
+			pc.Auth = authBinding
+			if authBinding != nil {
+				pc.APIKey = ""
+				pc.BaseURL = ""
+				pc.Headers = nil
+				pc.Protocol = ""
+			}
 		}
 		if req.Name != "" {
 			pc.Name = req.Name
@@ -841,6 +1073,24 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		} else {
 			pc.Headers = prevHeaders
 		}
+		// The generic secret merge above intentionally preserves omitted fields.
+		// Re-assert the managed-auth invariant after it so stale masked headers or
+		// an api_key submitted by an older UI cannot survive the mode switch.
+		if pc.Auth != nil {
+			pc.APIKey = ""
+			pc.BaseURL = ""
+			pc.Headers = nil
+			pc.Protocol = ""
+			// Image generation currently uses the Provider API key. Managed chat
+			// accounts deliberately do not expose or retain one, so keeping this
+			// endpoint would create a configuration that can never run.
+			pc.ImageEndpoint = nil
+		} else if pc.APIKey == "" {
+			return newConfigMutationHTTPError(
+				http.StatusBadRequest,
+				"api_key is required for API-key authentication",
+			)
+		}
 
 		// Replace the provider's custom models when the client sends the list (nil ⇒
 		// keep existing). Each model's stored Context is preserved by merging on id,
@@ -851,8 +1101,17 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 			for _, m := range pc.CustomModels {
 				prev[m.ID] = m
 			}
-			next := make([]config.CustomModelConfig, 0, len(*req.CustomModels))
-			seen := make(map[string]bool, len(*req.CustomModels))
+			next := make([]config.CustomModelConfig, 0, len(pc.CustomModels)+len(*req.CustomModels))
+			seen := make(map[string]bool, len(pc.CustomModels)+len(*req.CustomModels))
+			// Account-scoped live models are backend-owned metadata. The custom
+			// model editor sends only user-authored rows, so preserve managed rows
+			// across an unrelated provider edit instead of silently deleting them.
+			for _, existing := range pc.CustomModels {
+				if existing.Managed && existing.ID != "" && !seen[existing.ID] {
+					seen[existing.ID] = true
+					next = append(next, existing)
+				}
+			}
 			for _, m := range *req.CustomModels {
 				mid := strings.TrimSpace(m.ID)
 				if mid == "" || seen[mid] {

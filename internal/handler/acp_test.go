@@ -150,15 +150,16 @@ func TestACPToolPresentationSearchAndExecute(t *testing.T) {
 
 func TestBillableACPPresentationContainsOnlyBoundedSummary(t *testing.T) {
 	summary := &BillableApprovalSummary{
-		Capability: "image.generate", Provider: "bigmodel", Model: "cogview",
-		Size: "1024x1024", Count: 1, Billable: true,
+		Capability: "image.generate", Provider: "xai", Model: "grok-imagine-image",
+		AspectRatio: "9:16", Resolution: "2k", Count: 1, Billable: true,
 	}
 	presentation := billableACPPresentation(summary)
-	if presentation.Title != "Generate image with bigmodel / cogview" {
+	if presentation.Title != "Generate image with xai / grok-imagine-image" {
 		t.Fatalf("title = %q", presentation.Title)
 	}
 	input, ok := presentation.RawInput.(map[string]any)
-	if !ok || input["capability"] != "image.generate" || input["provider"] != "bigmodel" {
+	if !ok || input["capability"] != "image.generate" || input["provider"] != "xai" ||
+		input["aspect_ratio"] != "9:16" || input["resolution"] != "2k" {
 		t.Fatalf("raw input = %#v", presentation.RawInput)
 	}
 	encoded, err := json.Marshal(input)

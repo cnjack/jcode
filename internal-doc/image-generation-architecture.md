@@ -26,7 +26,7 @@
 - BigModel `cogview-3-flash` 精确 capability rule；
 - Alibaba Token Plan `wan2.7-image` / `wan2.7-image-pro` 精确 rule 与专属同步 `token_plan_multimodal` adapter；
 - 全局 Image Model；
-- 条件注册的 `generate_image(prompt, size?)`，P0 严格单图且请求 schema 不暴露 `count`；
+- 根据所选 adapter 条件注册 `generate_image` 参数：通用端点使用 `size?`，xAI 使用 `aspect_ratio?` / `resolution?`；P0 严格单图且请求 schema 不暴露 `count`；
 - provider URL/base64 同步结果；
 - managed Artifact v2、本地回放、Web/Desktop 图片卡、TUI 路径、ACP 文本/resource-link 降级；
 - BigModel Search MCP preset，先完成 MCP secret mask/merge；

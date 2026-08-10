@@ -9,12 +9,16 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { i18n } from '../i18n'
 import { store, uiActions } from '../app/store'
 import { buildImageEndpointConfig, buildProviderBaseURLUpdate, SettingsView } from './SettingsView'
 import { api } from '../lib/api'
+import {
+  removeProviderCatalogCache,
+  writeProviderCatalogCache,
+} from '../lib/providerCatalogCache'
 
 function renderView() {
   return render(
@@ -22,6 +26,14 @@ function renderView() {
       <SettingsView />
     </Provider>,
   )
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
 }
 
 beforeEach(async () => {
@@ -146,6 +158,82 @@ describe('SettingsView', () => {
     expect(toggle.getAttribute('aria-checked')).toBe('true')
   })
 
+  it('renders a cached provider catalog before background revalidation completes', async () => {
+    const provider = {
+      id: 'cached-copilot', name: 'Cached Copilot', api_key_set: false,
+      auth_binding: { method: 'github_copilot' as const, account_id: 'account-cache' },
+      auth_status: {
+        method: 'github_copilot' as const,
+        default_account_id: 'account-cache',
+        accounts: [{
+          id: 'account-cache', login: 'cached-user', authenticated_at: '2026-08-09T08:00:00Z', requires_reauth: false,
+        }],
+      },
+      capabilities: [],
+    }
+    removeProviderCatalogCache(provider.id)
+    writeProviderCatalogCache(provider, [{ id: 'cached-model', name: 'Cached Model', added: true }])
+    const liveCatalog = deferred<Array<{ id: string; name: string; added: boolean }>>()
+    vi.spyOn(api, 'listProviders').mockResolvedValue([provider])
+    vi.spyOn(api, 'providerCatalog').mockReturnValue(liveCatalog.promise)
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([])
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: '', model: '' }, current_image: { provider: '', model: '' }, providers: [],
+    })
+
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+    expect(await screen.findByText('Cached Model')).toBeTruthy()
+    expect(api.providerCatalog).toHaveBeenCalledWith(provider.id)
+
+    await act(async () => {
+      liveCatalog.resolve([{ id: 'fresh-model', name: 'Fresh Model', added: true }])
+      await Promise.resolve()
+    })
+    expect(await screen.findByText('Fresh Model')).toBeTruthy()
+    expect(screen.queryByText('Cached Model')).toBeNull()
+    removeProviderCatalogCache(provider.id)
+  })
+
+  it('does not let an older catalog request overwrite a newer refresh', async () => {
+    const provider = {
+      id: 'racing-copilot', name: 'Racing Copilot', api_key_set: false,
+      auth_binding: { method: 'github_copilot' as const, account_id: 'account-race' },
+      capabilities: [],
+    }
+    removeProviderCatalogCache(provider.id)
+    const initialRequest = deferred<Array<{ id: string; name: string; added: boolean }>>()
+    const refreshRequest = deferred<Array<{ id: string; name: string; added: boolean }>>()
+    vi.spyOn(api, 'listProviders').mockResolvedValue([provider])
+    vi.spyOn(api, 'providerCatalog')
+      .mockReturnValueOnce(initialRequest.promise)
+      .mockReturnValueOnce(refreshRequest.promise)
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([])
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: '', model: '' }, current_image: { provider: '', model: '' }, providers: [],
+    })
+
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+    await screen.findByText('Racing Copilot')
+    fireEvent.click(screen.getByTitle('Refresh catalog'))
+    expect(api.providerCatalog).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      refreshRequest.resolve([{ id: 'new-model', name: 'New Model', added: true }])
+      await Promise.resolve()
+    })
+    expect(await screen.findByText('New Model')).toBeTruthy()
+
+    await act(async () => {
+      initialRequest.resolve([{ id: 'old-model', name: 'Old Model', added: true }])
+      await Promise.resolve()
+    })
+    expect(screen.queryByText('Old Model')).toBeNull()
+    expect(screen.getByText('New Model')).toBeTruthy()
+    removeProviderCatalogCache(provider.id)
+  })
+
   it('sends base_url null when Settings clears a BigModel proxy without resending the API key', async () => {
     vi.spyOn(api, 'listProviders').mockResolvedValue([{
       id: 'zhipuai-coding-plan', name: 'BigModel Coding Plan', api_key_set: true,
@@ -206,5 +294,126 @@ describe('SettingsView', () => {
     expect(screen.queryByText('Provider tool')).toBeNull()
     expect(screen.queryByText('Current task')).toBeNull()
     expect(screen.queryByRole('switch', { name: 'Image generation tool' })).toBeNull()
+  })
+
+  it('adds an OpenAI provider with a managed ChatGPT account and no API key', async () => {
+    vi.spyOn(api, 'listProviders').mockResolvedValue([])
+    vi.spyOn(api, 'providerCatalog').mockResolvedValue([])
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([{
+      id: 'openai', name: 'OpenAI', configured: false, auth_methods: ['api_key', 'codex_oauth'],
+    }])
+    vi.spyOn(api, 'providerAuthStatus').mockResolvedValue({
+      method: 'codex_oauth',
+      default_account_id: 'account-1',
+      accounts: [{
+        id: 'account-1', login: 'jack@example.com', authenticated_at: '2026-08-09T08:00:00Z', requires_reauth: false,
+      }],
+    })
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: '', model: '' }, current_image: { provider: '', model: '' }, providers: [],
+    })
+    const addResponse = deferred<{ status: string }>()
+    const add = vi.spyOn(api, 'addProvider').mockReturnValue(addResponse.promise)
+
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'openai' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'ChatGPT' }))
+
+    await screen.findByText('jack@example.com')
+    expect(screen.queryByLabelText('API Key')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced' }))
+    expect(screen.queryByText('Custom Endpoint')).toBeNull()
+    expect(screen.queryByText('Custom Headers')).toBeNull()
+    const reasoningSelect = screen.getByText('Reasoning effort').parentElement?.querySelector('select')
+    expect(reasoningSelect).toBeTruthy()
+    fireEvent.change(reasoningSelect!, { target: { value: 'high' } })
+    expect(screen.queryByText('OpenAI-compatible image endpoint')).toBeNull()
+    const save = screen.getByRole('button', { name: 'Add' })
+    await waitFor(() => expect(save.hasAttribute('disabled')).toBe(false))
+    fireEvent.click(save)
+
+    await waitFor(() => expect(add).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('group', { name: 'Authentication' }).hasAttribute('disabled')).toBe(true)
+    expect(add.mock.calls[0][0]).toMatchObject({
+      id: 'openai',
+      auth_binding: { method: 'codex_oauth' },
+      reasoning_effort: 'high',
+    })
+    expect(add.mock.calls[0][0].api_key).toBeUndefined()
+    expect(add.mock.calls[0][0]).not.toHaveProperty('base_url')
+    expect(add.mock.calls[0][0]).not.toHaveProperty('headers')
+    expect(add.mock.calls[0][0]).not.toHaveProperty('image_endpoint')
+    await act(async () => {
+      addResponse.resolve({ status: 'ok' })
+      await Promise.resolve()
+    })
+  })
+
+  it('clears an existing image endpoint when a provider uses managed authentication', async () => {
+    const connected = {
+      method: 'codex_oauth' as const,
+      default_account_id: 'account-1',
+      accounts: [{
+        id: 'account-1', login: 'jack@example.com', authenticated_at: '2026-08-09T08:00:00Z', requires_reauth: false,
+      }],
+    }
+    vi.spyOn(api, 'listProviders').mockResolvedValue([{
+      id: 'openai', name: 'OpenAI', api_key_set: false,
+      auth_methods: ['api_key', 'codex_oauth'],
+      auth_binding: { method: 'codex_oauth', account_id: 'account-1' },
+      auth_status: connected,
+      image_endpoint: {
+        protocol: 'openai_images', base_url: 'https://images.example/v1', models: [{ id: 'paint-1' }],
+      },
+      capabilities: [],
+    }])
+    vi.spyOn(api, 'providerCatalog').mockResolvedValue([])
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([{
+      id: 'openai', name: 'OpenAI', configured: true, auth_methods: ['api_key', 'codex_oauth'],
+    }])
+    vi.spyOn(api, 'providerAuthStatus').mockResolvedValue(connected)
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: '', model: '' }, current_image: { provider: '', model: '' }, providers: [],
+    })
+    const update = vi.spyOn(api, 'updateProvider').mockResolvedValue({ status: 'ok' })
+
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+    fireEvent.click(await screen.findByTitle('Edit provider'))
+    await screen.findByText('jack@example.com')
+    expect(screen.queryByText('OpenAI-compatible image endpoint')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    const request = update.mock.calls[0][1]
+    expect(request.image_endpoint).toBeNull()
+    expect(request).not.toHaveProperty('base_url')
+    expect(request).not.toHaveProperty('headers')
+  })
+
+  it('surfaces a provider account that needs re-authentication', async () => {
+    vi.spyOn(api, 'listProviders').mockResolvedValue([{
+      id: 'openai', name: 'OpenAI', api_key_set: false,
+      auth_binding: { method: 'codex_oauth', account_id: 'account-1' },
+      auth_status: {
+        method: 'codex_oauth', default_account_id: 'account-1', accounts: [{
+          id: 'account-1', login: 'jack@example.com', authenticated_at: '2026-08-09T08:00:00Z', requires_reauth: true,
+        }],
+      },
+      capabilities: [],
+    }])
+    vi.spyOn(api, 'providerCatalog').mockResolvedValue([])
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([])
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: '', model: '' }, current_image: { provider: '', model: '' }, providers: [],
+    })
+
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+
+    expect(await screen.findByText(/Needs re-authentication · jack@example.com · ChatGPT/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Re-authenticate' })).toBeTruthy()
   })
 })

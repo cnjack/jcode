@@ -8,9 +8,20 @@ import (
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/providerauth"
 )
 
 // --- Setup & Provider Management Handlers ---
+
+type setupModelItem struct {
+	ID               string                  `json:"id"`
+	Name             string                  `json:"name"`
+	ToolCall         bool                    `json:"tool_call"`
+	ContextLimit     int                     `json:"context_limit,omitempty"`
+	Reasoning        bool                    `json:"reasoning,omitempty"`
+	Attachment       bool                    `json:"attachment,omitempty"`
+	ReasoningOptions []model.ReasoningOption `json:"reasoning_options,omitempty"`
+}
 
 // handleSetupStatus returns whether the server is in setup mode.
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
@@ -70,13 +81,14 @@ func (s *Server) handleSetupProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type providerItem struct {
-		ID         string   `json:"id"`
-		Name       string   `json:"name"`
-		Doc        string   `json:"doc,omitempty"`
-		API        string   `json:"api,omitempty"`
-		Env        []string `json:"env,omitempty"`
-		Configured bool     `json:"configured"`
-		Tag        string   `json:"tag,omitempty"` // "recommended", "free", "local"
+		ID          string   `json:"id"`
+		Name        string   `json:"name"`
+		Doc         string   `json:"doc,omitempty"`
+		API         string   `json:"api,omitempty"`
+		Env         []string `json:"env,omitempty"`
+		AuthMethods []string `json:"auth_methods,omitempty"`
+		Configured  bool     `json:"configured"`
+		Tag         string   `json:"tag,omitempty"` // "recommended", "free", "local"
 	}
 
 	providers := s.registry.ListProviders()
@@ -90,21 +102,24 @@ func (s *Server) handleSetupProviders(w http.ResponseWriter, r *http.Request) {
 
 	// Provider tags for recommendation.
 	tags := map[string]string{
-		"openai":    "recommended",
-		"anthropic": "recommended",
-		"ollama":    "local",
+		"openai":         "recommended",
+		"xai":            "recommended",
+		"github-copilot": "recommended",
+		"anthropic":      "recommended",
+		"ollama":         "local",
 	}
 
 	result := make([]providerItem, 0, len(providers))
 	for _, p := range providers {
 		result = append(result, providerItem{
-			ID:         p.ID,
-			Name:       p.Name,
-			Doc:        p.Doc,
-			API:        p.API,
-			Env:        p.Env,
-			Configured: configured[p.ID],
-			Tag:        tags[p.ID],
+			ID:          p.ID,
+			Name:        p.Name,
+			Doc:         p.Doc,
+			API:         p.API,
+			Env:         p.Env,
+			AuthMethods: providerAuthMethodsForID(s, p.ID),
+			Configured:  configured[p.ID],
+			Tag:         tags[p.ID],
 		})
 	}
 
@@ -134,40 +149,107 @@ func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	toModelItem := func(id, name string, toolCall bool, contextLimit int, reasoning, attachment bool, options []model.ReasoningOption) setupModelItem {
+		return setupModelItem{
+			ID: id, Name: name, ToolCall: toolCall, ContextLimit: contextLimit,
+			Reasoning: reasoning, Attachment: attachment, ReasoningOptions: options,
+		}
+	}
+
+	authMethod := r.URL.Query().Get("auth_method")
+	accountID := r.URL.Query().Get("account_id")
+	if authMethod == "" && accountID != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "auth_method is required with account_id"})
+		return
+	}
+	if authMethod != "" {
+		binding, err := s.validateProviderBinding(r.Context(), providerID, &config.ProviderAuthBinding{
+			Method: authMethod, AccountID: accountID,
+		})
+		if err != nil {
+			writeConfigMutationError(w, err)
+			return
+		}
+		method, err := parseProviderAuthMethod(binding.Method)
+		if err != nil {
+			writeProviderAuthError(w, err)
+			return
+		}
+		service, err := s.providerAuthService()
+		if err != nil {
+			writeProviderAuthError(w, err)
+			return
+		}
+		liveModels, err := service.Models(r.Context(), providerauth.Binding{
+			Method: method, AccountID: binding.AccountID,
+		})
+		if err != nil {
+			writeProviderAuthError(w, err)
+			return
+		}
+		result := make([]setupModelItem, 0, len(liveModels))
+		for _, live := range liveModels {
+			if live.Kind != providerauth.ModelKindChat {
+				continue
+			}
+			metadata := managedModelConfigFromLive(s.registry, providerID, live)
+			result = append(result, toModelItem(
+				live.ID, metadata.Name, metadata.ToolCall, metadata.Context,
+				metadata.Reasoning, metadata.Attachment, reasoningOptionsFromTiers(metadata.EffortTiers),
+			))
+		}
+		if len(result) == 0 {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "managed provider returned no chat models"})
+			return
+		}
+		prioritizeDefaultSetupModels(s.registry, providerID, result)
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
 	if s.registry == nil {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
 
 	models := s.registry.ListProviderModels(providerID, true)
-	type modelItem struct {
-		ID               string                  `json:"id"`
-		Name             string                  `json:"name"`
-		ToolCall         bool                    `json:"tool_call"`
-		ContextLimit     int                     `json:"context_limit,omitempty"`
-		Reasoning        bool                    `json:"reasoning,omitempty"`
-		Attachment       bool                    `json:"attachment,omitempty"`
-		ReasoningOptions []model.ReasoningOption `json:"reasoning_options,omitempty"`
-	}
 
-	result := make([]modelItem, 0, len(models))
+	result := make([]setupModelItem, 0, len(models))
 	for _, m := range models {
 		ctx := 0
 		if m.Limit != nil {
 			ctx = m.Limit.Context
 		}
-		result = append(result, modelItem{
-			ID:               m.ID,
-			Name:             m.Name,
-			ToolCall:         m.ToolCall,
-			ContextLimit:     ctx,
-			Reasoning:        m.Reasoning,
-			Attachment:       m.Attachment,
-			ReasoningOptions: m.ReasoningOptions,
-		})
+		result = append(result, toModelItem(
+			m.ID, m.Name, m.ToolCall, ctx, m.Reasoning, m.Attachment, m.ReasoningOptions,
+		))
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+func reasoningOptionsFromTiers(tiers []string) []model.ReasoningOption {
+	if len(tiers) == 0 {
+		return nil
+	}
+	return []model.ReasoningOption{{Type: "effort", Values: append([]string(nil), tiers...)}}
+}
+
+func prioritizeDefaultSetupModels(registry *model.ModelRegistry, providerID string, models []setupModelItem) {
+	if registry == nil || len(models) < 2 {
+		return
+	}
+	provider := registry.GetProvider(providerID)
+	if provider == nil {
+		return
+	}
+	sort.SliceStable(models, func(i, j int) bool {
+		left := provider.Models[models[i].ID]
+		right := provider.Models[models[j].ID]
+		leftDefault := left != nil && left.DefaultEnabled
+		rightDefault := right != nil && right.DefaultEnabled
+		return leftDefault && !rightDefault
+	})
 }
 
 // It saves the provider config and creates the agent.
@@ -178,28 +260,91 @@ func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Reques
 // a model explicitly since none can be inferred.
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider        string            `json:"provider"`
-		Model           string            `json:"model,omitempty"`
-		ModelReasoning  bool              `json:"model_reasoning,omitempty"`
-		APIKey          string            `json:"api_key"`
-		BaseURL         string            `json:"base_url,omitempty"`
-		Name            string            `json:"name,omitempty"` // custom provider display name
-		Headers         map[string]string `json:"headers,omitempty"`
-		Vision          *bool             `json:"vision,omitempty"`
-		Thinking        *bool             `json:"thinking,omitempty"`
-		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+		Provider        string                      `json:"provider"`
+		Model           string                      `json:"model,omitempty"`
+		ModelReasoning  bool                        `json:"model_reasoning,omitempty"`
+		APIKey          string                      `json:"api_key"`
+		BaseURL         string                      `json:"base_url,omitempty"`
+		Name            string                      `json:"name,omitempty"` // custom provider display name
+		Headers         map[string]string           `json:"headers,omitempty"`
+		Vision          *bool                       `json:"vision,omitempty"`
+		Thinking        *bool                       `json:"thinking,omitempty"`
+		ReasoningEffort string                      `json:"reasoning_effort,omitempty"`
+		AuthBinding     *config.ProviderAuthBinding `json:"auth_binding,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if req.Provider == "" || req.APIKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and api_key are required"})
+	if req.Provider == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider is required"})
 		return
+	}
+	normalizedAuthBinding, err := s.validateProviderBinding(r.Context(), req.Provider, req.AuthBinding)
+	if err != nil {
+		writeConfigMutationError(w, err)
+		return
+	}
+	req.AuthBinding = normalizedAuthBinding
+	if req.AuthBinding == nil && req.APIKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "api_key is required for API-key authentication"})
+		return
+	}
+	if req.AuthBinding != nil {
+		req.APIKey = ""
+		req.BaseURL = ""
+		req.Headers = nil
 	}
 	if !validReasoningEffort(req.ReasoningEffort) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
 		return
+	}
+
+	var managedModel *config.CustomModelConfig
+	if req.AuthBinding != nil {
+		method, parseErr := parseProviderAuthMethod(req.AuthBinding.Method)
+		if parseErr != nil {
+			writeProviderAuthError(w, parseErr)
+			return
+		}
+		service, serviceErr := s.providerAuthService()
+		if serviceErr != nil {
+			writeProviderAuthError(w, serviceErr)
+			return
+		}
+		liveModels, modelsErr := service.Models(r.Context(), providerauth.Binding{
+			Method: method, AccountID: req.AuthBinding.AccountID,
+		})
+		if modelsErr != nil {
+			writeProviderAuthError(w, modelsErr)
+			return
+		}
+		requestedModel := req.Model
+		if requestedModel == "" && s.registry != nil {
+			preferred := s.registry.PickDefaultModel(req.Provider)
+			for _, candidate := range liveModels {
+				if candidate.Kind == providerauth.ModelKindChat && candidate.ID == preferred {
+					requestedModel = preferred
+					break
+				}
+			}
+		}
+		for _, candidate := range liveModels {
+			if candidate.Kind != providerauth.ModelKindChat ||
+				(requestedModel != "" && candidate.ID != requestedModel) {
+				continue
+			}
+			metadata := managedModelConfigFromLive(s.registry, req.Provider, candidate)
+			managedModel = &metadata
+			req.Model = candidate.ID
+			break
+		}
+		if managedModel == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "selected model is not available for this managed account",
+			})
+			return
+		}
 	}
 
 	// Serialize the complete load/merge/save/publish transaction with every
@@ -231,7 +376,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 
 	// Build or update config.
 	var cfg *config.Config
-	cfg, err := config.LoadConfig()
+	cfg, err = config.LoadConfig()
 	if err != nil {
 		cfg, err = cloneConfigForSetup(s.cfg)
 		if err != nil {
@@ -250,11 +395,15 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	setupPC := &config.ProviderConfig{
 		APIKey:          req.APIKey,
 		BaseURL:         req.BaseURL,
+		Auth:            req.AuthBinding,
 		Name:            req.Name,
 		Headers:         cleanHeaders(req.Headers),
 		Vision:          req.Vision,
 		Thinking:        req.Thinking,
 		ReasoningEffort: req.ReasoningEffort,
+	}
+	if managedModel != nil {
+		setupPC.CustomModels = []config.CustomModelConfig{*managedModel}
 	}
 	// For a custom provider, persist the model as a custom model so it survives
 	// a model switch (otherwise it exists only as the active-model string and

@@ -18,6 +18,7 @@ import (
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	internalmodel "github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/model/responsemeta"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/toolpolicy"
@@ -54,6 +55,9 @@ func Run(
 	tokenUsage *internalmodel.TokenUsage,
 ) (result RunResult) {
 	ctx = toolpolicy.WithRunID(ctx, nextRunID(rec))
+	if rec != nil && rec.UUID() != "" {
+		ctx = internalmodel.WithProviderSessionID(ctx, rec.UUID())
+	}
 	if tracer != nil {
 		ctx = tracer.WithNewTrace(ctx, "coding_agent", messages)
 		defer func() {
@@ -589,6 +593,8 @@ func runInner(
 
 		if mo.IsStreaming {
 			var messageText strings.Builder
+			var reasoningText strings.Builder
+			var messageExtra map[string]any
 			var streamErr error
 			// Accumulate streaming tool call names, args, and IDs across chunks.
 			type pendingTC struct {
@@ -628,19 +634,27 @@ func runInner(
 					responseText.WriteString(chunk.Content)
 					h.OnAgentText(chunk.Content)
 				}
+				if chunk.ReasoningContent != "" {
+					reasoningText.WriteString(chunk.ReasoningContent)
+				}
+				messageExtra = mergeAssistantExtra(messageExtra, chunk.Extra)
 			}
 			if streamErr != nil {
 				// A failed stream may contain only a prefix of tool-call arguments.
 				// Preserve text already shown to the user, but never persist or
 				// expose incomplete calls as executable conversation history.
-				if messageText.Len() > 0 {
-					if rec != nil {
-						rec.RecordAssistant(messageText.String())
+				if messageText.Len() > 0 || reasoningText.Len() > 0 || len(messageExtra) > 0 {
+					partial := &schema.Message{
+						Role: schema.Assistant, Content: messageText.String(),
+						ReasoningContent: reasoningText.String(), Extra: messageExtra,
 					}
-					result.Messages = append(result.Messages, &schema.Message{
-						Role:    schema.Assistant,
-						Content: messageText.String(),
-					})
+					// Encrypted reasoning without visible output is not a complete
+					// assistant turn. Keep the live partial for diagnostics, but do
+					// not leave an orphan continuation item in the session journal.
+					if rec != nil && messageText.Len() > 0 {
+						rec.RecordAssistantMessage(partial)
+					}
+					result.Messages = append(result.Messages, partial)
 				}
 				if ctx.Err() != nil {
 					config.Logger().Printf("[runner] assistant stream cancelled: %v", streamErr)
@@ -658,13 +672,6 @@ func runInner(
 				}
 				h.OnAgentDone(runErr)
 				return finish(true, runErr)
-			}
-			// Flush assistant text at the end of each assistant message so the
-			// session file preserves the true message/tool interleaving. Without
-			// this, the whole run accumulates into a single assistant entry and
-			// replay collapses all surrounding tool calls into one big group.
-			if rec != nil && messageText.Len() > 0 {
-				rec.RecordAssistant(messageText.String())
 			}
 			// Notify and record accumulated tool calls in index order.
 			// All tool calls from this assistant message form one batch.
@@ -685,12 +692,22 @@ func runInner(
 					Function: schema.FunctionCall{Name: p.name, Arguments: p.args.String()},
 				})
 			}
-			if messageText.Len() > 0 || len(toolCalls) > 0 {
-				result.Messages = append(result.Messages, &schema.Message{
-					Role:      schema.Assistant,
-					Content:   messageText.String(),
-					ToolCalls: toolCalls,
-				})
+			if messageText.Len() > 0 || reasoningText.Len() > 0 || len(toolCalls) > 0 || len(messageExtra) > 0 {
+				assistantMessage := &schema.Message{
+					Role:             schema.Assistant,
+					Content:          messageText.String(),
+					ReasoningContent: reasoningText.String(),
+					ToolCalls:        toolCalls,
+					Extra:            messageExtra,
+				}
+				// Flush each complete assistant turn before its tool-call entries
+				// so replay preserves interleaving. Passing ToolCalls lets the
+				// recorder retain opaque reasoning for a tool-only turn while
+				// rejecting standalone opaque metadata.
+				if rec != nil {
+					rec.RecordAssistantMessage(assistantMessage)
+				}
+				result.Messages = append(result.Messages, assistantMessage)
 			}
 			if len(indices) > 0 {
 				batchID := nextBatchID()
@@ -716,15 +733,17 @@ func runInner(
 				}
 			}
 		} else if mo.Message != nil {
-			if mo.Message.Content != "" || len(mo.Message.ToolCalls) > 0 {
+			if mo.Message.Content != "" || mo.Message.ReasoningContent != "" || len(mo.Message.ToolCalls) > 0 || len(mo.Message.Extra) > 0 {
 				var toolCalls []schema.ToolCall
 				if len(mo.Message.ToolCalls) > 0 {
 					toolCalls = append(toolCalls, mo.Message.ToolCalls...)
 				}
 				result.Messages = append(result.Messages, &schema.Message{
-					Role:      schema.Assistant,
-					Content:   mo.Message.Content,
-					ToolCalls: toolCalls,
+					Role:             schema.Assistant,
+					Content:          mo.Message.Content,
+					ReasoningContent: mo.Message.ReasoningContent,
+					ToolCalls:        toolCalls,
+					Extra:            mergeAssistantExtra(nil, mo.Message.Extra),
 				})
 			}
 			if len(mo.Message.ToolCalls) > 0 {
@@ -756,8 +775,8 @@ func runInner(
 			}
 			// Flush non-streaming assistant text immediately so each assistant
 			// message is a distinct session entry with its surrounding tool calls.
-			if rec != nil && mo.Message.Content != "" {
-				rec.RecordAssistant(mo.Message.Content)
+			if rec != nil && (mo.Message.Content != "" || len(mo.Message.Extra) > 0) {
+				rec.RecordAssistantMessage(mo.Message)
 			}
 		}
 	}
@@ -769,6 +788,32 @@ func runInner(
 		return finish(true, persistErr)
 	}
 	return finish(false, nil)
+}
+
+func mergeAssistantExtra(dst, src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return dst
+	}
+	for key, value := range src {
+		// Eino attaches a per-dispatch correlation id to model messages. It is
+		// framework-ephemeral (and intentionally absent from session replay), so
+		// do not leak it into persistable conversation history.
+		if key == "_eino_msg_id" {
+			continue
+		}
+		if dst == nil {
+			dst = make(map[string]any, len(src))
+		}
+		if key == responsemeta.OpaqueItemsExtraKey {
+			items := append(responsemeta.FromExtra(dst), responsemeta.FromExtra(src)...)
+			if normalized := responsemeta.Normalize(items); len(normalized) > 0 {
+				dst[key] = normalized
+			}
+			continue
+		}
+		dst[key] = value
+	}
+	return dst
 }
 
 func decorateToolCallEvent(event *handler.ToolCallEvent) {

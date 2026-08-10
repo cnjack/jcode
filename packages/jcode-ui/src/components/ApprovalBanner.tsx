@@ -182,7 +182,10 @@ function BillablePendingCard({ approval, actions }: { approval: Approval; action
     : isSearch
       ? `${count} web search${count === 1 ? '' : 'es'}`
       : `${count} provider request${count === 1 ? '' : 's'}`
-  const details = [route, isImage ? summary?.size : undefined, unit].filter(Boolean).join(' · ')
+  const geometry = isImage
+    ? summary?.size || [summary?.aspect_ratio, summary?.resolution].filter(Boolean).join(' · ')
+    : undefined
+  const details = [route, geometry, unit].filter(Boolean).join(' · ')
   const label = isImage ? 'External image generation' : isSearch ? 'External web search' : 'External provider action'
   const question = isImage ? `Generate ${unit}?` : isSearch ? `Run ${unit}?` : `Send ${unit}?`
 

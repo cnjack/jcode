@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 )
 
@@ -84,6 +85,17 @@ func imageRuntimeVerifier(
 			current.CredentialFingerprint != expected.CredentialFingerprint ||
 			current.ConfigEpoch != expected.ConfigEpoch {
 			return fmt.Errorf("image runtime changed after approval")
+		}
+		if expected.AuthMethod != "" {
+			manager, managerErr := providerauth.Default(config.ConfigDir())
+			if managerErr != nil {
+				return fmt.Errorf("validate managed image account: %w", managerErr)
+			}
+			if validateErr := manager.ValidateBinding(ctx, providerauth.Binding{
+				Method: providerauth.Method(expected.AuthMethod), AccountID: expected.AccountID,
+			}); validateErr != nil {
+				return fmt.Errorf("validate managed image account: %w", validateErr)
+			}
 		}
 		return nil
 	}

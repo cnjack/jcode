@@ -295,6 +295,7 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 
 	// Build the run function that creates and executes the agent.
 	runFn := func(runCtx context.Context) (string, error) {
+		runCtx = internalmodel.WithProviderSubagent(runCtx)
 		childEnv := s.env.CloneForSubagent()
 		childTools := s.buildTools(childEnv, profile)
 		prompt := subagentSystemPrompt(profile, s.env.Pwd(), s.env.platform)

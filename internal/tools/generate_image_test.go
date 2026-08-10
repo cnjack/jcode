@@ -24,10 +24,12 @@ type stubImageGenerator struct {
 	result imagegen.Result
 	err    error
 	calls  int
+	input  imagegen.Request
 }
 
-func (g *stubImageGenerator) Generate(context.Context, imagegen.Request) (imagegen.Result, error) {
+func (g *stubImageGenerator) Generate(_ context.Context, input imagegen.Request) (imagegen.Result, error) {
 	g.calls++
+	g.input = input
 	return g.result, g.err
 }
 
@@ -357,6 +359,101 @@ func TestGenerateImageSchemaHasNoCount(t *testing.T) {
 	encoded, _ := json.Marshal(info)
 	if bytes.Contains(encoded, []byte(`"count"`)) {
 		t.Fatalf("P0 schema exposes count: %s", encoded)
+	}
+}
+
+func TestGenerateImageXAINativeSchemaAndLegacySizeNormalization(t *testing.T) {
+	deps := &GenerateImageDeps{
+		SupportedAspectRatios: []string{"1:1", "16:9", "9:16", "3:2", "2:3", "auto"},
+		SupportedResolutions:  []string{"1k", "2k"},
+	}
+	imageTool := NewGenerateImageTool(deps)
+	info, err := imageTool.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(`"size"`)) ||
+		!bytes.Contains(encoded, []byte(`"aspect_ratio"`)) ||
+		!bytes.Contains(encoded, []byte(`"resolution"`)) {
+		t.Fatalf("xAI schema = %s", encoded)
+	}
+	parsed, normalized, err := imageTool.(*generateImageTool).parseInput(
+		`{"prompt":" portrait ","size":"1024x1792"}`,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Prompt != "portrait" || parsed.Size != "" || parsed.AspectRatio != "9:16" ||
+		parsed.Resolution != "1k" {
+		t.Fatalf("parsed = %#v", parsed)
+	}
+	if normalized != `{"prompt":"portrait","aspect_ratio":"9:16","resolution":"1k"}` {
+		t.Fatalf("normalized = %s", normalized)
+	}
+}
+
+func TestGenerateImageRejectsAmbiguousOrUnsupportedNativeGeometry(t *testing.T) {
+	imageTool := NewGenerateImageTool(&GenerateImageDeps{
+		SupportedAspectRatios: []string{"1:1", "16:9"},
+		SupportedResolutions:  []string{"1k", "2k"},
+	}).(*generateImageTool)
+	for _, raw := range []string{
+		`{"prompt":"x","size":"1024x1024","aspect_ratio":"1:1"}`,
+		`{"prompt":"x","aspect_ratio":"9:16"}`,
+		`{"prompt":"x","resolution":"4k"}`,
+		`{"prompt":"x","size":"800x600"}`,
+	} {
+		if _, _, err := imageTool.parseInput(raw); err == nil {
+			t.Fatalf("parseInput(%s) succeeded", raw)
+		}
+	}
+}
+
+func TestGenerateImageLegacySizeDispatchesApprovedNativeGeometry(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	recorder, err := session.NewRecorder(t.TempDir(), "xai", "grok-4.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recorder.Close()
+	recorder.RecordUser("generate a portrait")
+	generator := &stubImageGenerator{result: imagegen.Result{Images: []imagegen.Image{{
+		Data: generatedPNG(t, 2, 3), MIMEType: "image/png", Width: 2, Height: 3,
+	}}}}
+	imageTool := NewGenerateImageTool(&GenerateImageDeps{
+		Generator: generator,
+		ArtifactService: artifact.NewServiceWithManagedRoot(
+			session.LoadArtifactRecords, nil, filepath.Join(t.TempDir(), "managed"),
+		),
+		Recorder: recorder, Ledger: toolpolicy.NewUsageLedger(1, 20, 0),
+		Provider: "xai", Model: "grok-imagine-image", EndpointProfile: "xai-images",
+		CredentialKind: "managed_account", CredentialFingerprint: "account-1",
+		ConfigEpoch: "0000000000000001", DispatchPolicy: imageDispatchPolicy(),
+		VerifyRuntime:         allowImageRuntime,
+		SupportedAspectRatios: []string{"1:1", "9:16"},
+		SupportedResolutions:  []string{"1k", "2k"},
+	})
+	rawArgs := `{"prompt":"portrait","size":"1024x1792"}`
+	intent, err := imageTool.(toolpolicy.BillableIntentPreparer).PrepareBillableIntent(
+		context.Background(), rawArgs, "legacy-size-call",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intent.NormalizedArgs != `{"prompt":"portrait","aspect_ratio":"9:16","resolution":"1k"}` {
+		t.Fatalf("approved args = %s", intent.NormalizedArgs)
+	}
+	ctx := toolpolicy.WithBillableIntent(context.Background(), intent)
+	if _, err := imageTool.InvokableRun(ctx, rawArgs); err != nil {
+		t.Fatal(err)
+	}
+	if generator.calls != 1 || generator.input.Size != "" || generator.input.AspectRatio != "9:16" ||
+		generator.input.Resolution != "1k" {
+		t.Fatalf("provider request calls=%d input=%#v", generator.calls, generator.input)
 	}
 }
 

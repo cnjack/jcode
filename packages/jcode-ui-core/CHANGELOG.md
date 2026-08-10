@@ -17,7 +17,8 @@
   generic and standalone tool surfaces.
 - **Structured billable approvals.** New `BillableApprovalSummary` plus
   `Approval.approvalClass` / `Approval.billableSummary` carry a bounded,
-  non-secret summary for external image/search decisions. Pending renderers can
+  non-secret summary for external image/search decisions, including native
+  image aspect-ratio and resolution controls. Pending renderers can
   inspect `ApprovalDecisionActions.canResolveOptions` before returning opaque
   option ids.
 - **Paged Ask User controls.** `AskUserControls` gains `activeIndex`,

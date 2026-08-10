@@ -60,6 +60,12 @@ import { uiActions, modelActions, loadConfig, loadModels, type SettingsTab } fro
 import { ProviderIcon } from './ProviderIcon'
 import { CloudTab } from './settings/CloudTab'
 import {
+  ProviderAuthSection,
+  isProviderAuthReady,
+  providerCredentialMethods,
+  resolveProviderAuthAccount,
+} from './settings/ProviderAuthSection'
+import {
   BTN_DANGER,
   BTN_GHOST,
   BTN_PRIMARY,
@@ -81,6 +87,11 @@ import {
   TEXTAREA,
 } from './settings/atoms'
 import { api } from '../lib/api'
+import {
+  readProviderCatalogCache,
+  removeProviderCatalogCache,
+  writeProviderCatalogCache,
+} from '../lib/providerCatalogCache'
 import { openRemoteConnect } from '../lib/remote'
 import { openUrl } from '../lib/useDesktop'
 import { LOCALE_LABELS, SUPPORTED_LOCALES, setLocale, type SupportedLocale } from '../i18n'
@@ -109,6 +120,9 @@ import type {
   SSHListResponse,
   UsageStats,
   SetupProvider,
+  ProviderAuthBinding,
+  ProviderAuthStatus,
+  ProviderCredentialMethod,
 } from '../lib/types'
 
 // ─── tab config ────────────────────────────────────────────────────────────
@@ -318,6 +332,7 @@ function ProvidersTab() {
   const [setupList, setSetupList] = useState<SetupProvider[]>([])
   const [catalogs, setCatalogs] = useState<Record<string, CatalogModel[]>>({})
   const [catalogLoading, setCatalogLoading] = useState('')
+  const catalogRequestEpochs = useRef(new Map<string, number>())
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<ProviderDetail | null>(null)
   const [modelForm, setModelForm] = useState<{ providerId: string; target: CustomModelDetail | null } | null>(null)
@@ -351,29 +366,51 @@ function ProvidersTab() {
     }
   }
 
+  function beginCatalogRequest(providerId: string): number {
+    const epoch = (catalogRequestEpochs.current.get(providerId) ?? 0) + 1
+    catalogRequestEpochs.current.set(providerId, epoch)
+    return epoch
+  }
+
+  function catalogRequestIsCurrent(providerId: string, epoch: number): boolean {
+    return catalogRequestEpochs.current.get(providerId) === epoch
+  }
+
+  async function revalidateCatalog(provider: ProviderDetail, showLoading = false): Promise<void> {
+    const epoch = beginCatalogRequest(provider.id)
+    if (showLoading) setCatalogLoading(provider.id)
+    try {
+      const catalog = await api.providerCatalog(provider.id)
+      if (!catalogRequestIsCurrent(provider.id, epoch)) return
+      writeProviderCatalogCache(provider, catalog)
+      setCatalogs((current) => ({ ...current, [provider.id]: catalog }))
+    } catch {
+      // Keep the last successful cache. A transient provider outage must not
+      // make known models disappear when reopening Settings.
+    } finally {
+      if (showLoading && catalogRequestIsCurrent(provider.id, epoch)) {
+        setCatalogLoading('')
+      }
+    }
+  }
+
   async function load() {
     setLoading(true)
     try {
       const list = await api.listProviders()
       setProviders(list)
-      // Pre-fetch each provider's catalog so the browse panel shows models
-      // immediately (the card's catalog is open by default).
-      await Promise.all(
-        list.map(async (p) => {
-          if (!catalogs[p.id]) {
-            try {
-              const cat = await api.providerCatalog(p.id)
-              setCatalogs((prev) => ({ ...prev, [p.id]: cat }))
-            } catch {
-              setCatalogs((prev) => ({ ...prev, [p.id]: [] }))
-            }
-          }
-        }),
-      )
+      setCatalogs(Object.fromEntries(list.map((provider) => [
+        provider.id,
+        readProviderCatalogCache(provider) ?? [],
+      ])))
+      // Stale-while-revalidate: cards render the last successful account-aware
+      // catalog immediately, then replace it only after the live request wins.
+      setLoading(false)
+      void Promise.all(list.map((provider) => revalidateCatalog(provider)))
     } catch {
       /* ignore */
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => {
@@ -473,26 +510,46 @@ function ProvidersTab() {
   }
 
   async function refreshCatalog(providerId: string) {
-    setCatalogLoading(providerId)
-    try {
-      const cat = await api.providerCatalog(providerId)
-      setCatalogs((prev) => ({ ...prev, [providerId]: cat }))
-    } catch {
-      setCatalogs((prev) => ({ ...prev, [providerId]: [] }))
-    }
-    setCatalogLoading('')
+    const provider = providers.find((candidate) => candidate.id === providerId)
+    if (provider) await revalidateCatalog(provider, true)
   }
 
   async function onProviderSaved() {
-    setProviders(await api.listProviders())
+    const nextProviders = await api.listProviders()
+    setProviders(nextProviders)
+    setCatalogs(Object.fromEntries(nextProviders.map((provider) => [
+      provider.id,
+      readProviderCatalogCache(provider) ?? [],
+    ])))
+    await Promise.all(nextProviders.map((provider) => revalidateCatalog(provider)))
     await refreshModels()
     setEditing(null)
     setAdding(false)
   }
 
+  async function onProviderAuthenticated(providerId: string) {
+    let refreshedProvider: ProviderDetail | undefined
+    try {
+      const nextProviders = await api.listProviders()
+      refreshedProvider = nextProviders.find((provider) => provider.id === providerId)
+      setProviders(nextProviders)
+    } catch {
+      // The account is already stored; keep the form usable if an older server
+      // cannot yet project managed-auth state onto provider details.
+    }
+    if (refreshedProvider) {
+      const cached = readProviderCatalogCache(refreshedProvider)
+      setCatalogs((current) => ({ ...current, [providerId]: cached ?? [] }))
+      await revalidateCatalog(refreshedProvider, true)
+    }
+    await refreshModels()
+  }
+
   async function deleteProvider(id: string) {
     try {
       await api.deleteProvider(id)
+      beginCatalogRequest(id)
+      removeProviderCatalogCache(id)
       setProviders((prev) => prev.filter((p) => p.id !== id))
       await refreshModels()
     } catch (err) {
@@ -620,6 +677,7 @@ function ProvidersTab() {
           setEditing(null)
         }}
         onSaved={onProviderSaved}
+        onAuthenticated={onProviderAuthenticated}
       />
     )
   }
@@ -880,6 +938,26 @@ function ProviderCard({
   const [search, setSearch] = useState('')
 
   const webSearchCapability = provider.capabilities?.find((capability) => capability.id === 'web_search')
+  const authAccount = resolveProviderAuthAccount(provider.auth_status, provider.auth_binding)
+  const authMethodLabel = provider.auth_binding
+    ? t(`settings.providers.auth.methods.${provider.auth_binding.method === 'codex_oauth'
+        ? 'chatgpt'
+        : provider.auth_binding.method === 'xai_oauth'
+          ? 'grok'
+          : 'copilot'}`)
+    : ''
+  const authNeedsReauth = !!provider.auth_binding && !!provider.auth_status
+    && (!!authAccount?.requires_reauth || (!!provider.auth_binding.account_id && !authAccount))
+  const authNeedsSignIn = !!provider.auth_binding && !!provider.auth_status && !authAccount && !authNeedsReauth
+  const authSummary = provider.auth_binding
+    ? provider.auth_status
+      ? authAccount
+        ? `${authNeedsReauth ? t('settings.providers.auth.needsReauth') : t('settings.providers.auth.connected')} · ${authAccount.login} · ${authMethodLabel}`
+        : `${t('settings.providers.auth.signInRequired')} · ${authMethodLabel}`
+      : `${t('settings.providers.auth.configured')} · ${authMethodLabel}`
+    : provider.api_key_set
+      ? `${t('settings.providers.auth.configured')} · ${t('settings.providers.auth.methods.apiKey')}`
+      : t('settings.providers.auth.signInRequired')
 
   const addedCount = catalog.filter((m) => m.added).length
   const filtered = (() => {
@@ -910,8 +988,21 @@ function ProviderCard({
             {provider.custom && <span className={CHIP}>{t('settings.providers.custom')}</span>}
             {selectedImageModel && <span className={CHIP_ACCENT}>{t('settings.providers.roles.imageSelectedBadge')}</span>}
           </div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-muted-foreground)]">
-            {provider.base_url || (provider.api_key_set ? t('settings.providers.apiKey') : '—')}
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--color-muted-foreground)]">
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{
+                backgroundColor: authNeedsReauth || authNeedsSignIn
+                  ? 'var(--color-warning-fg)'
+                  : provider.auth_binding && authAccount
+                    ? 'var(--color-success)'
+                    : 'var(--color-muted-foreground)',
+              }}
+            />
+            <span className="truncate">{authSummary}</span>
+            {provider.base_url && (
+              <span className="hidden truncate font-mono text-[10px] sm:inline">· {provider.base_url}</span>
+            )}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -942,6 +1033,12 @@ function ProviderCard({
             )
           ) : (
             <>
+              {(authNeedsReauth || authNeedsSignIn) && (
+                <button type="button" className={`${BTN_SECONDARY} ${BTN_XS}`} onClick={onEdit}>
+                  <ArrowPathIcon className="h-3.5 w-3.5" />
+                  {authNeedsReauth ? t('settings.providers.auth.reauthenticate') : t('settings.providers.auth.signInAction')}
+                </button>
+              )}
               <button type="button" title={t('settings.providers.edit')} className={`${BTN_GHOST} ${BTN_XS}`} onClick={onEdit}>
                 <PencilSquareIcon className="h-3.5 w-3.5" />
               </button>
@@ -1133,20 +1230,34 @@ function ProviderForm({
   configuredIds,
   onCancel,
   onSaved,
+  onAuthenticated,
 }: {
   editing: ProviderDetail | null
   setupList: SetupProvider[]
   configuredIds: string[]
   onCancel: () => void
   onSaved: () => void
+  onAuthenticated: (providerId: string, status: ProviderAuthStatus) => void | Promise<void>
 }) {
   const { t } = useTranslation()
   const isEdit = !!editing
+  const initialAuthMethods = editing?.custom
+    ? ['api_key' as const]
+    : providerCredentialMethods(
+        setupList.find((provider) => provider.id === editing?.id)?.auth_methods ?? editing?.auth_methods,
+        editing?.auth_binding,
+      )
+  const initialAuthMethod = editing?.auth_binding?.method ?? initialAuthMethods[0]
   const [mode, setMode] = useState<'registry' | 'custom'>(editing?.custom ? 'custom' : 'registry')
   const [selId, setSelId] = useState('')
   const [customId, setCustomId] = useState(editing?.id ?? '')
   const [name, setName] = useState(editing?.name ?? '')
   const [apiKey, setApiKey] = useState('')
+  const [authMethod, setAuthMethod] = useState<ProviderCredentialMethod>(initialAuthMethod)
+  const [authBinding, setAuthBinding] = useState<ProviderAuthBinding | null>(
+    initialAuthMethod === 'api_key' ? null : editing?.auth_binding ?? { method: initialAuthMethod },
+  )
+  const [authStatus, setAuthStatus] = useState<ProviderAuthStatus | undefined>(editing?.auth_status)
   const [baseUrl, setBaseUrl] = useState(editing?.base_url ?? '')
   const [headers, setHeaders] = useState<{ key: string; value: string }[]>(
     Object.entries(editing?.headers ?? {}).map(([key, value]) => ({ key, value })),
@@ -1187,6 +1298,25 @@ function ProviderForm({
   // Custom (non-registry) providers get the enable_thinking knob; registry
   // providers derive everything from models.dev metadata.
   const isCustomProvider = isEdit ? !!editing?.custom : mode === 'custom'
+  const selectedSetup = setupList.find((provider) => provider.id === providerId)
+  const authMethods = isCustomProvider
+    ? ['api_key' as const]
+    : providerCredentialMethods(selectedSetup?.auth_methods ?? editing?.auth_methods, editing?.auth_binding)
+  const isManagedAuth = authMethod !== 'api_key'
+  const managedAuthReady = authMethod === 'api_key' || isProviderAuthReady(authStatus, authBinding)
+
+  useEffect(() => {
+    if (isEdit) return
+    const setup = setupList.find((provider) => provider.id === selId)
+    const methods = mode === 'custom'
+      ? ['api_key' as const]
+      : providerCredentialMethods(setup?.auth_methods)
+    const next = methods.includes('api_key') ? 'api_key' : methods[0]
+    setAuthMethod(next)
+    setAuthBinding(next === 'api_key' ? null : { method: next })
+    setAuthStatus(undefined)
+    setApiKey('')
+  }, [isEdit, mode, selId, setupList])
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -1195,17 +1325,25 @@ function ProviderForm({
       setError(t('settings.providers.customIdRequired'))
       return
     }
-    if (!isEdit && !apiKey.trim()) {
+    if (authMethod === 'api_key' && !apiKey.trim() && (!isEdit || !editing?.api_key_set)) {
       setError(t('settings.providers.enterApiKey'))
+      return
+    }
+    if (authMethod !== 'api_key' && !isProviderAuthReady(authStatus, authBinding)) {
+      setError(t('settings.providers.auth.signInRequired'))
       return
     }
     setSaving(true)
     try {
-      const builtHeaders = buildHeaders(headers)
+      const builtHeaders = isManagedAuth ? {} : buildHeaders(headers)
       let imageEndpoint: ImageEndpointConfig | null | undefined = buildImageEndpointConfig(
         imageEndpointEnabled, imageEndpointBaseURL, imageEndpointModels, imageAssetHosts,
       )
-      if (!imageEndpointEnabled && isEdit && editing?.image_endpoint) imageEndpoint = null
+      if (isManagedAuth) {
+        imageEndpoint = isEdit && editing?.image_endpoint ? null : undefined
+      } else if (!imageEndpointEnabled && isEdit && editing?.image_endpoint) {
+        imageEndpoint = null
+      }
       // '' (Default) → undefined so the JSON omits the override entirely.
       // Vision is never sent: image support comes from model metadata, and
       // omitting the field clears any stale stored override on save.
@@ -1213,24 +1351,32 @@ function ProviderForm({
       if (isEdit) {
         const data: Parameters<typeof api.updateProvider>[1] = {
           name: name || undefined,
-          base_url: buildProviderBaseURLUpdate(editing?.base_url, baseUrl),
-          headers: Object.keys(builtHeaders).length ? builtHeaders : undefined,
+          ...(!isManagedAuth ? {
+            base_url: buildProviderBaseURLUpdate(editing?.base_url, baseUrl),
+            headers: Object.keys(builtHeaders).length ? builtHeaders : undefined,
+          } : {}),
           thinking: thinkingOverride,
           reasoning_effort: reasoningEffort || undefined,
           image_endpoint: imageEndpoint,
+          auth_binding: authMethod === 'api_key'
+            ? editing?.auth_binding ? null : undefined
+            : authBinding ?? { method: authMethod },
         }
-        if (apiKey.trim()) data.api_key = apiKey.trim()
+        if (authMethod === 'api_key' && apiKey.trim()) data.api_key = apiKey.trim()
         await api.updateProvider(editing!.id, data)
       } else {
         await api.addProvider({
           id: providerId,
-          api_key: apiKey.trim(),
+          api_key: authMethod === 'api_key' ? apiKey.trim() : undefined,
+          auth_binding: authMethod === 'api_key' ? undefined : authBinding ?? { method: authMethod },
           name: name || undefined,
           thinking: thinkingOverride,
           reasoning_effort: reasoningEffort || undefined,
-          base_url: baseUrl.trim() || undefined,
-          headers: Object.keys(builtHeaders).length ? builtHeaders : undefined,
-          image_endpoint: imageEndpoint ?? undefined,
+          ...(!isManagedAuth ? {
+            base_url: baseUrl.trim() || undefined,
+            headers: Object.keys(builtHeaders).length ? builtHeaders : undefined,
+            image_endpoint: imageEndpoint ?? undefined,
+          } : {}),
         })
       }
       onSaved()
@@ -1293,15 +1439,27 @@ function ProviderForm({
             </Field>
           )}
 
-          <Field label={t('settings.providers.apiKey')}>
-            <input
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              type="password"
-              placeholder={isEdit ? t('settings.providers.apiKeyUnchanged') : 'sk-…'}
-              className={INPUT_MONO}
-            />
-          </Field>
+          <ProviderAuthSection
+            methods={authMethods}
+            value={authMethod}
+            binding={authBinding}
+            initialStatus={authStatus}
+            disabled={saving}
+            apiKeyField={(
+              <input
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                type="password"
+                aria-label={t('settings.providers.apiKey')}
+                placeholder={isEdit ? t('settings.providers.apiKeyUnchanged') : t('setup.apiKeyPlaceholder')}
+                className={INPUT_MONO}
+              />
+            )}
+            onMethodChange={setAuthMethod}
+            onBindingChange={setAuthBinding}
+            onStatusChange={setAuthStatus}
+            onAuthenticated={(status) => onAuthenticated(providerId, status)}
+          />
 
           {(mode === 'custom' || isEdit) && (
             <Field label={t('settings.providers.customName')}>
@@ -1320,66 +1478,72 @@ function ProviderForm({
             type="button"
             onClick={() => setAdvancedOpen((v) => !v)}
             className="mb-3 flex items-center gap-1 text-[11px] font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+            aria-expanded={advancedOpen}
+            aria-controls="provider-advanced-fields"
           >
             <ChevronDownIcon
-              className="h-3.5 w-3.5 transition-transform"
+              className="h-3.5 w-3.5 transition-transform motion-reduce:transition-none"
               style={{ transform: advancedOpen ? 'rotate(180deg)' : 'none' }}
             />
             {t('settings.providers.advanced')}
           </button>
 
           {advancedOpen && (
-            <div className="mb-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] p-3">
-              <Field label={t('settings.providers.endpoint')}>
-                <input
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  type="text"
-                  placeholder={t('settings.providers.endpointPlaceholder')}
-                  className={INPUT_MONO}
-                />
-              </Field>
+            <div id="provider-advanced-fields" className="mb-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] p-3">
+              {!isManagedAuth && (
+                <>
+                  <Field label={t('settings.providers.endpoint')}>
+                    <input
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      type="text"
+                      placeholder={t('settings.providers.endpointPlaceholder')}
+                      className={INPUT_MONO}
+                    />
+                  </Field>
 
-              <div className="mb-3.5">
-                <div className="mb-1.5 flex items-center justify-between">
-                  <label className={LABEL + ' !mb-0'}>{t('settings.providers.headers')}</label>
-                  <button
-                    type="button"
-                    className={`${BTN_GHOST} ${BTN_XS}`}
-                    onClick={() => setHeaders((h) => [...h, { key: '', value: '' }])}
-                  >
-                    + {t('settings.providers.addHeader')}
-                  </button>
-                </div>
-                {headers.length === 0 && (
-                  <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.providers.headersHint')}</div>
-                )}
-                {headers.map((h, i) => (
-                  <div key={i} className="mb-2 flex gap-2">
-                    <input
-                      value={h.key}
-                      onChange={(e) => setHeaders((prev) => prev.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))}
-                      type="text"
-                      placeholder={t('settings.providers.headerKey')}
-                      className={INPUT_MONO}
-                    />
-                    <input
-                      value={h.value}
-                      onChange={(e) => setHeaders((prev) => prev.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
-                      type="text"
-                      placeholder="value"
-                      className={INPUT_MONO}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setHeaders((prev) => prev.filter((_, j) => j !== i))}
-                      className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--color-muted-foreground)] hover:bg-[var(--color-secondary)]"
-                    >
-                      ✕
-                    </button>
+                  <div className="mb-3.5">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <label className={LABEL + ' !mb-0'}>{t('settings.providers.headers')}</label>
+                      <button
+                        type="button"
+                        className={`${BTN_GHOST} ${BTN_XS}`}
+                        onClick={() => setHeaders((h) => [...h, { key: '', value: '' }])}
+                      >
+                        + {t('settings.providers.addHeader')}
+                      </button>
+                    </div>
+                    {headers.length === 0 && (
+                      <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.providers.headersHint')}</div>
+                    )}
+                    {headers.map((h, i) => (
+                      <div key={i} className="mb-2 flex gap-2">
+                        <input
+                          value={h.key}
+                          onChange={(e) => setHeaders((prev) => prev.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))}
+                          type="text"
+                          placeholder={t('settings.providers.headerKey')}
+                          className={INPUT_MONO}
+                        />
+                        <input
+                          value={h.value}
+                          onChange={(e) => setHeaders((prev) => prev.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+                          type="text"
+                          placeholder="value"
+                          className={INPUT_MONO}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setHeaders((prev) => prev.filter((_, j) => j !== i))}
+                          className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--color-muted-foreground)] hover:bg-[var(--color-secondary)]"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              )}
 
               <Field label={t('settings.providers.advanced')}>
                 <div className="space-y-2">
@@ -1418,7 +1582,7 @@ function ProviderForm({
                 </div>
               </Field>
 
-              <div className="mt-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+              {!isManagedAuth && <div className="mt-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-[12px] font-medium text-[var(--color-foreground)]">
@@ -1510,7 +1674,7 @@ function ProviderForm({
                     </Field>
                   </div>
                 )}
-              </div>
+              </div>}
             </div>
           )}
 
@@ -1520,7 +1684,7 @@ function ProviderForm({
           <button type="button" className={BTN_SECONDARY} onClick={onCancel}>
             {t('common.cancel')}
           </button>
-          <button type="submit" disabled={saving} className={BTN_PRIMARY}>
+          <button type="submit" disabled={saving || !managedAuthReady} className={BTN_PRIMARY}>
             {saving ? t('settings.providers.saving') : isEdit ? t('settings.mcp.save') : t('settings.providers.addBtn')}
           </button>
         </div>

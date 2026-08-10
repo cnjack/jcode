@@ -121,7 +121,8 @@ func (c *TokenPlanMultimodalClient) Generate(ctx context.Context, input Request)
 		return Result{}, fmt.Errorf("P0 image generation supports exactly one image")
 	}
 	if strings.TrimSpace(input.Quality) != "" || strings.TrimSpace(input.Background) != "" ||
-		strings.TrimSpace(input.OutputFormat) != "" || strings.TrimSpace(input.ResponseFormat) != "" {
+		strings.TrimSpace(input.OutputFormat) != "" || strings.TrimSpace(input.ResponseFormat) != "" ||
+		strings.TrimSpace(input.AspectRatio) != "" || strings.TrimSpace(input.Resolution) != "" {
 		return Result{}, fmt.Errorf("image request contains options unsupported by Token Plan")
 	}
 	size, err := normalizeTokenPlanSize(input.Size)

@@ -5,12 +5,24 @@
  * users test the connection, then calls /api/setup/complete.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api'
-import { normalizeMode, type SetupProvider, type SetupModel } from '../lib/types'
+import {
+  normalizeMode,
+  type ProviderAuthBinding,
+  type ProviderAuthStatus,
+  type ProviderCredentialMethod,
+  type SetupProvider,
+  type SetupModel,
+} from '../lib/types'
 import { useAppDispatch } from '../app/hooks'
 import { chatActions, loadWorkspaceState, modelActions, sessionActions, uiActions } from '../app/store'
+import {
+  ProviderAuthSection,
+  isProviderAuthReady,
+  providerCredentialMethods,
+} from './settings/ProviderAuthSection'
 
 export function SetupView() {
   const { t } = useTranslation()
@@ -26,26 +38,79 @@ export function SetupView() {
   const [headersText, setHeadersText] = useState('')
   const [models, setModels] = useState<SetupModel[]>([])
   const [apiKey, setApiKey] = useState('')
+  const [authMethod, setAuthMethod] = useState<ProviderCredentialMethod>('api_key')
+  const [authBinding, setAuthBinding] = useState<ProviderAuthBinding | null>(null)
+  const [authStatus, setAuthStatus] = useState<ProviderAuthStatus | undefined>()
   const [model, setModel] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [validating, setValidating] = useState(false)
   const [validation, setValidation] = useState<{ valid: boolean; error?: string } | null>(null)
   const [error, setError] = useState('')
+  const mountedRef = useRef(true)
+  const modelsRequestRef = useRef(0)
+  const selectedProviderRef = useRef<string | null>(null)
+  selectedProviderRef.current = !custom ? selected?.id ?? null : null
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      modelsRequestRef.current += 1
+    }
+  }, [])
+
+  async function loadProviderModels(providerID: string, binding?: ProviderAuthBinding): Promise<void> {
+    const requestID = modelsRequestRef.current + 1
+    modelsRequestRef.current = requestID
+    let nextModels: SetupModel[] = []
+    try {
+      nextModels = binding
+        ? await api.setupProviderModels(providerID, binding)
+        : await api.setupProviderModels(providerID)
+    } catch {
+      nextModels = []
+    }
+    if (!mountedRef.current
+      || modelsRequestRef.current !== requestID
+      || selectedProviderRef.current !== providerID) return
+    setModels(nextModels)
+    if (binding) setModel(nextModels[0]?.id ?? '')
+  }
 
   useEffect(() => {
     api.setupProviders().then(setProviders).catch(() => {})
   }, [])
 
   useEffect(() => {
-    if (!selected || custom) return
+    modelsRequestRef.current += 1
     setModels([])
     setModel('')
-    api.setupProviderModels(selected.id).then(setModels).catch(() => {})
+    if (!selected || custom) return
+    void loadProviderModels(selected.id)
   }, [selected, custom])
 
   useEffect(() => {
+    if (!selected || custom || authMethod === 'api_key' ||
+      !isProviderAuthReady(authStatus, authBinding)) return
+    const accountID = authBinding?.account_id || authStatus?.default_account_id
+    void loadProviderModels(selected.id, {
+      method: authMethod,
+      account_id: accountID || undefined,
+    })
+  }, [selected, custom, authMethod, authBinding, authStatus])
+
+  useEffect(() => {
     setValidation(null)
-  }, [apiKey, selected, custom, baseUrl, customId, headersText])
+  }, [apiKey, authMethod, authBinding, selected, custom, baseUrl, customId, headersText])
+
+  useEffect(() => {
+    const methods = custom ? ['api_key' as const] : providerCredentialMethods(selected?.auth_methods)
+    const next = methods.includes('api_key') ? 'api_key' : methods[0]
+    setAuthMethod(next)
+    setAuthBinding(next === 'api_key' ? null : { method: next })
+    setAuthStatus(undefined)
+    setApiKey('')
+  }, [selected, custom])
 
   function parseHeaders(): Record<string, string> | undefined {
     const raw = headersText.trim()
@@ -62,10 +127,6 @@ export function SetupView() {
   }
 
   function validateInputs(): boolean {
-    if (!apiKey.trim()) {
-      setError(t('setup.apiKeyRequired'))
-      return false
-    }
     if (custom) {
       if (!customId.trim()) {
         setError(t('setup.customIdRequired'))
@@ -89,13 +150,21 @@ export function SetupView() {
       setError(t('setup.chooseProvider'))
       return false
     }
+    if (authMethod === 'api_key' && !apiKey.trim()) {
+      setError(t('setup.apiKeyRequired'))
+      return false
+    }
+    if (authMethod !== 'api_key' && !isProviderAuthReady(authStatus, authBinding)) {
+      setError(t('settings.providers.auth.signInRequired'))
+      return false
+    }
     return true
   }
 
   async function testConnection() {
     setError('')
     setValidation(null)
-    if (!validateInputs()) return
+    if (authMethod !== 'api_key' || !validateInputs()) return
     setValidating(true)
     try {
       const result = await api.setupValidate({
@@ -120,12 +189,15 @@ export function SetupView() {
     try {
       await api.setupComplete({
         provider: providerId(),
-        api_key: apiKey.trim(),
+        api_key: authMethod === 'api_key' ? apiKey.trim() : undefined,
+        auth_binding: authMethod === 'api_key' ? undefined : authBinding ?? { method: authMethod },
         model: custom ? customModel.trim() : model || undefined,
         model_reasoning: custom ? customReasoning : undefined,
-        base_url: baseUrl.trim() || undefined,
         name: custom ? customName.trim() || customId.trim() : undefined,
-        headers: parseHeaders(),
+        ...(authMethod === 'api_key' ? {
+          base_url: baseUrl.trim() || undefined,
+          headers: parseHeaders(),
+        } : {}),
       })
       const h = await api.health()
       dispatch(modelActions.setProvider(h.provider))
@@ -146,12 +218,19 @@ export function SetupView() {
     }
   }
 
+  const authMethods = custom
+    ? ['api_key' as const]
+    : providerCredentialMethods(selected?.auth_methods)
+  const credentialsReady = authMethod === 'api_key'
+    ? !!apiKey.trim()
+    : isProviderAuthReady(authStatus, authBinding)
+
   return (
-    <div className="setup-frame relative flex h-screen items-center justify-center bg-[var(--color-background)]">
+    <div className="setup-frame relative flex min-h-[100dvh] items-center justify-center bg-[var(--color-background)] p-4">
       <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
       <form
         onSubmit={complete}
-        className="w-full max-w-md rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-md)]"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-md)]"
       >
         <h1 className="text-lg font-semibold">{t('setup.welcomeTitle')}</h1>
         <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
@@ -192,14 +271,41 @@ export function SetupView() {
           </div>
         )}
 
-        <label className="mt-3 block text-xs font-medium text-[var(--color-muted-foreground)]">{t('setup.apiKey')}</label>
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder={t('setup.apiKeyPlaceholder')}
-          className="mt-1 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-sm outline-none focus:border-[var(--color-primary)]"
-        />
+        {(selected || custom) && (
+          <div className="mt-3">
+            <ProviderAuthSection
+              methods={authMethods}
+              value={authMethod}
+              binding={authBinding}
+              initialStatus={authStatus}
+              disabled={submitting}
+              apiKeyField={(
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  aria-label={t('setup.apiKey')}
+                  placeholder={t('setup.apiKeyPlaceholder')}
+                  className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-sm outline-none focus:border-[var(--color-primary)]"
+                />
+              )}
+              onMethodChange={setAuthMethod}
+              onBindingChange={setAuthBinding}
+              onStatusChange={setAuthStatus}
+              onAuthenticated={async (status) => {
+                setAuthStatus(status)
+                const providerID = selectedProviderRef.current
+                if (providerID) {
+                  const accountID = authBinding?.account_id || status.default_account_id
+                  await loadProviderModels(providerID, {
+                    method: status.method,
+                    account_id: accountID || undefined,
+                  })
+                }
+              }}
+            />
+          </div>
+        )}
 
         {custom && (
           <>
@@ -246,18 +352,20 @@ export function SetupView() {
           </div>
         )}
         {error && <div className="mt-2 text-xs text-[var(--color-error-fg)]">{error}</div>}
-        <div className="mt-4 grid grid-cols-[auto_1fr] gap-2">
-          <button
-            type="button"
-            disabled={validating || !apiKey}
-            onClick={() => void testConnection()}
-            className="rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-2 text-sm font-medium text-[var(--color-foreground)] disabled:opacity-50"
-          >
-            {validating ? t('setup.checking') : t('setup.testConnection')}
-          </button>
+        <div className={`mt-4 grid gap-2 ${authMethod === 'api_key' ? 'grid-cols-[auto_1fr]' : 'grid-cols-1'}`}>
+          {authMethod === 'api_key' && (
+            <button
+              type="button"
+              disabled={validating || !apiKey}
+              onClick={() => void testConnection()}
+              className="rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-2 text-sm font-medium text-[var(--color-foreground)] disabled:opacity-50"
+            >
+              {validating ? t('setup.checking') : t('setup.testConnection')}
+            </button>
+          )}
           <button
             type="submit"
-            disabled={submitting || !apiKey || (!custom && !selected)}
+            disabled={submitting || !credentialsReady || (!custom && !selected)}
             className="rounded-[var(--radius-md)] bg-[var(--color-primary)] px-3 py-2 text-sm font-medium text-[var(--color-on-primary)] disabled:opacity-50"
           >
             {submitting ? t('setup.settingUp') : t('setup.completeSetup')}

@@ -312,6 +312,8 @@ export interface BillableApprovalSummary {
   provider?: string
   model?: string
   size?: string
+  aspect_ratio?: string
+  resolution?: string
   count?: number
   billable?: boolean
   has_reference?: boolean

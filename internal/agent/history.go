@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/config"
+	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/tools"
 )
@@ -43,6 +44,7 @@ func CompactHistory(ctx context.Context, cm einomodel.BaseChatModel, history []a
 		fmt.Fprintf(&sb, "[%s]: %s\n", msg.Role, TruncateStr(msg.Content, 500))
 	}
 
+	ctx = internalmodel.WithProviderAgentInitiated(ctx)
 	resp, err := cm.Generate(ctx, []*schema.Message{
 		schema.SystemMessage("You are a conversation summarizer. Produce a concise summary of the conversation history provided. Output only the summary, no preamble."),
 		schema.UserMessage(sb.String()),

@@ -20,7 +20,7 @@
   transcript.
 - **Billable approval presentation.** `ApprovalBanner` recognizes
   `approvalClass: 'billable_external'` and presents the bounded provider,
-  model, size, count, and capability summary with explicit deny/allow-once
+  model, size or native aspect-ratio/resolution, count, and capability summary with explicit deny/allow-once
   actions. Image generation and provider web search receive distinct copy and
   icons without exposing the full prompt or raw tool arguments.
 - Re-exported the new core media contracts — `ArtifactRef`, `ToolPhase`,

@@ -145,12 +145,26 @@ Map of provider name to provider config. Each provider needs:
 
 | Field | Required | Description |
 |---|---|---|
-| `api_key` | Yes | Your API key |
-| `base_url` | No | Custom base URL (defaults to the provider's standard endpoint) |
+| `api_key` | Conditional | API key for the legacy/default authentication path; required unless `auth` is set |
+| `auth` | Conditional | Non-secret managed account binding: `{ "method": "codex_oauth" | "xai_oauth" | "github_copilot", "account_id"?: "..." }` |
+| `base_url` | No | Custom base URL for API-key providers (defaults to the provider's standard endpoint) |
+
+Managed account credentials are not stored in this map. They live in
+`~/.jcode/provider-auth.json`, which is written atomically with owner-only file
+permissions. The Provider config stores only `auth.method` and an optional
+`auth.account_id`; omitting the account ID follows that method's default usable
+account. Managed transports ignore custom `base_url`, `headers`, `protocol`, and
+`api_key` values and use their pinned runtime profile. Because custom image
+endpoints currently reuse the Provider API key, `image_endpoint` is unavailable
+on a managed-login Provider; configure it under a separate API-key Provider.
+The built-in xAI managed profile is the exception: `image_model` may select
+`xai/grok-imagine-image` or `xai/grok-imagine-image-quality`, which use the
+pinned official xAI Images endpoint and a dispatch-time managed credential.
 
 These are **local Providers** and Desktop calls them directly. When Cloud
-configuration sync is enabled, their secrets and custom headers are encrypted
-on Desktop before upload. Cloud Providers use a separate server-side catalog and
+configuration sync is enabled, API keys and custom headers are encrypted on
+Desktop before upload. Managed account credentials remain device-local; only
+their non-secret binding is part of Provider configuration. Cloud Providers use a separate server-side catalog and
 `cloud_proxy`; they are not written into this map. See
 [Cloud & configuration sync](/docs/cloud).
 
@@ -162,6 +176,7 @@ Active model in `"provider/model"` format.
 |---|---|
 | `model` | Primary model for all interactions |
 | `small_model` | Optional lightweight model. Powers the subagent `"small"` model alias (cheap delegated subtasks) and LLM session-title generation. Unset → subagents use the parent model and titles stay truncated first messages |
+| `image_model` | Optional independent image-generation role in `"provider/model"` format. Generated calls remain externally billable and follow the configured approval policy |
 | `max_iterations` | Maximum agent iterations per turn (default: 1000) |
 
 ### context_limits

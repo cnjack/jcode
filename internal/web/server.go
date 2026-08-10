@@ -26,6 +26,7 @@ import (
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
@@ -78,10 +79,13 @@ type Server struct {
 	ctxPtr atomic.Pointer[context.Context]
 
 	// Dependencies set during initialization.
-	tracer   *telemetry.LangfuseTracer
-	cfg      *config.Config
-	cfgMu    sync.Mutex // serializes read-modify-write SaveConfig from concurrent handlers
-	registry *model.ModelRegistry
+	providerAuthMu  sync.Mutex
+	providerAuth    ProviderAuthService
+	providerAuthErr error
+	tracer          *telemetry.LangfuseTracer
+	cfg             *config.Config
+	cfgMu           sync.Mutex // serializes read-modify-write SaveConfig from concurrent handlers
+	registry        *model.ModelRegistry
 	// newEngine builds a fresh, fully-isolated task engine (its own env, agent,
 	// recorder, handler, approval state) at the given pwd/mode. This is how a new
 	// concurrent task — or a "switch project" — gets its run state without
@@ -196,6 +200,21 @@ type Server struct {
 
 type ArtifactOpener func(context.Context, string, bool) error
 
+// ProviderAuthService is the Web-facing slice of the process-wide managed
+// provider account manager. Keeping the interface here makes device-flow and
+// provider mutation handlers testable without real OAuth endpoints.
+type ProviderAuthService interface {
+	Start(context.Context, providerauth.Method) (providerauth.Flow, error)
+	Poll(context.Context, providerauth.Method, string) (providerauth.Flow, error)
+	Cancel(providerauth.Method, string) error
+	Status(context.Context, providerauth.Method) (providerauth.Status, error)
+	SetDefault(context.Context, providerauth.Method, string) error
+	Remove(context.Context, providerauth.Method, string) error
+	Logout(context.Context, providerauth.Method) error
+	ValidateBinding(context.Context, providerauth.Binding) error
+	Models(context.Context, providerauth.Binding) ([]providerauth.Model, error)
+}
+
 // ArtifactSharePublisher is consumed by the local Web API and implemented by
 // cloud.ArtifactSharePublisher. Keeping the interface here makes task scoping
 // and login behavior independently testable without a Cloud deployment.
@@ -287,6 +306,7 @@ type ServerConfig struct {
 	ArtifactShares      ArtifactSharePublisher                                                // optional: encrypted Cloud artifact publisher
 	CloudCredentials    func() (*cloud.Credentials, error)                                    // optional: injectable credential loader
 	OpenArtifact        ArtifactOpener                                                        // optional: Desktop open/reveal adapter
+	ProviderAuth        ProviderAuthService                                                   // optional: managed provider login service
 }
 
 // NewServer creates a new web server.
@@ -377,6 +397,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		artifactShares:       artifactShares,
 		loadCloudCredentials: loadCloudCredentials,
 		openArtifact:         openArtifact,
+		providerAuth:         cfg.ProviderAuth,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
 	// the root context exists.
@@ -563,6 +584,15 @@ func (s *Server) Start(ctx context.Context) error {
 	// built-in model list; for custom endpoints it queries the live /models
 	// endpoint. Each entry is flagged added=true when already configured.
 	mux.HandleFunc("GET /api/providers/{id}/models", s.handleProviderCatalog)
+	// Managed provider authentication. Device tokens and bearer credentials
+	// never cross this boundary; clients receive only flow/account summaries.
+	mux.HandleFunc("GET /api/provider-auth/{method}", s.handleProviderAuthStatus)
+	mux.HandleFunc("POST /api/provider-auth/{method}/start", s.handleProviderAuthStart)
+	mux.HandleFunc("POST /api/provider-auth/{method}/flows/{flow_id}/poll", s.handleProviderAuthPoll)
+	mux.HandleFunc("DELETE /api/provider-auth/{method}/flows/{flow_id}", s.handleProviderAuthCancel)
+	mux.HandleFunc("POST /api/provider-auth/{method}/default", s.handleProviderAuthSetDefault)
+	mux.HandleFunc("DELETE /api/provider-auth/{method}/accounts/{account_id}", s.handleProviderAuthRemove)
+	mux.HandleFunc("DELETE /api/provider-auth/{method}", s.handleProviderAuthLogout)
 
 	// History management.
 	mux.HandleFunc("POST /api/history/truncate", s.handleTruncateHistory)

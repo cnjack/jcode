@@ -2,8 +2,12 @@ package command
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 
@@ -65,6 +69,57 @@ func TestConfiguredGenerateImageToolDependsOnlyOnIndependentImageRole(t *testing
 		cfg, service, recorder, ledger, loader, nil, nil,
 	); err != nil {
 		t.Fatalf("legacy provider policy disabled the independent image role: %v", err)
+	}
+}
+
+func TestConfiguredGenerateImageToolAcceptsManagedXAIAccount(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".jcode")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	accountJSON := `{"version":1,"methods":{"xai_oauth":{"accounts":{"account-1":{"id":"account-1","login":"grok-user","secret":"refresh-token","authenticated_at":"` +
+		time.Now().UTC().Format(time.RFC3339Nano) + `"}},"default_account_id":"account-1"}}}`
+	if err := os.WriteFile(filepath.Join(configDir, "provider-auth.json"), []byte(accountJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		ImageModel: "xai/grok-imagine-image-quality",
+		Providers: map[string]*config.ProviderConfig{
+			"xai": {Auth: &config.ProviderAuthBinding{Method: "xai_oauth", AccountID: "account-1"}},
+		},
+	}
+	recorder, err := session.NewRecorder(t.TempDir(), "xai", "grok-4.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recorder.Close()
+	ledger, err := newImageUsageLedger(recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := artifact.NewServiceWithManagedRoot(
+		session.LoadArtifactRecords, nil, filepath.Join(t.TempDir(), "managed"),
+	)
+	imageTool, err := configuredGenerateImageTool(
+		cfg, service, recorder, ledger, testProviderRuntimeConfigLoader(cfg), nil, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := imageTool.Info(context.Background())
+	if err != nil || info == nil || info.Name != "generate_image" {
+		t.Fatalf("tool info=%#v err=%v", info, err)
+	}
+	encoded, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"size"`) ||
+		!strings.Contains(string(encoded), `"aspect_ratio"`) ||
+		!strings.Contains(string(encoded), `"resolution"`) {
+		t.Fatalf("managed xAI tool schema = %s", encoded)
 	}
 }
 

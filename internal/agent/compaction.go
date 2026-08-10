@@ -98,6 +98,7 @@ func (s *ThresholdCompactionStrategy) Compact(ctx context.Context, messages []*s
 		{Role: schema.User, Content: sb.String()},
 	}
 
+	ctx = internalmodel.WithProviderAgentInitiated(ctx)
 	summaryMsg, err := s.summarizer.Generate(ctx, summaryInput)
 	if err != nil {
 		config.Logger().Printf("[compaction] summarisation failed: %v", err)

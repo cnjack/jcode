@@ -802,10 +802,14 @@ func billableApprovalSummary(intent toolpolicy.BillableIntent) *handler.Billable
 	}
 	var args struct {
 		Size           string `json:"size"`
+		AspectRatio    string `json:"aspect_ratio"`
+		Resolution     string `json:"resolution"`
 		ReferenceImage string `json:"reference_image"`
 	}
 	if json.Unmarshal([]byte(intent.NormalizedArgs), &args) == nil {
 		summary.Size = strings.TrimSpace(args.Size)
+		summary.AspectRatio = strings.TrimSpace(args.AspectRatio)
+		summary.Resolution = strings.TrimSpace(args.Resolution)
 		summary.HasReference = strings.TrimSpace(args.ReferenceImage) != ""
 	}
 	return summary

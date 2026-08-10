@@ -161,6 +161,8 @@ func billableACPPresentation(summary *BillableApprovalSummary) acpToolPresentati
 			"provider":      summary.Provider,
 			"model":         summary.Model,
 			"size":          summary.Size,
+			"aspect_ratio":  summary.AspectRatio,
+			"resolution":    summary.Resolution,
 			"count":         summary.Count,
 			"billable":      summary.Billable,
 			"has_reference": summary.HasReference,
