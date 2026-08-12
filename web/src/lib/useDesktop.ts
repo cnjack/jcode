@@ -99,32 +99,37 @@ export function isAbsoluteLocalWorkspacePath(path: string): boolean {
  * `target="_blank"` clicks are dead (new-window creation is denied). One
  * delegated capture-phase listener covers every current and future anchor:
  * external http(s) links are opened in the system browser (Tauri) or a new
- * tab (browser); same-origin and loopback (sidecar API, Bearer-auth'd) links
- * are left alone.
+ * tab (browser). Desktop also routes loopback links and Command/Ctrl-clicks
+ * through the system browser; API traffic uses fetch/WebSocket rather than
+ * anchor navigation. Same-origin application links are left alone.
  */
-export function initExternalLinks(): void {
-  if (typeof document === 'undefined') return
-  document.addEventListener(
-    'click',
-    (e) => {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-      const anchor = (e.target as Element | null)?.closest?.('a[href]')
-      if (!anchor) return
-      const href = anchor.getAttribute('href') ?? ''
-      let url: URL
-      try {
-        url = new URL(href, window.location.href)
-      } catch {
-        return
-      }
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') return
-      if (url.origin === window.location.origin) return
-      if (isLoopback(url.hostname)) return
-      e.preventDefault()
-      void openUrl(url.href)
-    },
-    true,
-  )
+export function initExternalLinks(): () => void {
+  if (typeof document === 'undefined') return () => {}
+  const onClick = (e: MouseEvent) => {
+    if (e.defaultPrevented || e.button !== 0 || e.shiftKey || e.altKey) return
+    // Browser Web keeps native Command/Ctrl-click new-tab behavior. Tauri's
+    // webview cannot create that tab, so Desktop must route the gesture too.
+    if (!isTauri && (e.metaKey || e.ctrlKey)) return
+    const anchor = (e.target as Element | null)?.closest?.('a[href]')
+    if (!anchor) return
+    const href = anchor.getAttribute('href') ?? ''
+    let url: URL
+    try {
+      url = new URL(href, window.location.href)
+    } catch {
+      return
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return
+    if (url.origin === window.location.origin) return
+    // In Browser Web, preserve the existing loopback navigation behavior. In
+    // Desktop, localhost links are user-facing previews and belong outside the
+    // app; sidecar API requests never rely on anchor clicks.
+    if (!isTauri && isLoopback(url.hostname)) return
+    e.preventDefault()
+    void openUrl(url.href)
+  }
+  document.addEventListener('click', onClick, true)
+  return () => document.removeEventListener('click', onClick, true)
 }
 
 function isLoopback(hostname: string): boolean {
