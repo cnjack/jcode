@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"runtime"
@@ -12,7 +14,10 @@ import (
 
 type countingExecuteExecutor struct {
 	Executor
-	calls int
+	calls  int
+	stdout string
+	stderr string
+	err    error
 }
 
 func (e *countingExecuteExecutor) Exec(
@@ -22,7 +27,63 @@ func (e *countingExecuteExecutor) Exec(
 	time.Duration,
 ) (string, string, error) {
 	e.calls++
-	return "ok", "", nil
+	stdout := e.stdout
+	if stdout == "" && e.err == nil {
+		stdout = "ok"
+	}
+	return stdout, e.stderr, e.err
+}
+
+func TestExecutePreservesFatalRemoteTransportError(t *testing.T) {
+	env := NewEnv(t.TempDir(), runtime.GOOS+"/"+runtime.GOARCH)
+	transportErr := &RemoteTransportError{
+		Kind:      "ssh",
+		Code:      "ssh_connection_failed",
+		Phase:     RemoteTransportOutcomeUnknown,
+		Retryable: true,
+		Err:       errors.New("use of closed network connection"),
+	}
+	executor := &countingExecuteExecutor{
+		Executor: env.Exec,
+		stdout:   "possibly applied\n",
+		stderr:   "connection lost\n",
+		err:      Fatal(transportErr),
+	}
+	env.Exec = executor
+
+	modelOutput, err := env.NewExecuteTool(nil).InvokableRun(
+		context.Background(), `{"command":"touch state"}`,
+	)
+	if !IsFatal(err) {
+		t.Fatalf("execute error = %v, want Fatal", err)
+	}
+	var got *RemoteTransportError
+	if !errors.As(err, &got) || got != transportErr {
+		t.Fatalf("execute error = %v, want original RemoteTransportError", err)
+	}
+	if !strings.Contains(modelOutput, "possibly applied") {
+		t.Fatalf("model output lost diagnostic stdout: %q", modelOutput)
+	}
+}
+
+func TestExecuteOrdinaryExitRemainsModelResult(t *testing.T) {
+	env := NewEnv(t.TempDir(), runtime.GOOS+"/"+runtime.GOARCH)
+	executor := &countingExecuteExecutor{
+		Executor: env.Exec,
+		stderr:   "ordinary failure\n",
+		err:      fmt.Errorf("exit status 7"),
+	}
+	env.Exec = executor
+
+	modelOutput, err := env.NewExecuteTool(nil).InvokableRun(
+		context.Background(), `{"command":"false"}`,
+	)
+	if err != nil {
+		t.Fatalf("ordinary command error propagated: %v", err)
+	}
+	if !strings.Contains(modelOutput, "ordinary failure") {
+		t.Fatalf("model output lost ordinary stderr: %q", modelOutput)
+	}
 }
 
 // execToolRun runs the execute tool against a real LocalExecutor.

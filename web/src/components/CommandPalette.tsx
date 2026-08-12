@@ -11,17 +11,14 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
 import {
-  chatActions,
-  loadSession,
   loadTasks,
-  loadWorkspaceState,
-  modelActions,
-  sessionActions,
+  openConversation,
+  startNewChat,
   uiActions,
 } from '../app/store'
 import { api } from '../lib/api'
-import { normalizeMode, type TaskItem } from '../lib/types'
-import { isRemotePath, openRemoteConnect, parseRemoteLabel } from '../lib/remote'
+import type { TaskItem } from '../lib/types'
+import { openRemoteConnect } from '../lib/remote'
 
 interface PaletteItem {
   id: string
@@ -36,7 +33,6 @@ export function CommandPalette() {
   const { t } = useTranslation()
   const dispatch = useAppDispatch()
   const tasks = useAppSelector((s) => s.session.tasks)
-  const activePath = useAppSelector((s) => s.session.projectPath)
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
   const [opening, setOpening] = useState(false)
@@ -49,36 +45,22 @@ export function CommandPalette() {
   }, [dispatch])
 
   async function newChat() {
-    dispatch(uiActions.setView('chat'))
-    dispatch(chatActions.clearChat())
-    const resp = await api.newSession()
-    // Stay off the sidebar until the first user message (empty UUID rows look broken).
-    dispatch(sessionActions.setCurrentSession(resp.session_id))
-    if (resp.provider !== undefined) dispatch(modelActions.setProvider(resp.provider))
-    if (resp.model !== undefined) dispatch(modelActions.setModel(resp.model))
-    if (resp.agent !== undefined) dispatch(modelActions.setAgent(resp.agent))
-    if (resp.mode !== undefined) dispatch(modelActions.setMode(normalizeMode(resp.mode)))
+    close()
+    await dispatch(startNewChat())
   }
 
   async function openTask(task: TaskItem) {
     if (opening) return
     setOpening(true)
     try {
-      if (task.unread) await api.updateTask(task.uuid, { unread: false }).catch(() => undefined)
+      if (task.unread) void api.updateTask(task.uuid, { unread: false }).catch(() => undefined)
       dispatch(uiActions.setView('chat'))
-      if (task.project && task.project !== activePath) {
-        if (isRemotePath(task.project)) {
-          const meta = parseRemoteLabel(task.project)
-          openRemoteConnect(meta ? { ...meta, loadTaskUuid: task.uuid } : undefined)
-          close()
-          return
-        }
-        const resp = await api.switchProject(task.project)
-        dispatch(sessionActions.setProjectPath(resp.pwd || task.project))
-        await dispatch(loadWorkspaceState())
-      }
-      await dispatch(loadSession(task.uuid))
       close()
+      await dispatch(openConversation({
+        uuid: task.uuid,
+        project: task.project || '',
+        title: task.title,
+      }))
     } finally {
       setOpening(false)
     }
@@ -112,7 +94,7 @@ export function CommandPalette() {
         Icon: ChatBubbleLeftIcon,
         run: () => openTask(task),
       })),
-  [tasks, t, activePath, opening])
+  [tasks, t, opening])
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()

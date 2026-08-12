@@ -19,10 +19,10 @@ import {
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch } from '../app/hooks'
-import { chatActions, loadSession, loadWorkspaceState, sessionActions } from '../app/store'
-import { api } from '../lib/api'
-import type { RemotePrefill } from '../lib/remote'
-import type { DockerContainer, RemoteAuthMethod, RemoteKind, SSHAlias } from '../lib/types'
+import { chatActions, loadWorkspaceState, sessionActions } from '../app/store'
+import { api, isAPIError } from '../lib/api'
+import { sshReconnectRequest, type RemotePrefill } from '../lib/remote'
+import type { DockerContainer, RemoteAuthMethod, RemoteHostKeyErrorPayload, RemoteKind, SSHAlias } from '../lib/types'
 
 type Step = 'method' | 'config' | 'docker' | 'connecting' | 'dir'
 
@@ -55,12 +55,12 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
   const [dirLoading, setDirLoading] = useState(false)
   const [aliasName, setAliasName] = useState('')
   const [error, setError] = useState('')
+  const [hostKeyPrompt, setHostKeyPrompt] = useState<RemoteHostKeyErrorPayload | null>(null)
   const [binding, setBinding] = useState(false)
   const [aliasMenuOpen, setAliasMenuOpen] = useState(false)
-  /** Keep prefill for bind-time loadTaskUuid without re-running open effect. */
-  const prefillRef = useRef<RemotePrefill | null>(null)
   const boundRef = useRef(false)
   const aliasMenuRef = useRef<HTMLDivElement | null>(null)
+  const hostKeyRetryRef = useRef<((fingerprint?: string) => Promise<void>) | null>(null)
 
   const steps = useMemo(
     () => [
@@ -86,7 +86,6 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
   useEffect(() => {
     if (!open) return
     boundRef.current = false
-    prefillRef.current = prefill ?? null
     resetForm()
     void loadAliases()
     if (prefill) {
@@ -141,12 +140,13 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
     setDirs([])
     setAliasName('')
     setError('')
+    setHostKeyPrompt(null)
+    hostKeyRetryRef.current = null
     setBinding(false)
   }
 
   function applyPrefill(p: RemotePrefill) {
-    const colon = p.host.lastIndexOf(':')
-    setHost(colon >= 0 ? p.host.slice(0, colon) : p.host)
+    setHost(p.host)
     setPort(p.port || 22)
     setUser(p.user || 'root')
     setMethod(p.kind === 'docker' ? 'docker' : 'ssh')
@@ -214,23 +214,12 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
   }
 
   /** Seamless SSH reconnect with key/agent; fall back to prefilled form. */
-  async function autoReconnectSSH(p: RemotePrefill) {
+  async function autoReconnectSSH(p: RemotePrefill, confirmedFingerprint?: string) {
     applyPrefill(p)
     setMethod('ssh')
     setStep('connecting')
-    const colon = p.host.lastIndexOf(':')
-    const h = colon >= 0 ? p.host.slice(0, colon) : p.host
-    const po = p.port || 22
-    const u = p.user || 'root'
     try {
-      const res = await api.remoteConnect({
-        type: 'ssh',
-        host: h.trim(),
-        port: po,
-        user: u.trim() || 'root',
-        auth_method: 'key',
-        key_path: '~/.ssh/id_rsa',
-      })
+      const res = await api.remoteConnect(sshReconnectRequest(p, confirmedFingerprint))
       setConnectionId(res.connection_id)
       const dir = p.remotePath && p.remotePath !== '/' ? p.remotePath : res.remote_pwd
       setCurrentDir(dir)
@@ -243,7 +232,11 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
           setStep('config')
         }
       }
-    } catch {
+    } catch (e) {
+      if (showHostKeyPrompt(e, (fingerprint) => autoReconnectSSH(p, fingerprint))) {
+        setStep('config')
+        return
+      }
       setError('')
       setStep('config')
     }
@@ -274,13 +267,14 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
     }
   }
 
-  async function connectSSH() {
+  async function connectSSH(confirmedFingerprint?: string) {
     if (!host.trim()) {
       setError('Host is required')
       return
     }
     await discardConnection()
     setError('')
+    setHostKeyPrompt(null)
     setStep('connecting')
     try {
       const res = await api.remoteConnect({
@@ -292,14 +286,46 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
         password: authMethod === 'password' ? password : undefined,
         key_path: authMethod === 'key' ? keyPath.trim() : undefined,
         passphrase: authMethod === 'key' ? passphrase : undefined,
+        accept_host_key: confirmedFingerprint ? true : undefined,
+        host_key_fingerprint: confirmedFingerprint,
       })
       setConnectionId(res.connection_id)
       await listDir(res.connection_id, res.remote_pwd)
       setStep('dir')
     } catch (e) {
+      if (showHostKeyPrompt(e, (fingerprint) => connectSSH(fingerprint))) {
+        setStep('config')
+        return
+      }
       setError(e instanceof Error ? e.message : 'Connection failed')
       setStep('config')
     }
+  }
+
+  function showHostKeyPrompt(
+    errorValue: unknown,
+    retry: (fingerprint?: string) => Promise<void>,
+  ): boolean {
+    if (!isAPIError(errorValue) || errorValue.status !== 409 || !errorValue.body || typeof errorValue.body !== 'object') return false
+    const body = errorValue.body as Partial<RemoteHostKeyErrorPayload>
+    if (
+      body.code !== 'ssh_host_key_unknown' &&
+      body.code !== 'ssh_host_key_changed' &&
+      body.code !== 'ssh_host_key_confirmation_mismatch'
+    ) return false
+    if (!body.host || !body.fingerprint || !body.key_type) return false
+    setHostKeyPrompt({
+      error: body.error || errorValue.message,
+      code: body.code,
+      host: body.host,
+      fingerprint: body.fingerprint,
+      key_type: body.key_type,
+      old_fingerprint: body.old_fingerprint,
+      expected_fingerprint: body.expected_fingerprint,
+    })
+    hostKeyRetryRef.current = retry
+    setError('')
+    return true
   }
 
   async function connectDocker(container: string) {
@@ -348,7 +374,7 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
     setBinding(true)
     setError('')
     try {
-      const res = await api.remoteBind(connId, dir)
+      const res = await api.remoteBind(connId, dir, { focus: true })
       if (res.kind === 'docker') {
         const name = aliasName.trim() || res.container || 'container'
         await api.remoteSaveDockerAlias(name, res.container || '', res.remote_path).catch(() => {})
@@ -359,13 +385,9 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
       boundRef.current = true
       setConnectionId('')
       dispatch(chatActions.clearChat())
-      dispatch(sessionActions.setProjectPath(res.label || res.pwd))
+      dispatch(sessionActions.setProjectPath(res.project || res.workspace_key || res.label || res.pwd))
       dispatch(sessionActions.setCurrentSession(''))
       await dispatch(loadWorkspaceState())
-      const taskUuid = prefillRef.current?.loadTaskUuid
-      if (taskUuid) {
-        await dispatch(loadSession(taskUuid))
-      }
       onBound?.()
       onClose()
       return true
@@ -478,6 +500,42 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
                 <h3 className="rcw-h">{t('wizard.sshConnection')}</h3>
                 <p className="rcw-sub">{t('wizard.sshDesc')}</p>
                 {error && <div className="rcw-error">{error}</div>}
+                {hostKeyPrompt && (
+                  <div className={`rcw-host-key${hostKeyPrompt.code === 'ssh_host_key_changed' ? ' is-danger' : ''}`}>
+                    <div className="rcw-host-key-title">
+                      {hostKeyPrompt.code === 'ssh_host_key_unknown'
+                        ? t('conversationLoading.hostKey.unknownTitle')
+                        : hostKeyPrompt.code === 'ssh_host_key_changed'
+                          ? t('conversationLoading.hostKey.changedTitle')
+                          : t('conversationLoading.hostKey.mismatchTitle')}
+                    </div>
+                    <div className="rcw-host-key-body">
+                      {hostKeyPrompt.code === 'ssh_host_key_unknown'
+                        ? t('conversationLoading.hostKey.unknownBody')
+                        : hostKeyPrompt.code === 'ssh_host_key_changed'
+                          ? t('conversationLoading.hostKey.changedBody')
+                          : t('conversationLoading.hostKey.mismatchBody')}
+                    </div>
+                    <div className="rcw-host-key-fingerprint">{hostKeyPrompt.fingerprint}</div>
+                    {hostKeyPrompt.old_fingerprint && <div className="rcw-host-key-old">{hostKeyPrompt.old_fingerprint}</div>}
+                    {hostKeyPrompt.expected_fingerprint && (
+                      <div className="rcw-host-key-old">
+                        {t('conversationLoading.hostKey.expected')}: {hostKeyPrompt.expected_fingerprint}
+                      </div>
+                    )}
+                    <div className="rcw-host-key-actions">
+                      <button type="button" className="rcw-ghost" onClick={() => setHostKeyPrompt(null)}>{t('common.cancel')}</button>
+                      {hostKeyPrompt.code === 'ssh_host_key_unknown' && (
+                        <button type="button" className="rcw-primary" onClick={() => void hostKeyRetryRef.current?.(hostKeyPrompt.fingerprint)}>
+                          {t('conversationLoading.hostKey.accept')}
+                        </button>
+                      )}
+                      {hostKeyPrompt.code === 'ssh_host_key_confirmation_mismatch' && (
+                        <button type="button" className="rcw-primary" onClick={() => void hostKeyRetryRef.current?.()}>{t('common.retry')}</button>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {connecting && (
                   <div className="rcw-hint">
                     <ArrowPathIcon className="h-3.5 w-3.5 spin" /> {t('wizard.connecting')}
@@ -799,6 +857,46 @@ const RCW_CSS = `
   background: var(--color-error-bg, rgba(220, 38, 38, 0.08));
   border: 1px solid var(--color-error-fg, rgba(220, 38, 38, 0.3));
   word-break: break-word;
+}
+.rcw-host-key {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--color-warning-fg);
+  border-radius: var(--radius-lg);
+  background: var(--color-warning-bg);
+}
+.rcw-host-key.is-danger {
+  border-color: var(--color-error-fg);
+  background: var(--color-error-bg);
+}
+.rcw-host-key-title {
+  color: var(--color-foreground);
+  font-size: 12px;
+  font-weight: 650;
+}
+.rcw-host-key-body {
+  margin-top: 4px;
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.rcw-host-key-fingerprint,
+.rcw-host-key-old {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  color: var(--color-foreground);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.rcw-host-key-old {
+  color: var(--color-muted-foreground);
+  text-decoration: line-through;
+}
+.rcw-host-key-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
 }
 .rcw-methods {
   display: grid;

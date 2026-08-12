@@ -12,7 +12,9 @@ import (
 // recently foregrounded session per project, so a web/desktop client can
 // return to the conversation that was open before a restart.
 type lastSessionFile struct {
-	Projects map[string]string `json:"projects"` // project path → session uuid
+	Projects      map[string]string `json:"projects"`                 // project path → session uuid
+	RecentProject string            `json:"recent_project,omitempty"` // last foregrounded project across workspaces
+	RecentSession string            `json:"recent_session,omitempty"` // last foregrounded session across workspaces
 }
 
 func lastSessionPath() (string, error) {
@@ -44,10 +46,12 @@ func SaveLastSession(project, id string) {
 	if f.Projects == nil {
 		f.Projects = map[string]string{}
 	}
-	if f.Projects[project] == id {
+	if f.Projects[project] == id && f.RecentProject == project && f.RecentSession == id {
 		return
 	}
 	f.Projects[project] = id
+	f.RecentProject = project
+	f.RecentSession = id
 
 	if err := ensurePrivateSessionDir(filepath.Dir(p)); err != nil {
 		return
@@ -85,7 +89,68 @@ func LoadLastSession(project string) string {
 	if err := json.Unmarshal(data, &f); err != nil {
 		return ""
 	}
-	id := f.Projects[project]
+	return validateLastSessionID(f.Projects[project])
+}
+
+// LoadMostRecentSession returns the last foregrounded project/session across
+// all workspaces. Desktop uses this on a cold start because its sidecar always
+// boots from a local directory and therefore cannot infer that the previously
+// focused workspace was SSH or Docker. Project-scoped web startup continues to
+// use LoadLastSession.
+func LoadMostRecentSession() (project, id string) {
+	p, err := lastSessionPath()
+	if err != nil {
+		return "", ""
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "", ""
+	}
+	var f lastSessionFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		return "", ""
+	}
+	// One-time compatibility for last_session.json files written before the
+	// global pointer existed: choose the most recently written transcript among
+	// the already-recorded per-project foreground entries. The next focus saves
+	// an exact recent pointer, so this approximation is not used again.
+	if f.RecentProject == "" || f.RecentSession == "" {
+		return inferMostRecentLegacySession(f.Projects)
+	}
+	id = validateLastSessionID(f.RecentSession)
+	if id == "" {
+		return "", ""
+	}
+	return f.RecentProject, id
+}
+
+func inferMostRecentLegacySession(projects map[string]string) (project, id string) {
+	dir, err := config.SessionsDir()
+	if err != nil {
+		return "", ""
+	}
+	var (
+		latest int64
+		have   bool
+	)
+	for candidateProject, candidateID := range projects {
+		if ValidateSessionID(candidateID) != nil {
+			continue
+		}
+		info, statErr := os.Stat(filepath.Join(dir, candidateID+".json"))
+		if statErr != nil {
+			continue
+		}
+		stamp := info.ModTime().UnixNano()
+		if have && stamp <= latest {
+			continue
+		}
+		project, id, latest, have = candidateProject, candidateID, stamp, true
+	}
+	return project, id
+}
+
+func validateLastSessionID(id string) string {
 	if id == "" || ValidateSessionID(id) != nil {
 		return ""
 	}

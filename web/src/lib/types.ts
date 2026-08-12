@@ -392,6 +392,27 @@ export interface RemoteConnectRequest {
   key_path?: string
   passphrase?: string
   container?: string // docker: container id or name
+  /** Confirm and persist a previously unknown SSH host key. A changed key is
+   *  always rejected by the backend, even when this flag is present. */
+  accept_host_key?: boolean
+  /** Fingerprint shown to the user. Required with accept_host_key so the
+   *  backend can reject a key swap between prompt and retry. */
+  host_key_fingerprint?: string
+}
+
+export type RemoteHostKeyErrorCode =
+  | 'ssh_host_key_unknown'
+  | 'ssh_host_key_changed'
+  | 'ssh_host_key_confirmation_mismatch'
+
+export interface RemoteHostKeyErrorPayload {
+  error: string
+  code: RemoteHostKeyErrorCode
+  host: string
+  fingerprint: string
+  key_type: string
+  old_fingerprint?: string
+  expected_fingerprint?: string
 }
 
 export interface RemoteConnectResponse {
@@ -419,6 +440,69 @@ export interface RemoteBindResponse {
   port: number
   container?: string
   remote_path: string
+  session_id?: string
+  project?: string
+  provider?: string
+  model?: string
+  agent?: string
+  mode?: string
+  running?: boolean
+  activated?: boolean
+  focused?: boolean
+  workspace_key?: string
+}
+
+export interface SessionActivationResponse {
+  status: string
+  session_id: string
+  kind: 'local' | RemoteKind
+  pwd: string
+  project: string
+  workspace_key: string
+  provider?: string
+  model?: string
+  agent?: string
+  mode: string
+  running: boolean
+  activated: boolean
+  focused: boolean
+}
+
+/** Task-scoped SSH/Docker recovery status emitted by the local control plane.
+ * The envelope task_id is merged into the payload by WSClient before it reaches
+ * Redux. `retry_after_ms` is accepted temporarily for compatibility with early
+ * backend builds; new emitters use `retry_in_ms`. */
+export type RemoteConnectionStatus =
+  | 'waiting'
+  | 'reconnecting'
+  | 'ready'
+  | 'action_required'
+  | 'failed'
+
+export interface RemoteConnectionStatusData {
+  task_id?: string
+  kind: RemoteKind
+  status: RemoteConnectionStatus
+  attempt: number
+  max_attempts: number
+  retry_in_ms?: number
+  retry_after_ms?: number
+  host?: string
+  code?: string
+  error?: string
+  retryable?: boolean
+}
+
+export interface AgentDoneData {
+  error?: string
+  detail?: string
+  code?: string
+  error_kind?: 'remote_connection' | string
+  kind?: RemoteKind
+  phase?: 'before_dispatch' | 'outcome_unknown' | string
+  retryable?: boolean
+  stopped?: boolean
+  task_id?: string
 }
 
 export interface DockerContainer {
@@ -517,10 +601,6 @@ export interface TokenUpdateData {
   cache_hit_rate?: number
   cache_supported?: boolean
   model_context_limit: number
-}
-
-export interface AgentDoneData {
-  error?: string
 }
 
 // --- Usage statistics ---

@@ -381,6 +381,290 @@ select:focus-visible {
   color: var(--color-muted-foreground);
   opacity: 0.8;
 }
+
+/* Existing-conversation restore. This is a first-class page state inside the
+   chat surface (not a modal): history can become readable while remote
+   environment activation waits for authentication or host-key confirmation. */
+.conversation-loading {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+.conversation-loading__header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  min-height: 76px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface) 94%, var(--color-muted));
+}
+.conversation-loading__phase-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 34%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+  color: var(--color-primary);
+}
+.conversation-loading__phase-icon.is-error {
+  border-color: color-mix(in srgb, var(--color-error-fg) 34%, var(--color-border));
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}
+.conversation-loading__title {
+  overflow: hidden;
+  color: var(--color-foreground);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation-loading__phase {
+  margin-top: 3px;
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+}
+.conversation-loading__steps {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+.conversation-loading__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-muted-foreground);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.conversation-loading__step-dot {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+}
+.conversation-loading__step.is-active {
+  color: var(--color-foreground);
+}
+.conversation-loading__step.is-active .conversation-loading__step-dot {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+.conversation-loading__step.is-ready {
+  color: var(--color-success-fg);
+}
+.conversation-loading__step.is-ready .conversation-loading__step-dot {
+  border-color: transparent;
+}
+.conversation-loading__action {
+  width: min(720px, calc(100% - 36px));
+  flex-shrink: 0;
+  align-self: center;
+  margin: 18px 18px 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-warning-fg) 28%, var(--color-border));
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--color-warning-bg) 62%, var(--color-surface));
+  box-shadow: var(--shadow-sm);
+}
+.conversation-loading__action.is-danger {
+  border-color: color-mix(in srgb, var(--color-error-fg) 34%, var(--color-border));
+  background: color-mix(in srgb, var(--color-error-bg) 70%, var(--color-surface));
+}
+.conversation-loading__action-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--color-warning-fg);
+}
+.conversation-loading__action.is-danger .conversation-loading__action-heading {
+  color: var(--color-error-fg);
+}
+.conversation-loading__action-heading > svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.conversation-loading__action-heading h2 {
+  color: var(--color-foreground);
+  font-size: 13px;
+  font-weight: 650;
+}
+.conversation-loading__action-heading p {
+  margin-top: 3px;
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.conversation-loading__fingerprint {
+  display: grid;
+  gap: 6px;
+  margin: 13px 0 0 30px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-background) 72%, transparent);
+}
+.conversation-loading__fingerprint > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px;
+}
+.conversation-loading__fingerprint dt {
+  color: var(--color-muted-foreground);
+  font-size: 10.5px;
+}
+.conversation-loading__fingerprint dd {
+  overflow-wrap: anywhere;
+  color: var(--color-foreground);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.conversation-loading__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.conversation-loading__primary,
+.conversation-loading__secondary {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  font-weight: 600;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.conversation-loading__primary {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-background);
+}
+.conversation-loading__primary:hover {
+  background: color-mix(in srgb, var(--color-primary) 88%, var(--color-foreground));
+}
+.conversation-loading__secondary {
+  background: var(--color-surface);
+  color: var(--color-foreground);
+}
+.conversation-loading__secondary:hover {
+  background: var(--color-muted);
+}
+.conversation-loading__auth {
+  display: grid;
+  gap: 10px;
+  margin: 13px 0 0 30px;
+}
+.conversation-loading__segmented {
+  display: inline-flex;
+  width: fit-content;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-muted);
+}
+.conversation-loading__segmented button {
+  padding: 5px 9px;
+  border-radius: calc(var(--radius-md) - 2px);
+  color: var(--color-muted-foreground);
+  font-size: 10.5px;
+}
+.conversation-loading__segmented button.is-active {
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-foreground);
+}
+.conversation-loading__auth label {
+  display: grid;
+  gap: 5px;
+  color: var(--color-muted-foreground);
+  font-size: 10.5px;
+}
+.conversation-loading__auth input {
+  height: 34px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  outline: none;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.conversation-loading__auth input:focus {
+  border-color: var(--color-border-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ring) 16%, transparent);
+}
+.conversation-loading__field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 10px;
+}
+.conversation-loading__history {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  position: relative;
+}
+.conversation-loading__history-label {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  align-self: center;
+  gap: 5px;
+  margin: 12px 0 2px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--color-success-bg);
+  color: var(--color-success-fg);
+  font-size: 10px;
+  font-weight: 600;
+}
+.conversation-loading__preview {
+  min-height: 0;
+  flex: 1;
+  opacity: 0.82;
+}
+.conversation-loading__preview::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 48px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--color-surface));
+  content: '';
+}
+@media (max-width: 800px) {
+  .conversation-loading__header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .conversation-loading__steps {
+    width: 100%;
+    margin-left: 50px;
+  }
+  .conversation-loading__field-row {
+    grid-template-columns: 1fr;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .rs-bar { animation: none; }
 }
@@ -921,4 +1205,171 @@ html.is-tauri-macos .titlebar-drag {
   border-left: 3px solid var(--color-border);
   padding-left: 0.8rem;
   color: var(--color-muted-foreground);
+}
+
+/* ─── Task-scoped remote recovery ───
+   A quiet operational layer above the composer. It deliberately does not use
+   chat error styling: an SSH transport interruption is not a model failure. */
+.remote-connection-notice {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0 0 0.55rem;
+  padding: 0.62rem 0.7rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-foreground);
+}
+.remote-connection-notice[data-status='waiting'],
+.remote-connection-notice[data-status='reconnecting'],
+.remote-connection-notice[data-status='action_required'] {
+  border-color: var(--color-warning-fg);
+  background: var(--color-warning-bg);
+}
+.remote-connection-notice[data-status='ready'] {
+  border-color: var(--color-success-fg);
+  background: var(--color-success-bg);
+}
+.remote-connection-notice[data-status='failed'] {
+  border-color: var(--color-error-fg);
+  background: var(--color-error-bg);
+}
+.remote-connection-notice__track {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--color-border);
+}
+.remote-connection-notice__track > span {
+  display: block;
+  height: 100%;
+  background: var(--color-warning-fg);
+  transition: width var(--duration-normal);
+}
+.remote-connection-notice__icon {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--color-muted);
+  color: var(--color-muted-foreground);
+}
+.remote-connection-notice[data-status='waiting'] .remote-connection-notice__icon,
+.remote-connection-notice[data-status='reconnecting'] .remote-connection-notice__icon,
+.remote-connection-notice[data-status='action_required'] .remote-connection-notice__icon {
+  color: var(--color-warning-fg);
+}
+.remote-connection-notice[data-status='ready'] .remote-connection-notice__icon {
+  color: var(--color-success-fg);
+}
+.remote-connection-notice[data-status='failed'] .remote-connection-notice__icon {
+  color: var(--color-error-fg);
+}
+.remote-connection-notice__copy {
+  min-width: 0;
+}
+.remote-connection-notice__heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.remote-connection-notice__attempt {
+  flex: none;
+  color: var(--color-muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+}
+.remote-connection-notice__copy p {
+  margin: 0.16rem 0 0;
+  overflow: hidden;
+  color: var(--color-muted-foreground);
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-connection-notice__details {
+  margin-top: 0.2rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.625rem;
+}
+.remote-connection-notice__details summary {
+  width: max-content;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--color-border-active);
+  text-underline-offset: 2px;
+}
+.remote-connection-notice__details > p {
+  margin-top: 0.25rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.remote-connection-notice__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.remote-connection-notice__retry {
+  display: inline-flex;
+  min-height: 1.75rem;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.55rem;
+  border: 1px solid var(--color-border-active);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  transition: border-color var(--duration-fast), background-color var(--duration-fast);
+}
+.remote-connection-notice__retry:hover {
+  border-color: var(--color-ring);
+  background: var(--color-muted);
+}
+.remote-connection-notice__retry:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.remote-connection-notice__retry:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+.remote-connection-notice__dismiss {
+  display: inline-flex;
+  width: 1.65rem;
+  height: 1.65rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  color: var(--color-muted-foreground);
+  transition: color var(--duration-fast), background-color var(--duration-fast);
+}
+.remote-connection-notice__dismiss:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+}
+.remote-connection-notice__dismiss:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: -2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .remote-connection-notice__track > span,
+  .remote-connection-notice__retry,
+  .remote-connection-notice__dismiss {
+    transition: none;
+  }
 }

@@ -37,8 +37,8 @@ import {
   sessionActions,
   uiActions,
   chatActions,
-  loadSession,
   loadWorkspaceState,
+  openConversation,
   replaySession,
   startNewChat,
 } from './app/store'
@@ -86,8 +86,12 @@ export default function App() {
         dispatch(modelActions.setMode(normalizeMode(h.mode)))
         dispatch(modelActions.setServerVersion(h.version))
         dispatch(modelActions.setImageSupport(!!h.image_support))
-        dispatch(sessionActions.setProjectPath(h.pwd))
-        dispatch(sessionActions.setCurrentSession(h.session_id || ''))
+        dispatch(sessionActions.setProjectPath(h.project || h.workspace_key || h.pwd))
+        const restoreSessionId = isTauri ? h.recent_session_id || h.session_id : h.session_id
+        const restoreProject = isTauri && h.recent_session_id
+          ? h.recent_project || h.project || h.workspace_key || h.pwd
+          : h.project || h.workspace_key || h.pwd
+        dispatch(sessionActions.setCurrentSession(restoreSessionId || ''))
         dispatch(chatActions.setRunning(!!h.running))
         if (h.auth_required) dispatch(uiActions.setNeedsAuth(true))
         if (h.needs_setup) dispatch(uiActions.setNeedsSetup(true))
@@ -95,7 +99,16 @@ export default function App() {
         // has persisted history. A fresh empty session should stay on welcome.
         if (!h.auth_required && !h.needs_setup) {
           await dispatch(loadWorkspaceState())
-          if (h.session_id) await dispatch(loadSession(h.session_id))
+          if (restoreSessionId) {
+            const state = store_getState()
+            const indexedTask = state.session.tasks.find((task) => task.uuid === restoreSessionId)
+            const indexedSession = state.session.sessions.find((session) => session.uuid === restoreSessionId)
+            await dispatch(openConversation({
+              uuid: restoreSessionId,
+              project: indexedTask?.project || restoreProject,
+              title: indexedTask?.title || indexedSession?.title,
+            }))
+          }
         }
       } catch (err) {
         if (!cancelled) {

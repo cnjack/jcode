@@ -137,7 +137,7 @@ func TestSessionsMetaSealedWhenCipherActive(t *testing.T) {
 	if err := json.Unmarshal(plain, &meta); err != nil {
 		t.Fatal(err)
 	}
-	if meta.UUID != "s1" || meta.Title != "secret title" {
+	if meta.UUID != "s1" || meta.Title != "secret title" || meta.Project != "proj" {
 		t.Fatalf("decrypted meta = %+v", meta)
 	}
 }

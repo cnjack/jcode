@@ -195,8 +195,10 @@ type ToolApprovalResponse struct {
 
 // SSHConnectMsg is sent when user initially requests connection
 type SSHConnectMsg struct {
-	Addr string // user@host
-	Path string // remote working dir (optional)
+	Addr               string // user@host
+	Path               string // remote working dir (optional)
+	AcceptHostKey      bool
+	HostKeyFingerprint string
 }
 
 // SSHListDirReqMsg is sent when TUI needs to list a directory on the remote machine
@@ -213,9 +215,13 @@ type SSHDirResultsMsg struct {
 
 // SSHStatusMsg carries the result of an SSH connection attempt.
 type SSHStatusMsg struct {
-	Success bool
-	Label   string // e.g. "root@myserver:22"
-	Err     error
+	Success     bool
+	Label       string // e.g. "root@myserver:22"
+	Err         error
+	HostKeyCode string
+	Host        string
+	Fingerprint string
+	KeyType     string
 }
 
 // SSHCancelMsg is sent when user cancels the SSH dir picker via Esc.

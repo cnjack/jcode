@@ -181,5 +181,11 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	// LLM; Streams/Meta are reconstructed by the web handler via
 	// ParseExecModelOutput for structured UI rendering.
 	res := BuildExecResult(stdout, stderr, err, elapsed, input.Command)
+	if IsFatal(err) {
+		// Preserve the structured RemoteTransportError through approval middleware.
+		// In particular, an outcome-unknown SSH command must never be presented to
+		// the model as an ordinary failure it may blindly retry.
+		return res.ModelOutput, err
+	}
 	return res.ModelOutput, nil
 }

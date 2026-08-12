@@ -7,6 +7,7 @@ package remote
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,13 +25,23 @@ import (
 // authentication falls back to the SSH agent + the default ~/.ssh keys (the same
 // behavior as tools.BuildSSHAuthMethods, used by the TUI).
 type SSHOptions struct {
-	Host       string
-	Port       int
-	User       string
-	Password   string // password auth
-	KeyPath    string // explicit private key file (~ is expanded)
-	Passphrase string // passphrase for an encrypted private key
+	Host               string
+	Port               int
+	User               string
+	Password           string // password auth
+	KeyPath            string // explicit private key file (~ is expanded)
+	Passphrase         string // passphrase for an encrypted private key
+	AcceptHostKey      bool   // explicit TOFU confirmation
+	HostKeyFingerprint string // SHA256 fingerprint shown by the previous attempt
 }
+
+type SSHHostKeyError = tools.SSHHostKeyError
+
+const (
+	SSHHostKeyUnknown              = tools.SSHHostKeyUnknown
+	SSHHostKeyChanged              = tools.SSHHostKeyChanged
+	SSHHostKeyConfirmationMismatch = tools.SSHHostKeyConfirmationMismatch
+)
 
 // resolveTarget splits Host into a dial address ("host:port") and a username,
 // honoring an embedded "user@" prefix and an explicit Port.
@@ -47,8 +58,10 @@ func resolveTarget(opts SSHOptions) (addr, user string) {
 		user = "root"
 	}
 	// Apply an explicit port only when the host doesn't already carry one.
-	if opts.Port > 0 && !strings.Contains(host, ":") {
-		host = fmt.Sprintf("%s:%d", host, opts.Port)
+	if opts.Port > 0 {
+		if _, _, err := net.SplitHostPort(host); err != nil {
+			host = net.JoinHostPort(strings.Trim(host, "[]"), fmt.Sprintf("%d", opts.Port))
+		}
 	}
 	return host, user
 }
@@ -92,12 +105,25 @@ func BuildAuthMethods(opts SSHOptions) ([]ssh.AuthMethod, error) {
 
 // Connect dials the remote host described by opts and returns a live executor.
 func Connect(opts SSHOptions) (*tools.SSHExecutor, error) {
+	return ConnectContext(context.Background(), opts)
+}
+
+// ConnectContext dials the remote host with bounded cancellation and JCode's
+// strict known_hosts/TOFU policy.
+func ConnectContext(ctx context.Context, opts SSHOptions) (*tools.SSHExecutor, error) {
 	addr, user := resolveTarget(opts)
 	methods, err := BuildAuthMethods(opts)
 	if err != nil {
 		return nil, err
 	}
-	return tools.NewSSHExecutor(addr, user, methods)
+	hostKeyCallback, err := tools.NewSSHHostKeyCallback(tools.SSHHostKeyPolicy{
+		AcceptUnknown:       opts.AcceptHostKey,
+		ExpectedFingerprint: opts.HostKeyFingerprint,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return tools.NewSSHExecutorContext(ctx, addr, user, methods, hostKeyCallback)
 }
 
 // DiscoverPwd returns the remote default working directory (best effort),
@@ -106,7 +132,7 @@ func DiscoverPwd(ctx context.Context, exec tools.Executor, fallback string) stri
 	if fallback == "" {
 		fallback = "/root"
 	}
-	if stdout, _, err := exec.Exec(ctx, "pwd", "", 5*time.Second); err == nil {
+	if stdout, _, err := tools.ExecReadOnly(ctx, exec, "pwd", "", 5*time.Second); err == nil {
 		if trimmed := strings.TrimSpace(stdout); trimmed != "" {
 			return trimmed
 		}
@@ -119,7 +145,7 @@ func DiscoverPwd(ctx context.Context, exec tools.Executor, fallback string) stri
 // can render an "up" entry in a directory picker.
 func ListDirs(ctx context.Context, exec tools.Executor, path string) ([]string, error) {
 	cmd := fmt.Sprintf("ls -F -1 %s", tools.ShellQuote(path))
-	stdout, stderr, err := exec.Exec(ctx, cmd, "", 10*time.Second)
+	stdout, stderr, err := tools.ExecReadOnly(ctx, exec, cmd, "", 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("ls %s failed: %v: %s", path, err, truncate(stderr, 100))
 	}

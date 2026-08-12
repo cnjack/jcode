@@ -39,6 +39,12 @@ func TestEventDurabilityClassification(t *testing.T) {
 	}
 }
 
+func TestRemoteConnectionStatusIsLocalOnly(t *testing.T) {
+	if !localOnlyEvents["remote_connection_status"] {
+		t.Fatal("remote_connection_status must be dropped before Cloud event routing")
+	}
+}
+
 func TestSeqAllocatorMonotonicFromOne(t *testing.T) {
 	a := newSeqAllocator()
 	for want := int64(1); want <= 3; want++ {

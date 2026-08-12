@@ -98,7 +98,9 @@ func (r *readTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	}
 
 	if stat.IsDir {
-		out, serr, err := r.env.Exec.Exec(ctx, fmt.Sprintf("ls -la %s", ShellQuote(input.FilePath)), "", 10*time.Second)
+		out, serr, err := ExecReadOnly(
+			ctx, r.env.Exec, fmt.Sprintf("ls -la %s", ShellQuote(input.FilePath)), "", 10*time.Second,
+		)
 		if err != nil {
 			return "", fmt.Errorf("failed to list directory %s: %w\n%s", input.FilePath, err, serr)
 		}

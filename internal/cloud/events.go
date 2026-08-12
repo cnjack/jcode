@@ -52,6 +52,15 @@ var eventDurability = map[string]bool{
 	"subagent_progress": false, // intermediate subagent tool progress lines
 }
 
+// localOnlyEvents are WebSocket control-plane signals intended only for a
+// client attached directly to this JCode process. They must not consume a
+// Cloud sequence number, enter durable history, or ride the ephemeral relay:
+// remote connection retry details describe the device's private transport and
+// can include host/error diagnostics that Cloud neither needs nor should store.
+var localOnlyEvents = map[string]bool{
+	"remote_connection_status": true,
+}
+
 // isDurableEvent reports whether a WS event type is uploaded as a durable
 // event. Unknown types default to durable.
 func isDurableEvent(eventType string) bool {
@@ -241,6 +250,15 @@ func (b *eventBatcher) run(ctx context.Context) {
 }
 
 func (b *eventBatcher) flushAll(ctx context.Context) {
+	b.c.historySyncMu.RLock()
+	defer b.c.historySyncMu.RUnlock()
+	b.flushAllLocked(ctx)
+}
+
+// flushAllLocked drains pending events while the caller already holds either
+// side of historySyncMu. Session sync uses the write side to establish a
+// stable server high-water mark before projecting older JSONL entries.
+func (b *eventBatcher) flushAllLocked(ctx context.Context) {
 	b.mu.Lock()
 	batches := b.pending
 	b.pending = make(map[string][]EventUpload)
@@ -250,6 +268,12 @@ func (b *eventBatcher) flushAll(ctx context.Context) {
 			b.upload(ctx, sid, batch)
 		}
 	}
+}
+
+func (b *eventBatcher) hasPending(sid string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.pending[sid]) > 0
 }
 
 // upload POSTs one batch. Conflicted seqs are skipped server-side and the
@@ -284,6 +308,16 @@ func (b *eventBatcher) upload(ctx context.Context, sid string, batch []EventUplo
 func (c *Connector) eventPumpLoop(ctx context.Context) {
 	bo := c.backoff()
 	batcher := newEventBatcher(c)
+	c.batcherMu.Lock()
+	c.eventBatcher = batcher
+	c.batcherMu.Unlock()
+	defer func() {
+		c.batcherMu.Lock()
+		if c.eventBatcher == batcher {
+			c.eventBatcher = nil
+		}
+		c.batcherMu.Unlock()
+	}()
 	go batcher.run(ctx)
 	for {
 		err := c.pumpEvents(ctx, batcher)
@@ -341,6 +375,9 @@ func (c *Connector) handleWSEvent(ctx context.Context, batcher *eventBatcher, ms
 	if err := json.Unmarshal(msg, &ev); err != nil || ev.Type == "" {
 		return
 	}
+	if localOnlyEvents[ev.Type] {
+		return
+	}
 	// Resolve the owning session. Task-tagged events carry it on the envelope;
 	// task_status is a global envelope with the id inside data. Everything else
 	// global (mcp_changed, pong, model_changed without task, …) has no session
@@ -357,15 +394,19 @@ func (c *Connector) handleWSEvent(ctx context.Context, batcher *eventBatcher, ms
 	if sid == "" {
 		return
 	}
+	// Backfill takes the write side while it seeds seq 1..N. Keeping this read
+	// lock through live allocation prevents a just-enabled session from racing
+	// an older transcript into the same sequence numbers.
+	c.historySyncMu.RLock()
+	defer c.historySyncMu.RUnlock()
 
 	// M19 per-session sync gate: events of sessions without an explicit sync
 	// opt-in are dropped here — durable AND ephemeral, with NO seq allocated
 	// (a gapless per-session seq stream is preserved for the events that do
 	// upload). Turning sync off stops the upload from that event on; the
 	// next replacement session snapshot removes the mirror and its durable
-	// cloud events. Turning sync back on recreates the mirror and resumes uploads
-	// from that moment forward — earlier local history is NOT backfilled (the
-	// pump is a live stream and has no replay path).
+	// cloud events. Turning sync back on recreates the mirror; session sync now
+	// projects the local JSONL transcript before this live path resumes.
 	if !c.syncEnabled(sid) {
 		// Drop any agent_text buffered while the session was enabled: if sync
 		// is re-enabled mid-run, the synthesized agent_message must only cover

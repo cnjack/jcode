@@ -31,7 +31,7 @@ func (c *Connector) collectSessions() ([]SessionUpsert, error) {
 		return nil, err
 	}
 	upserts := make([]SessionUpsert, 0, len(all))
-	for _, metas := range all {
+	for project, metas := range all {
 		for _, m := range metas {
 			if m.UUID == "" {
 				continue
@@ -46,6 +46,10 @@ func (c *Connector) collectSessions() ([]SessionUpsert, error) {
 			if m.Status == "running" {
 				status = "running"
 			}
+			// The index key is authoritative. Older index rows may predate the
+			// redundant Project field; populate it so the unchanged Cloud client can
+			// still distinguish ssh:// and docker:// conversations from local ones.
+			m.Project = project
 			metaJSON, err := json.Marshal(m)
 			if err != nil {
 				continue
@@ -88,6 +92,18 @@ func parseActivityTime(value string) (time.Time, bool) {
 // the CEK cipher is active. Capabilities collection is best-effort: a failure
 // there must not fail the session sync.
 func (c *Connector) syncSessions(ctx context.Context) error {
+	// Sequence allocation and history projection must observe one stable cloud
+	// cursor. Live events hold the read side; the sync round takes the write
+	// side and first flushes anything that was already allocated.
+	c.historySyncMu.Lock()
+	defer c.historySyncMu.Unlock()
+	c.batcherMu.Lock()
+	batcher := c.eventBatcher
+	c.batcherMu.Unlock()
+	if batcher != nil {
+		batcher.flushAllLocked(ctx)
+	}
+
 	upserts, err := c.collectSessions()
 	if err != nil {
 		return err
@@ -102,8 +118,32 @@ func (c *Connector) syncSessions(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	byID := make(map[string]SessionUpsert, len(upserts))
+	for _, upsert := range upserts {
+		byID[upsert.SessionID] = upsert
+	}
 	for _, s := range resp.Sessions {
-		c.seq.Seed(s.SessionID, s.LastSeq)
+		lastSeq := s.LastSeq
+		upsert, known := byID[s.SessionID]
+		// Never snapshot a conversation while a run is writing it, or while a
+		// failed live upload remains queued. The next index/sync-store tick will
+		// retry once the transcript is stable.
+		// Before the event pump starts there is no concurrent local stream, so a
+		// stale persisted "running" bit from an earlier crash must not suppress
+		// recovery forever. During normal operation only an idle session is safe.
+		canBackfill := known && (batcher == nil || upsert.Status == "idle")
+		if batcher != nil && batcher.hasPending(s.SessionID) {
+			canBackfill = false
+		}
+		if canBackfill {
+			projectedLastSeq, backfillErr := c.backfillSessionHistory(ctx, s.SessionID, lastSeq)
+			if backfillErr != nil {
+				c.logf("history backfill for session %s skipped: %v", s.SessionID, backfillErr)
+			} else {
+				lastSeq = projectedLastSeq
+			}
+		}
+		c.seq.Seed(s.SessionID, lastSeq)
 	}
 	c.logf("session index synced (%d sessions)", len(upserts))
 	return nil

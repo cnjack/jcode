@@ -189,7 +189,7 @@ func newFakeLocal(t *testing.T) (*fakeLocal, *httptest.Server) {
 	t.Helper()
 	f := &fakeLocal{activeSessionID: "sess-active-1", createdSessionID: "sess-new-1"}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/sessions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/sessions/activate", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
@@ -200,7 +200,14 @@ func newFakeLocal(t *testing.T) (*fakeLocal, *httptest.Server) {
 			http.Error(w, "session create failed", status)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "session_id": f.createdSessionID})
+		sessionID, _ := body["session_id"].(string)
+		if sessionID == "" {
+			sessionID = f.createdSessionID
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready", "session_id": sessionID})
+	})
+	mux.HandleFunc("POST /api/mode", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("POST /api/chat", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -274,6 +281,7 @@ func (f *fakeLocal) sessionBody() map[string]any {
 
 func newTestConnector(t *testing.T, cloudURL, localBase string) *Connector {
 	t.Helper()
+	historyPath := filepath.Join(t.TempDir(), historySyncFile)
 	return NewConnector(ConnectorConfig{
 		CloudURL:          cloudURL,
 		Credentials:       &Credentials{DeviceID: "dev-1", DeviceToken: "tok", DeviceName: "test"},
@@ -288,7 +296,11 @@ func newTestConnector(t *testing.T, cloudURL, localBase string) *Connector {
 		// M19: without an explicit opt-in the connector syncs nothing. Tests
 		// pre-opt-in the sids they exercise ("s1"/"s2"); filter-specific tests
 		// build their own store via newTestSyncStore.
-		SyncStore: newTestSyncStore(t, "s1", "s2"),
+		SyncStore:       newTestSyncStore(t, "s1", "s2"),
+		HistorySyncPath: historyPath,
+		LoadSessionFn: func(string) ([]session.Entry, error) {
+			return nil, os.ErrNotExist
+		},
 	})
 }
 
@@ -622,10 +634,16 @@ func TestEventPumpDurableAndEphemeral(t *testing.T) {
 	// Ephemeral: token-level deltas.
 	conn.handleWSEvent(ctx, batcher, wsMsg(t, "agent_text", "s1", map[string]string{"text": "chunk"}))
 	conn.handleWSEvent(ctx, batcher, wsMsg(t, "token_update", "s1", map[string]int64{"total_tokens": 42}))
+	// Local-only: private SSH retry state must never be uploaded, even via the
+	// ephemeral relay, and must not consume the next durable sequence number.
+	conn.handleWSEvent(ctx, batcher, wsMsg(t, "remote_connection_status", "s1", map[string]any{
+		"kind": "ssh", "status": "reconnecting", "attempt": 1,
+	}))
+	conn.handleWSEvent(ctx, batcher, wsMsg(t, "tool_result", "s1", map[string]string{"name": "read"}))
 	// Global non-session event: skipped entirely.
 	conn.handleWSEvent(ctx, batcher, wsMsg(t, "mcp_changed", "", map[string]string{"name": "x"}))
 
-	waitFor(t, func() bool { return len(cloud.allEvents()) == 3 }, "3 durable events uploaded")
+	waitFor(t, func() bool { return len(cloud.allEvents()) == 4 }, "4 durable events uploaded")
 	waitFor(t, func() bool { return cloud.ephemeralCount() == 2 }, "2 ephemeral events forwarded")
 
 	events := cloud.allEvents()
@@ -634,7 +652,7 @@ func TestEventPumpDurableAndEphemeral(t *testing.T) {
 			t.Fatalf("events[%d].Seq = %d, want %d (per-session monotonic from 1)", i, ev.Seq, i+1)
 		}
 	}
-	wantKinds := []string{"user_message", "tool_call", "task_status"}
+	wantKinds := []string{"user_message", "tool_call", "task_status", "tool_result"}
 	for i, ev := range events {
 		if ev.Kind != wantKinds[i] {
 			t.Errorf("events[%d].Kind = %q, want %q", i, ev.Kind, wantKinds[i])

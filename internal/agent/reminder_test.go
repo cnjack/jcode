@@ -288,10 +288,11 @@ func (fakeRemoteExecutor) Stat(context.Context, string) (*tools.FileInfo, error)
 func (fakeRemoteExecutor) Exec(context.Context, string, string, time.Duration) (string, string, error) {
 	return "", "", nil
 }
-func (fakeRemoteExecutor) Platform() string           { return "linux/amd64" }
-func (fakeRemoteExecutor) Label() string              { return "fake-remote" }
-func (fakeRemoteExecutor) Close() error               { return nil }
-func (fakeRemoteExecutor) ProjectLabel(string) string { return "fake" }
+func (fakeRemoteExecutor) Platform() string            { return "linux/amd64" }
+func (fakeRemoteExecutor) Label() string               { return "fake-remote" }
+func (fakeRemoteExecutor) Probe(context.Context) error { return nil }
+func (fakeRemoteExecutor) Close() error                { return nil }
+func (fakeRemoteExecutor) ProjectLabel(string) string  { return "fake" }
 
 // switch_env mutates the shared *tools.Env in place without rebuilding the
 // agent (ACP/web). While the live env is remote, the local-filesystem sweeps

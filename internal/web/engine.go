@@ -307,16 +307,17 @@ func (e *Engine) recUUID() string {
 }
 
 // applyModelSwitch swaps the engine's agent + provider/model under emu and
-// re-tags the recorder with the new model.
+// re-tags the recorder with the new provider/model pair.
 func (e *Engine) applyModelSwitch(ag *adk.ChatModelAgent, provider, model string) {
 	e.emu.Lock()
-	defer e.emu.Unlock()
 	e.agent = ag
 	e.agentRevision++
 	e.providerName = provider
 	e.modelName = model
-	if e.recorder != nil {
-		e.recorder.SetModel(model)
+	rec := e.recorder
+	e.emu.Unlock()
+	if rec != nil {
+		rec.SetProviderModel(provider, model)
 	}
 }
 
@@ -344,8 +345,8 @@ func (e *Engine) applyAgentRoleSwitch(roleName string, built *AgentRoleBuild) {
 	e.emu.Unlock()
 	if rec != nil {
 		rec.SetAgent(roleName)
-		if built != nil && built.Model != "" {
-			rec.SetModel(built.Model)
+		if built != nil && built.Provider != "" && built.Model != "" {
+			rec.SetProviderModel(built.Provider, built.Model)
 		}
 	}
 }
@@ -405,11 +406,7 @@ func (s *Server) registerEngine(eng *Engine) error {
 	if eng == nil {
 		return nil
 	}
-	if eng.handler != nil {
-		eng.handler.SetModePromotionCallback(func() error {
-			return s.syncModeAfterApproval(eng, true, true)
-		})
-	}
+	s.prepareEngineRegistration(eng)
 	if eng.taskID == "" {
 		return nil
 	}
@@ -440,6 +437,112 @@ func (s *Server) registerEngine(eng *Engine) error {
 	s.tasksMu.Unlock()
 	if pumpCtx != nil {
 		s.startPump(pumpCtx, eng)
+	}
+	return nil
+}
+
+func (s *Server) prepareEngineRegistration(eng *Engine) {
+	if eng == nil {
+		return
+	}
+	if eng.handler != nil {
+		eng.handler.SetModePromotionCallback(func() error {
+			return s.syncModeAfterApproval(eng, true, true)
+		})
+	}
+	if eng.env == nil {
+		return
+	}
+	statusSource, ok := eng.env.Exec.(tools.RemoteConnectionStatusSource)
+	if !ok {
+		return
+	}
+	taskID := eng.taskID
+	statusSource.SetRemoteConnectionStatusHandler(func(status tools.RemoteConnectionStatus) {
+		// Reconnect state is task-scoped control-plane data. It bypasses the
+		// WebHandler pump because it originates below the agent runner, but uses
+		// the same task-tagged broker envelope so task subscriptions still apply.
+		if taskID == "" || s.wsBroker == nil {
+			return
+		}
+		s.wsBroker.Broadcast(WSEvent{
+			TaskID: taskID,
+			Type:   "remote_connection_status",
+			Data:   status,
+		})
+	})
+}
+
+// publishEngineCandidate atomically installs a fully built and hydrated engine.
+// expected is nil for a cold/new task and the currently published engine for an
+// idle reconnect. The old runtime is never removed before its replacement is
+// ready, so concurrent task resolution cannot observe an empty or unhydrated
+// conversation. Callers serialize this with taskCreateMu.
+func (s *Server) publishEngineCandidate(eng, expected *Engine) error {
+	if eng == nil || eng.taskID == "" {
+		return fmt.Errorf("cannot publish an engine without a task id")
+	}
+	s.prepareEngineRegistration(eng)
+
+	base := s.rootCtx()
+	if base == nil {
+		base = context.Background()
+	}
+	pumpCtx, cancel := context.WithCancel(base)
+	eng.pumpCancel = cancel
+
+	s.tasksMu.Lock()
+	existing, exists := s.tasks[eng.taskID]
+	s.mu.Lock()
+	activeMatchesExpected := expected != nil && s.Engine == expected
+	if expected == nil {
+		if exists {
+			s.mu.Unlock()
+			s.tasksMu.Unlock()
+			cancel()
+			return errTaskAlreadyRegistered
+		}
+		if len(s.tasks) >= maxLiveEngines {
+			s.mu.Unlock()
+			s.tasksMu.Unlock()
+			cancel()
+			return errTooManyTasks
+		}
+	} else {
+		if expected.taskID != eng.taskID {
+			s.mu.Unlock()
+			s.tasksMu.Unlock()
+			cancel()
+			return fmt.Errorf("replacement task id %s does not match %s", eng.taskID, expected.taskID)
+		}
+		if (exists && existing != expected) || (!exists && !activeMatchesExpected) {
+			s.mu.Unlock()
+			s.tasksMu.Unlock()
+			cancel()
+			return fmt.Errorf("task engine changed during activation")
+		}
+		if expected.running.Load() {
+			s.mu.Unlock()
+			s.tasksMu.Unlock()
+			cancel()
+			return fmt.Errorf("conversation %s is running; refusing to replace its runtime", eng.taskID)
+		}
+	}
+	s.tasks[eng.taskID] = eng
+	if activeMatchesExpected {
+		// Replacing an unhealthy runtime for the same foreground identity is not a
+		// focus change. Keep Desktop attached to the repaired engine.
+		s.Engine = eng
+	}
+	s.mu.Unlock()
+	s.tasksMu.Unlock()
+
+	s.startPump(pumpCtx, eng)
+	if expected != nil {
+		if s.ptyMgr != nil {
+			s.ptyMgr.closeForTask(expected.taskID)
+		}
+		expected.teardown()
 	}
 	return nil
 }
@@ -478,6 +581,20 @@ func (s *Server) buildLocalEngine(taskID, pwd, modeStr string) (*Engine, error) 
 // runs can pass the headless factory (which drops interactive tools) while
 // sharing all the registration/model-inheritance plumbing with normal tasks.
 func (s *Server) buildLocalEngineWith(taskID, pwd, modeStr string, factory func(taskID, pwd, mode string) (*EngineConfig, error)) (*Engine, error) {
+	eng, err := s.assembleLocalEngine(taskID, pwd, modeStr, factory)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.registerEngine(eng); err != nil {
+		eng.teardown()
+		return nil, err
+	}
+	return eng, nil
+}
+
+// assembleLocalEngine constructs a candidate without publishing it. Activation
+// uses this to finish hydration before the task becomes resolvable.
+func (s *Server) assembleLocalEngine(taskID, pwd, modeStr string, factory func(taskID, pwd, mode string) (*EngineConfig, error)) (*Engine, error) {
 	ec, err := factory(taskID, pwd, modeStr)
 	if err != nil {
 		return nil, err
@@ -500,15 +617,12 @@ func (s *Server) buildLocalEngineWith(taskID, pwd, modeStr string, factory func(
 			}
 		}
 	}
-	if err := s.registerEngine(eng); err != nil {
-		eng.teardown()
-		return nil, err
-	}
 	return eng, nil
 }
 
-// buildRemoteEngine creates and registers a fresh remote (SSH or Docker) task engine.
-func (s *Server) buildRemoteEngine(taskID string, exec tools.RemoteExecutor, remotePwd, modeStr string) (*Engine, error) {
+// assembleRemoteEngine constructs an unpublished remote candidate. The caller
+// retains ownership of exec until the candidate is atomically published.
+func (s *Server) assembleRemoteEngine(taskID string, exec tools.RemoteExecutor, remotePwd, modeStr string) (*Engine, error) {
 	if s.newRemoteEngine == nil {
 		return nil, fmt.Errorf("remote task creation is not supported")
 	}
@@ -517,10 +631,6 @@ func (s *Server) buildRemoteEngine(taskID string, exec tools.RemoteExecutor, rem
 		return nil, err
 	}
 	eng := newEngine(ec)
-	if err := s.registerEngine(eng); err != nil {
-		eng.teardown()
-		return nil, err
-	}
 	return eng, nil
 }
 
@@ -566,7 +676,7 @@ func (s *Server) setActiveEngine(eng *Engine) {
 	// pwd, so remote workspaces never clobber the local entry) — health reports
 	// it after a restart so clients return to their last conversation. Runs
 	// outside s.mu: this is best-effort file I/O.
-	session.SaveLastSession(eng.pwd, eng.taskID)
+	session.SaveLastSession(engineProject(eng), eng.taskID)
 }
 
 // deleteEngine removes a task engine from the map and tears it down (stops its
@@ -648,7 +758,7 @@ func (s *Server) setTaskStatus(eng *Engine, running bool) {
 		"task_id":    eng.taskID,
 		"running":    running,
 		"status":     status,
-		"project":    eng.pwd,
+		"project":    engineProject(eng),
 		"updated_at": now,
 	}})
 	go func(id, st, ts string) {
@@ -661,6 +771,9 @@ func (s *Server) setTaskStatus(eng *Engine, running bool) {
 
 // CloseAllEngines tears down every live engine. Called on server shutdown.
 func (s *Server) CloseAllEngines() {
+	if s.remoteConns != nil {
+		s.remoteConns.closeAll()
+	}
 	s.tasksMu.Lock()
 	engines := make([]*Engine, 0, len(s.tasks))
 	for _, e := range s.tasks {

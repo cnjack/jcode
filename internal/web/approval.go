@@ -34,17 +34,19 @@ func (s *Server) handleGetGoal(w http.ResponseWriter, _ *http.Request) {
 // handleSetGoal sets (or replaces) the session goal. Unless start=false, it also
 // kicks off an agent run so work begins immediately.
 func (s *Server) handleSetGoal(w http.ResponseWriter, r *http.Request) {
-	eng := s.activeEngine()
-	if eng == nil || eng.env == nil || eng.env.GoalStore == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "goals not available"})
-		return
-	}
 	var req struct {
 		Objective string `json:"objective"`
 		Start     *bool  `json:"start,omitempty"` // default true
+		TaskID    string `json:"task_id,omitempty"`
+		Source    string `json:"source,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	eng := s.resolveEngine(req.TaskID)
+	if eng == nil || eng.env == nil || eng.env.GoalStore == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task goals not available"})
 		return
 	}
 	objective, err := tools.ValidateGoalObjective(req.Objective)
@@ -59,7 +61,7 @@ func (s *Server) handleSetGoal(w http.ResponseWriter, r *http.Request) {
 		// will pick the goal up after the current run finishes. Targets the active
 		// task.
 		if eng.running.CompareAndSwap(false, true) {
-			s.submitMessage(eng, tools.GoalKickoffPrompt(objective), eng.curMode(), "", "", nil)
+			s.submitMessage(eng, tools.GoalKickoffPrompt(objective), eng.curMode(), req.Source, req.TaskID, nil)
 		}
 	}
 	writeJSON(w, http.StatusOK, g)

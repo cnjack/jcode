@@ -17,6 +17,8 @@ import { useAppSelector } from '../app/hooks'
 import { useProductComposerHost } from '../app/composerHost'
 import kimiBackground from '../assets/kimi-light-background.webp'
 import zhipuBackground from '../assets/zhipu-light-background.webp'
+import { ConversationLoadingView } from './ConversationLoadingView'
+import { RemoteConnectionNotice } from './RemoteConnectionNotice'
 
 const MODEL_BACKGROUNDS = {
   kimi: kimiBackground,
@@ -63,6 +65,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
   const host = useProductComposerHost()
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
   const sessionLoading = useAppSelector((s) => s.chat.sessionLoading)
+  const conversationLoadPhase = useAppSelector((s) => s.conversationLoad.phase)
   const pendingAskUser = useAppSelector((s) => {
     for (const item of s.chat.timeline) {
       if (
@@ -94,6 +97,8 @@ export function ChatView({ readOnly }: ChatViewProps) {
       </div>
     )
   }
+
+  if (conversationLoadPhase !== 'idle') return <ConversationLoadingView />
 
   // Resume in flight: swap to a skeleton the instant the click lands, so the
   // switch feels immediate instead of blank-until-ready (the old flow showed
@@ -144,6 +149,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
         {/* Centered elevated composer. z-[2] keeps its upward-opening menus
             (model picker, slash palette) above the welcome hero text. */}
         <div className="welcome-composer z-[2] w-full max-w-4xl px-5">
+          <RemoteConnectionNotice />
           <ChatInput host={host} elevated pickerPlacement="bottom" onSent={() => { /* timeline auto-follows */ }} />
         </div>
         {/* Bottom half balances the center */}
@@ -167,6 +173,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
       </div>
       {/* z-[2] keeps the composer’s upward-opening menus above the thread layer. */}
       <div className="chat-content-layer chat-col relative z-[2]">
+        <RemoteConnectionNotice />
         {/* Goal pill floats behind the composer; composer sits on top (higher z-index). */}
         <GoalBanner host={host} />
         <div className={pendingAskUser ? 'hidden' : undefined} aria-hidden={pendingAskUser ? true : undefined}>

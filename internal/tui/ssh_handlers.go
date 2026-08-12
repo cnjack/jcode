@@ -119,6 +119,38 @@ func (m *Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea
 	return m, tea.Batch(cmds...)
 }
 
+func (m *Model) handleSSHHostKeyConfirm(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	accepted := strings.EqualFold(strings.TrimSpace(input), "yes") || strings.EqualFold(strings.TrimSpace(input), "y")
+	m.sshHostKeyPrompt = false
+	m.textarea.Placeholder = "Type your prompt here..."
+	if !accepted {
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("⚙ SSH:")+" Host key was not trusted; connection cancelled."))
+		m.sshSaveAddr = ""
+		m.sshSavePath = ""
+		m.sshHostKeyFingerprint = ""
+		m.refreshViewport()
+		return m, tea.Batch(cmds...)
+	}
+
+	fingerprint := m.sshHostKeyFingerprint
+	addr := m.sshAddr
+	path := m.sshPath
+	m.sshHostKeyFingerprint = ""
+	m.agentDone = false
+	m.thinking = true
+	m.lines = append(m.lines, textLine(toolLabelStyle.Render("🔐 SSH:")+" Trusting the displayed host key and reconnecting..."))
+	cmds = append(cmds, func() tea.Msg {
+		return SSHConnectMsg{
+			Addr:               addr,
+			Path:               path,
+			AcceptHostKey:      true,
+			HostKeyFingerprint: fingerprint,
+		}
+	})
+	cmds = append(cmds, m.spinner.Tick)
+	return m, tea.Batch(cmds...)
+}
+
 // handleSSHStep handles input during the SSH setup wizard.
 func (m *Model) handleSSHStep(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	if m.sshStep == 1 {
@@ -146,6 +178,7 @@ func (m *Model) handleSSHStep(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 func (m *Model) startSSHConnect(addr, path string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.sshStep = 0
 	m.sshAddr = addr
+	m.sshPath = path
 	m.mode = ModeAgent
 	m.agentDone = false
 	m.thinking = true

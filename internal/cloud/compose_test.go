@@ -176,8 +176,12 @@ func newFakeComposeLocal(t *testing.T) (*fakeComposeLocal, *httptest.Server) {
 				return
 			}
 			switch path {
-			case "/api/sessions":
-				_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "session_id": f.sessionID})
+			case "/api/sessions/activate":
+				sessionID, _ := body["session_id"].(string)
+				if sessionID == "" {
+					sessionID = f.sessionID
+				}
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready", "session_id": sessionID})
 			case "/api/chat":
 				w.WriteHeader(http.StatusAccepted)
 				_ = json.NewEncoder(w).Encode(map[string]string{"status": "processing", "session_id": f.sessionID})
@@ -187,12 +191,12 @@ func newFakeComposeLocal(t *testing.T) (*fakeComposeLocal, *httptest.Server) {
 		}
 	}
 	mux := http.NewServeMux()
-	for _, p := range []string{"/api/sessions", "/api/chat", "/api/model", "/api/mode", "/api/model-state/effort", "/api/goal"} {
+	for _, p := range []string{"/api/sessions/activate", "/api/chat", "/api/model", "/api/mode", "/api/model-state/effort", "/api/goal"} {
 		mux.HandleFunc("POST "+p, record(p))
 	}
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.calls = append(f.calls, "GET /api/health")
+		f.calls = append(f.calls, "GET /api/status")
 		f.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]string{"provider": f.healthProvider, "model": f.healthModel})
 	})
@@ -243,14 +247,14 @@ func TestChatSendComposeOrder(t *testing.T) {
 	}
 
 	calls, bodies := local.snapshot()
-	wantOrder := []string{"/api/sessions", "/api/model", "/api/model-state/effort", "/api/mode", "/api/goal", "/api/chat"}
+	wantOrder := []string{"/api/sessions/activate", "/api/model", "/api/model-state/effort", "/api/mode", "/api/goal", "/api/chat"}
 	if strings.Join(calls, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("call order = %v, want %v", calls, wantOrder)
 	}
 
 	// Session create carries the project path.
-	if bodies["/api/sessions"][0]["pwd"] != "/tmp/proj-a" {
-		t.Errorf("sessions body = %v, want pwd /tmp/proj-a", bodies["/api/sessions"][0])
+	if bodies["/api/sessions/activate"][0]["project_path"] != "/tmp/proj-a" {
+		t.Errorf("activation body = %v, want project_path /tmp/proj-a", bodies["/api/sessions/activate"][0])
 	}
 	// Model + effort (effort keyed by the command's model).
 	if bodies["/api/model"][0]["provider"] != "anthropic" || bodies["/api/model"][0]["model"] != "claude-x" {
@@ -302,18 +306,18 @@ func TestChatSendComposeExistingSessionAndEffortFromHealth(t *testing.T) {
 	}
 
 	calls, bodies := local.snapshot()
-	wantOrder := []string{"/api/sessions", "GET /api/health", "/api/model-state/effort", "/api/chat"}
+	wantOrder := []string{"/api/sessions/activate", "GET /api/status", "/api/model-state/effort", "/api/chat"}
 	if strings.Join(calls, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("call order = %v, want %v", calls, wantOrder)
 	}
 	// Focus passes the existing session id through.
-	if bodies["/api/sessions"][0]["session_id"] != "sess-77" {
-		t.Errorf("sessions body = %v, want session_id sess-77", bodies["/api/sessions"][0])
+	if bodies["/api/sessions/activate"][0]["session_id"] != "sess-77" {
+		t.Errorf("activation body = %v, want session_id sess-77", bodies["/api/sessions/activate"][0])
 	}
-	// Effort without an explicit model resolves the current one via /api/health.
+	// Effort without an explicit model resolves the task via /api/status.
 	eff := bodies["/api/model-state/effort"][0]
 	if eff["provider"] != "prov-cur" || eff["model"] != "mod-cur" || eff["effort"] != "low" {
-		t.Errorf("effort body = %v, want current model from /api/health", eff)
+		t.Errorf("effort body = %v, want current model from /api/status", eff)
 	}
 }
 
@@ -623,8 +627,8 @@ func TestChatSendGoalArmed(t *testing.T) {
 	}
 
 	calls, bodies := local.snapshot()
-	if strings.Join(calls, ",") != "/api/goal" {
-		t.Fatalf("local calls = %v, want only /api/goal (no /api/chat, no compose steps)", calls)
+	if strings.Join(calls, ",") != "/api/sessions/activate,/api/goal" {
+		t.Fatalf("local calls = %v, want activation + /api/goal (no /api/chat, no compose steps)", calls)
 	}
 	goal := bodies["/api/goal"][0]
 	if goal["objective"] != "交付 M14" || goal["start"] != true {

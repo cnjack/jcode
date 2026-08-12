@@ -153,7 +153,10 @@ func (e *editTool) createFile(ctx context.Context, input EditInput) (string, err
 		return "", fmt.Errorf("new_string is required when creating a file")
 	}
 
-	fi, _ := e.env.Exec.Stat(ctx, input.FilePath)
+	fi, err := e.env.Exec.Stat(ctx, input.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect file %s before creating: %w", input.FilePath, err)
+	}
 	if fi != nil && fi.Exists {
 		return "", fmt.Errorf("file %s already exists. Use old_string to edit existing files, or delete the file first", input.FilePath)
 	}
