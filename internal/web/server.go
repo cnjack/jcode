@@ -96,6 +96,11 @@ type Server struct {
 	// newRemoteEngine is newEngine's remote sibling: it builds a task engine bound
 	// to a remote executor (SSH or Docker) instead of a local pwd.
 	newRemoteEngine func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error)
+	// dialSSH/dialDocker are the cold-activation seams for persisted remote
+	// conversations. Production falls back to internal/remote; focused tests can
+	// inject bounded fakes without dialing a host or Docker daemon.
+	dialSSH    func(context.Context, string, string) (tools.RemoteExecutor, error)
+	dialDocker func(context.Context, string) (tools.RemoteExecutor, error)
 
 	// newAutomationEngine builds a headless task engine for automation runs: like
 	// newEngine but drops interactive tools (ask_user) so an unattended run can't
@@ -442,6 +447,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /api/sessions", s.handleNewSession)
+	mux.HandleFunc("POST /api/sessions/activate", s.handleActivateSession)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("GET /api/todos", s.handleGetTodos)
 	mux.HandleFunc("GET /api/goal", s.handleGetGoal)
@@ -671,24 +677,31 @@ func (s *Server) currentModelSupportsImage(eng *Engine) bool {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	eng := s.activeEngine()
+	recentProject, recentSessionID := session.LoadMostRecentSession()
 
 	if s.needsSetup || eng == nil {
 		pwd := ""
+		project := ""
 		if eng != nil {
 			pwd = eng.pwd
+			project = engineProject(eng)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":        "needs_setup",
-			"version":       s.version,
-			"pwd":           pwd,
-			"provider":      "",
-			"model":         "",
-			"agent":         "",
-			"mode":          "build",
-			"session_id":    "",
-			"running":       false,
-			"needs_setup":   true,
-			"auth_required": s.requireAuth,
+			"status":            "needs_setup",
+			"version":           s.version,
+			"pwd":               pwd,
+			"project":           project,
+			"workspace_key":     project,
+			"provider":          "",
+			"model":             "",
+			"agent":             "",
+			"mode":              "build",
+			"session_id":        "",
+			"recent_project":    recentProject,
+			"recent_session_id": recentSessionID,
+			"running":           false,
+			"needs_setup":       true,
+			"auth_required":     s.requireAuth,
 		})
 		return
 	}
@@ -704,22 +717,27 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	throwaway := (eng.recorder == nil || !eng.recorder.HasRecording()) && !eng.running.Load()
 	eng.emu.Unlock()
 	if throwaway {
-		if last := session.LoadLastSession(eng.pwd); last != "" {
+		if last := session.LoadLastSession(engineProject(eng)); last != "" {
 			sessionID = last
 		}
 	}
+	project := engineProject(eng)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":        "ok",
-		"version":       s.version,
-		"pwd":           eng.pwd,
-		"provider":      provider,
-		"model":         mdl,
-		"agent":         eng.curAgentRole(),
-		"mode":          modeStr,
-		"session_id":    sessionID,
-		"running":       eng.running.Load(),
-		"image_support": s.currentModelSupportsImage(eng),
-		"auth_required": s.requireAuth,
+		"status":            "ok",
+		"version":           s.version,
+		"pwd":               eng.pwd,
+		"project":           project,
+		"workspace_key":     project,
+		"provider":          provider,
+		"model":             mdl,
+		"agent":             eng.curAgentRole(),
+		"mode":              modeStr,
+		"session_id":        sessionID,
+		"recent_project":    recentProject,
+		"recent_session_id": recentSessionID,
+		"running":           eng.running.Load(),
+		"image_support":     s.currentModelSupportsImage(eng),
+		"auth_required":     s.requireAuth,
 	})
 }
 
@@ -729,13 +747,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) statusSnapshot(eng *Engine) map[string]any {
 	full := eng.tokenUsage.GetFull()
 	provider, mdl, modeStr := eng.modelSnapshot()
+	project := engineProject(eng)
 	return map[string]any{
-		"running":  eng.running.Load(),
-		"pwd":      eng.pwd,
-		"provider": provider,
-		"model":    mdl,
-		"agent":    eng.curAgentRole(),
-		"mode":     modeStr,
+		"running":       eng.running.Load(),
+		"pwd":           eng.pwd,
+		"project":       project,
+		"workspace_key": project,
+		"provider":      provider,
+		"model":         mdl,
+		"agent":         eng.curAgentRole(),
+		"mode":          modeStr,
 		// Live token snapshot so a client reconnecting between turns can render
 		// the context bar + cache hit rate without waiting for the next
 		// token_update WS event. total_tokens = current context occupancy.
@@ -755,9 +776,9 @@ func (s *Server) statusSnapshot(eng *Engine) map[string]any {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	eng := s.activeEngine()
+	eng := s.resolveEngine(r.URL.Query().Get("task_id"))
 	if eng == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
 	payload := s.statusSnapshot(eng)

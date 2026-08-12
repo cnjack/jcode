@@ -46,6 +46,11 @@ type ConnectorConfig struct {
 	// override them to point at a temp dir.
 	IndexPathFn    func() (string, error)
 	ListSessionsFn func() (map[string][]session.SessionMeta, error)
+	// LoadSessionFn / HistorySyncPath override the local JSONL transcript and
+	// crash-recovery ledger in tests. Production uses the strict JSONL history
+	// loader and ~/.jcode/cloud-history.json.
+	LoadSessionFn   func(string) ([]session.Entry, error)
+	HistorySyncPath string
 
 	// InboxDir is the root under which chat attachments land
 	// (<InboxDir>/<session_id>/<filename>). Empty → ~/.jcode/inbox.
@@ -107,6 +112,13 @@ type Connector struct {
 	// providerSyncMu serializes ASK enrollment, provider vault reconciliation
 	// and approval actions so one Desktop process never races its own CAS state.
 	providerSyncMu sync.Mutex
+	// historySyncMu orders transcript backfill before live event sequence
+	// allocation. batcherMu exposes the currently running durable batcher so a
+	// session-index sync can flush already allocated events before inspecting
+	// the cloud high-water mark.
+	historySyncMu sync.RWMutex
+	batcherMu     sync.Mutex
+	eventBatcher  *eventBatcher
 
 	// statusMu guards state/lastError, the live connection snapshot exposed
 	// via Status. Written by Run's loops, read by the web status endpoint.
@@ -677,11 +689,19 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	if cloudForbiddenMode(p.Mode) {
 		return "error", map[string]string{"error": fmt.Sprintf("mode_not_allowed_for_cloud: %q (cloud sessions are capped at auto)", p.Mode)}
 	}
+	// The relay itself is the trust boundary. Channel is optional presentation
+	// metadata supplied by clients, so it must never decide whether the local
+	// activation endpoint applies Cloud's remote-workspace allowlist or safe
+	// default mode. It also prevents a Cloud-originated user turn from being
+	// mislabeled as a Desktop local_echo when older clients omit channel.
+	if strings.TrimSpace(p.Channel) == "" {
+		p.Channel = "cloud"
+	}
 	// goal_armed wins over everything: text is the goal objective and the
 	// command only arms the goal — /api/chat and all compose facets
 	// (mode/images/session/attachments/…) are ignored.
 	if p.GoalArmed {
-		return c.execChatSendGoalArmed(ctx, &p)
+		return c.execChatSendGoalArmed(ctx, cmd, &p)
 	}
 	// Attachments alone are a valid message (their reference list becomes the
 	// text); truly empty input is not.
@@ -694,16 +714,19 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	return c.execChatSendLegacy(ctx, cmd, &p)
 }
 
-// execChatSendGoalArmed arms the session goal on the active engine via
-// POST /api/goal with start=true (mirroring the web UI's setGoal default),
-// which kicks off the agent run itself — no /api/chat call follows.
-func (c *Connector) execChatSendGoalArmed(ctx context.Context, p *chatSendPayload) (string, any) {
+// execChatSendGoalArmed activates its exact task without foregrounding it, then
+// arms that task's goal. No /api/chat call follows.
+func (c *Connector) execChatSendGoalArmed(ctx context.Context, cmd DeviceCommand, p *chatSendPayload) (string, any) {
 	objective := strings.TrimSpace(p.Text)
 	if objective == "" {
 		return "error", map[string]string{"error": "chat.send: goal_armed with empty objective"}
 	}
+	sessionID, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel)
+	if err != nil {
+		return "error", map[string]string{"error": err.Error()}
+	}
 	status, body, err := c.local.postJSON(ctx, "/api/goal", map[string]any{
-		"objective": objective, "start": true,
+		"objective": objective, "start": true, "task_id": sessionID, "source": p.Channel,
 	})
 	if err != nil {
 		return "error", map[string]string{"error": err.Error()}
@@ -721,12 +744,19 @@ func (c *Connector) execChatSendLegacy(ctx context.Context, cmd DeviceCommand, p
 	// an empty id to /api/chat targets the local active engine, which could be a
 	// different conversation. The created id is therefore the sole target for
 	// both the message and the successful command acknowledgment.
-	sessionID := cmd.SessionID
-	if sessionID == "" {
-		var err error
-		sessionID, err = c.createOrFocusSession(ctx, "", "", p.Channel)
-		if err != nil {
-			return "error", map[string]string{"error": err.Error()}
+	sessionID, err := c.activateSession(ctx, cmd.SessionID, "", p.Channel)
+	if err != nil {
+		return "error", map[string]string{"error": err.Error()}
+	}
+	if p.Mode != "" {
+		modeName := p.Mode
+		if modeName == "build" {
+			modeName = "approval"
+		}
+		if err := c.postLocalOK(ctx, "/api/mode", map[string]string{
+			"mode": modeName, "task_id": sessionID,
+		}); err != nil {
+			return "error", map[string]string{"error": fmt.Sprintf("mode: %v", err)}
 		}
 	}
 
@@ -765,7 +795,7 @@ func (c *Connector) execChatSendLegacy(ctx context.Context, cmd DeviceCommand, p
 }
 
 // execChatSendCompose runs the M12 ordered compose pipeline against the local
-// control plane: create/focus the session (project_path) → land attachments →
+// control plane: activate the session (project_path) → land attachments →
 // model → effort → mode → goal → send the message with the attachment
 // reference list appended. Every step failure acks error naming the facet —
 // unsupported facets are never silently ignored.
@@ -781,10 +811,9 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 		return errResult(err)
 	}
 
-	// 1. Create/focus the session. This makes the task active before the
-	// task-scoped model/mode/goal endpoints below and returns the id required by
-	// attachments and chat.
-	sid, err := c.createOrFocusSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel)
+	// 1. Activate the session without changing Desktop's foreground and return
+	// the id required by every task-scoped compose facet below.
+	sid, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel)
 	if err != nil {
 		return errResult(err)
 	}
@@ -804,7 +833,7 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 			return errResult(fmt.Errorf("model: provider and id are both required"))
 		}
 		if err := c.postLocalOK(ctx, "/api/model", map[string]string{
-			"provider": p.Model.Provider, "model": p.Model.ID,
+			"provider": p.Model.Provider, "model": p.Model.ID, "task_id": sid,
 		}); err != nil {
 			return errResult(fmt.Errorf("model: %w", err))
 		}
@@ -814,7 +843,7 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 		if p.Model != nil {
 			provider, modelID = p.Model.Provider, p.Model.ID
 		} else {
-			provider, modelID, err = c.currentModel(ctx)
+			provider, modelID, err = c.currentModel(ctx, sid)
 			if err != nil {
 				return errResult(fmt.Errorf("effort: cannot resolve current model: %w", err))
 			}
@@ -835,7 +864,7 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 		if m == "build" { // legacy chat-mode alias for the approval mode
 			m = "approval"
 		}
-		if err := c.postLocalOK(ctx, "/api/mode", map[string]string{"mode": m}); err != nil {
+		if err := c.postLocalOK(ctx, "/api/mode", map[string]string{"mode": m, "task_id": sid}); err != nil {
 			return errResult(fmt.Errorf("mode: %w", err))
 		}
 	}
@@ -843,7 +872,7 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 	// 4. Goal (start=false: the message below kicks the run off itself).
 	if p.Goal != "" {
 		if err := c.postLocalOK(ctx, "/api/goal", map[string]any{
-			"objective": p.Goal, "start": false,
+			"objective": p.Goal, "start": false, "task_id": sid, "source": p.Channel,
 		}); err != nil {
 			return errResult(fmt.Errorf("goal: %w", err))
 		}
@@ -870,32 +899,33 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 	return "ok", map[string]string{"session_id": sid}
 }
 
-// createOrFocusSession centralizes the local session contract for cloud
-// commands. Source is sent at creation so handleNewSession can apply the
-// cloud-sync policy before the first message is emitted.
-func (c *Connector) createOrFocusSession(ctx context.Context, sessionID, projectPath, channel string) (string, error) {
+// activateSession centralizes the non-foreground local session contract for
+// Cloud commands. Source is always non-empty so the server applies the Cloud
+// remote allowlist and safe-mode policy before the first event is emitted.
+func (c *Connector) activateSession(ctx context.Context, sessionID, projectPath, source string) (string, error) {
 	req := map[string]string{}
 	if sessionID != "" {
 		req["session_id"] = sessionID
 	}
 	if projectPath != "" {
-		req["pwd"] = projectPath
+		req["project_path"] = projectPath
 	}
-	if channel != "" {
-		req["source"] = channel
+	if source == "" {
+		source = "cloud"
 	}
-	status, body, err := c.local.postJSON(ctx, "/api/sessions", req)
+	req["source"] = source
+	status, body, err := c.local.postJSON(ctx, "/api/sessions/activate", req)
 	if err != nil {
 		return "", err
 	}
 	if status != http.StatusOK {
-		return "", errUnexpectedStatus("/api/sessions", status, string(body))
+		return "", errUnexpectedStatus("/api/sessions/activate", status, string(body))
 	}
 	var resp struct {
 		SessionID string `json:"session_id"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil || resp.SessionID == "" {
-		return "", fmt.Errorf("/api/sessions: no session_id in response: %s", body)
+		return "", fmt.Errorf("/api/sessions/activate: no session_id in response: %s", body)
 	}
 	return resp.SessionID, nil
 }
@@ -912,23 +942,23 @@ func (c *Connector) postLocalOK(ctx context.Context, path string, body any) erro
 	return nil
 }
 
-// currentModel resolves the active engine's provider/model via GET
-// /api/health (used to key an effort override when the command did not name
-// a model).
-func (c *Connector) currentModel(ctx context.Context) (provider, modelID string, err error) {
-	status, body, err := c.local.getJSON(ctx, "/api/health")
+// currentModel resolves the activated task's provider/model via task-scoped
+// status (used to key an effort override when the command did not name one).
+func (c *Connector) currentModel(ctx context.Context, sessionID string) (provider, modelID string, err error) {
+	path := "/api/status?task_id=" + url.QueryEscape(sessionID)
+	status, body, err := c.local.getJSON(ctx, path)
 	if err != nil {
 		return "", "", err
 	}
 	if status != http.StatusOK {
-		return "", "", errUnexpectedStatus("/api/health", status, string(body))
+		return "", "", errUnexpectedStatus("/api/status", status, string(body))
 	}
 	var health struct {
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
 	}
 	if err := json.Unmarshal(body, &health); err != nil {
-		return "", "", fmt.Errorf("/api/health: invalid response: %w", err)
+		return "", "", fmt.Errorf("/api/status: invalid response: %w", err)
 	}
 	return health.Provider, health.Model, nil
 }

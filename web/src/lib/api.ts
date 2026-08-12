@@ -1,5 +1,5 @@
 // API client for jcode backend — ported from web/src/composables/api.ts.
-import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, ProviderToolPolicy, ImageEndpointConfig, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse, ArtifactRecord, ArtifactShareResult, ArtifactShareSummary } from './types'
+import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, ProviderToolPolicy, ImageEndpointConfig, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse, ArtifactRecord, ArtifactShareResult, ArtifactShareSummary, SessionActivationResponse } from './types'
 import type { AuthMethod, ProviderAuthBinding, ProviderAuthFlow, ProviderAuthPollResult, ProviderAuthStatus } from './types'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from './automation'
 import { apiBase } from './apiBase'
@@ -12,6 +12,16 @@ interface RequestOptions extends RequestInit {
    * surface as an error in that form — not clear the token / re-trigger the gate.
    */
   skipAuth?: boolean
+}
+
+export interface APIError extends Error {
+  status?: number
+  code?: string
+  body?: unknown
+}
+
+export function isAPIError(error: unknown): error is APIError {
+  return error instanceof Error && ('status' in error || 'body' in error)
 }
 
 async function request<T>(path: string, options?: RequestOptions): Promise<T> {
@@ -31,8 +41,10 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
     const body = await resp.json().catch(() => ({ error: resp.statusText }))
     // Attach the status so callers can distinguish 401 (bad token) from
     // transport/5xx failures and react differently.
-    const err = new Error(body.error || `HTTP ${resp.status}`) as Error & { status?: number }
+    const err = new Error(body.error || `HTTP ${resp.status}`) as APIError
     err.status = resp.status
+    err.code = typeof body.code === 'string' ? body.code : undefined
+    err.body = body
     throw err
   }
   return resp.json()
@@ -71,7 +83,7 @@ export const api = {
       body: JSON.stringify({ before_user_message: beforeUserMessage }),
     }),
   health: () =>
-    request<{ status: string; version: string; pwd: string; provider: string; model: string; agent?: string; mode: string; session_id: string; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
+    request<{ status: string; version: string; pwd: string; project?: string; workspace_key?: string; provider: string; model: string; agent?: string; mode: string; session_id: string; recent_project?: string; recent_session_id?: string; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
       '/api/health',
     ),
   // authVerify validates a token typed into the login gate. skipAuth keeps a 401
@@ -87,6 +99,8 @@ export const api = {
       running: boolean
       ws_clients: number
       pwd: string
+      project?: string
+      workspace_key?: string
       provider: string
       model: string
       agent?: string
@@ -110,10 +124,17 @@ export const api = {
     }),
   clearGoal: () => request<{ status: string }>('/api/goal', { method: 'DELETE' }),
   sessions: () => request<SessionItem[]>('/api/sessions'),
-  session: (id: string) => request<SessionEntry[]>(`/api/sessions/${encodeURIComponent(id)}`),
+  session: (id: string, signal?: AbortSignal) =>
+    request<SessionEntry[]>(`/api/sessions/${encodeURIComponent(id)}`, { signal }),
+  activateSession: (data: { session_id: string; project_path?: string; source?: string; focus?: boolean }, signal?: AbortSignal) =>
+    request<SessionActivationResponse>('/api/sessions/activate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      signal,
+    }),
   deleteSession: (id: string) =>
     request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  newSession: (sessionId?: string) =>
+  newSession: (sessionId?: string, signal?: AbortSignal) =>
     request<{
       status: string
       session_id: string
@@ -135,6 +156,7 @@ export const api = {
     }>('/api/sessions', {
       method: 'POST',
       body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
+      signal,
     }),
   files: (path?: string) => {
     const q = path ? `?path=${encodeURIComponent(path)}` : ''
@@ -277,10 +299,11 @@ export const api = {
     const q = path ? `?path=${encodeURIComponent(path)}` : ''
     return request<BrowseResponse>(`/api/browse${q}`)
   },
-  switchProject: (path: string) =>
+  switchProject: (path: string, signal?: AbortSignal) =>
     request<{ status: string; pwd: string }>('/api/project/switch', {
       method: 'POST',
       body: JSON.stringify({ path }),
+      signal,
     }),
   // Returns the subset of the given local paths that no longer exist on disk, so
   // the workspace picker can hide dead entries. Send local paths only — ssh://
@@ -314,20 +337,27 @@ export const api = {
     request<DockerContainersResponse>('/api/docker/containers'),
 
   // Remote connection wizard (SSH)
-  remoteConnect: (data: RemoteConnectRequest) =>
+  remoteConnect: (data: RemoteConnectRequest, signal?: AbortSignal) =>
     request<RemoteConnectResponse>('/api/remote/connect', {
       method: 'POST',
       body: JSON.stringify(data),
+      signal,
     }),
   remoteListDir: (connectionId: string, path: string) =>
     request<RemoteListDirResponse>('/api/remote/list-dir', {
       method: 'POST',
       body: JSON.stringify({ connection_id: connectionId, path }),
     }),
-  remoteBind: (connectionId: string, path: string) =>
+  remoteBind: (
+    connectionId: string,
+    path: string,
+    options?: { session_id?: string; focus?: boolean },
+    signal?: AbortSignal,
+  ) =>
     request<RemoteBindResponse>('/api/remote/bind', {
       method: 'POST',
-      body: JSON.stringify({ connection_id: connectionId, path }),
+      body: JSON.stringify({ connection_id: connectionId, path, ...options }),
+      signal,
     }),
   remoteCancel: (connectionId: string) =>
     request<{ status: string }>('/api/remote/cancel', {

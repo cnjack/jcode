@@ -10,7 +10,6 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/session"
-	"github.com/cnjack/jcode/internal/tools"
 )
 
 // taskItem is the sidebar's view of a session: its persisted metadata plus a
@@ -377,8 +376,6 @@ func (s *Server) writeResumeReply(w http.ResponseWriter, eng *Engine, entries []
 }
 
 func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
-	// Parse optional resume session ID + project. Creating a task no longer
-	// blocks on "is the agent running" — tasks run concurrently.
 	var req struct {
 		SessionID string `json:"session_id,omitempty"`
 		Pwd       string `json:"pwd,omitempty"`
@@ -394,116 +391,24 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Already-live task: just focus it (do not disturb its run).
-	if req.SessionID != "" {
-		if eng := s.resolveEngine(req.SessionID); eng != nil {
-			s.setActiveEngine(eng)
-			// Best-effort: a read failure only drops the embedded entries —
-			// the client falls back to GET /api/sessions/{id}.
-			entries, err := session.LoadSession(req.SessionID)
-			if err != nil {
-				config.Logger().Printf("[web] resume: embedded entries unavailable for %s (client falls back to GET): %v", req.SessionID, err)
-			}
-			s.writeResumeReply(w, eng, entries)
-			return
-		}
-	}
-
-	if s.newEngine == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "task creation is not supported"})
-		return
-	}
-
-	// Resume mode is task-owned authorization state. Load it before asking the
-	// factory to build an agent so this task can never inherit the foreground
-	// task's Full access mode (or Server.activeMode) during a restart. As in the
-	// TUI and ACP, a saved Plan resumes as Approval: the plan remains in session
-	// history, while the agent comes back with the normal tool set and per-call
-	// approval instead of being stranded in a read-only planning agent.
-	var entries []session.Entry
-	var restoredState *session.SessionState
-	restoredMode := mode.Approval
-	buildMode := s.activeMode()
-	if req.SessionID != "" {
-		var loadErr error
-		entries, loadErr = session.LoadSession(req.SessionID)
-		if loadErr != nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
-			return
-		}
-		restoredState = session.ReconstructState(entries)
-		savedMode, modeErr := session.LoadSessionModeStrict(req.SessionID)
-		if modeErr != nil {
-			// Conversational replay may salvage a damaged transcript, but mode is
-			// authorization state. A line that cannot be parsed might be a newer
-			// revoke, so restore the safe default and keep details in the local log.
-			config.Logger().Printf("[web] resume: mode journal unavailable for %s; restoring approval: %v", req.SessionID, modeErr)
-		} else {
-			restoredMode = restoredWebSessionMode(savedMode)
-		}
-		buildMode = restoredMode.String()
-	}
-
-	// Each new/resumed task gets its OWN engine (env, agent, recorder, handler),
-	// so it runs independently of every other task.
-	pwd := req.Pwd
-	if pwd == "" {
-		if a := s.activeEngine(); a != nil {
-			pwd = a.pwd
-		}
-	}
-	eng, err := s.buildLocalEngine(req.SessionID, pwd, buildMode)
+	// Build or recover the task without changing the foreground until every
+	// remote connection and hydration step has succeeded. This is the same cold
+	// activation path used by Cloud commands, so a persisted SSH/Docker UUID can
+	// never silently fall back to a local engine.
+	result, err := s.ensureConversation(r.Context(), req.SessionID, req.Pwd, req.Source)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeConversationActivationError(w, err)
 		return
 	}
-
-	// Resume: hydrate the fresh engine with the persisted conversation/todos/goal.
-	if req.SessionID != "" {
-		st := restoredState
-		if eng.rebuildForRole != nil {
-			eng.rebuildMu.Lock()
-			provider, model, _ := eng.modelSnapshot()
-			built, rebuildErr := eng.rebuildForRole(st.Agent, provider, model)
-			if rebuildErr != nil {
-				config.Logger().Printf("[web] resume: custom agent %q unavailable for %s: %v", st.Agent, req.SessionID, rebuildErr)
-				if fallback, fallbackErr := eng.rebuildForRole("", provider, model); fallbackErr == nil {
-					eng.applyAgentRoleSwitch("", fallback)
-				}
-			} else {
-				eng.applyAgentRoleSwitch(st.Agent, built)
-			}
-			eng.rebuildMu.Unlock()
-		}
-		eng.emu.Lock()
-		eng.history = st.History
-		eng.emu.Unlock()
-		if eng.approvalState != nil {
-			eng.approvalState.SetSessionMode(restoredMode)
-		}
-		if eng.todoStore != nil {
-			items := make([]tools.TodoItem, len(st.Todos))
-			for i, t := range st.Todos {
-				items[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
-			}
-			eng.todoStore.Update(items)
-		}
-		if eng.env != nil && eng.env.GoalStore != nil {
-			eng.env.GoalStore.RestoreFromSnapshot(st.Goal)
-			if eng.handler != nil {
-				eng.handler.Emit("goal_update", eng.env.GoalStore.Get())
-			}
-		}
+	eng := s.resolveEngine(result.SessionID)
+	if eng == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "activated task is unavailable"})
+		return
 	}
-
 	s.setActiveEngine(eng)
 
-	// Brand-new task: tell its view to start clean, and stamp its initial
-	// cloud-sync state (M19): cloud-originated sessions always sync, local
-	// ones follow cloud.sync_default. Resume never stamps.
 	if req.SessionID == "" {
 		s.wsBroker.Broadcast(WSEvent{TaskID: eng.taskID, Type: "session_reset", Data: map[string]string{}})
-		s.stampCloudSync(eng.taskID, req.Source, true)
 		resp := s.statusSnapshot(eng)
 		resp["status"] = "ok"
 		resp["session_id"] = eng.taskID
@@ -511,8 +416,10 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resume: one-shot reply (entries + goal + todos + status) so the client
-	// repaints without follow-up round trips.
+	entries, loadErr := session.LoadSession(req.SessionID)
+	if loadErr != nil {
+		config.Logger().Printf("[web] resume: embedded entries unavailable for %s (client falls back to GET): %v", req.SessionID, loadErr)
+	}
 	s.writeResumeReply(w, eng, entries)
 }
 

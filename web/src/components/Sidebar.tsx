@@ -32,7 +32,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { uiActions, sessionActions, chatActions, loadSession, loadWorkspaceState, startNewChat } from '../app/store'
+import { uiActions, sessionActions, chatActions, remoteConnectionActions, loadWorkspaceState, openConversation, startNewChat } from '../app/store'
 import { api } from '../lib/api'
 import type { TaskItem } from '../lib/types'
 import { ThemeToggle } from './ThemeToggle'
@@ -344,27 +344,11 @@ export function Sidebar() {
     // on the resume critical path (an awaited PATCH here delayed the replay
     // by a full round trip on every unread open).
     if (row.unread) void patchTask(row.uuid, { unread: false })
-    if (row.project && activePath && row.project !== activePath) {
-      // Remote workspaces need the wizard (prefill + optional load task).
-      if (isRemotePath(row.project)) {
-        const meta = parseRemoteLabel(row.project)
-        openRemoteConnect(meta ? { ...meta, loadTaskUuid: row.uuid } : undefined)
-        return
-      }
-      try {
-        const resp = await api.switchProject(row.project)
-        dispatch(sessionActions.setProjectPath(resp.pwd || row.project))
-        await dispatch(loadWorkspaceState())
-      } catch {
-        dispatch(chatActions.addMessage({
-          role: 'system',
-          content: t('sidebar.switchProjectFailed'),
-          level: 'error',
-        }))
-        return
-      }
-    }
-    await dispatch(loadSession(row.uuid))
+    await dispatch(openConversation({
+      uuid: row.uuid,
+      project: row.project,
+      title: row.title,
+    }))
   }
 
   // Apply a task metadata patch via the API and reflect it in the store.
@@ -404,6 +388,7 @@ export function Sidebar() {
     // stale after the await (a WS update or refresh may have landed since),
     // and a whole-list setTasks would clobber it.
     dispatch(sessionActions.removeSession(row.uuid))
+    dispatch(remoteConnectionActions.clear({ taskId: row.uuid }))
     if (!wasActive) {
       dispatch(chatActions.dropSessionQueue(row.uuid))
       return

@@ -908,6 +908,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						}
 					}
 
+					if m.sshHostKeyPrompt {
+						return m.handleSSHHostKeyConfirm(prompt, cmds)
+					}
+
 					if m.sshSavePrompt {
 						return m.handleSSHSaveAlias(prompt, cmds)
 					}
@@ -1690,7 +1694,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case SSHStatusMsg:
 		m.thinking = false
-		if msg.Success {
+		switch {
+		case msg.Success:
 			m.envLabel = msg.Label
 			m.invalidateSidebarCache()
 			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Connected to %s",
@@ -1711,7 +1716,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.lines = append(m.lines, textLine(toolLabelStyle.Render("⚙ SSH:")+" Save as alias? Enter alias name (or press Enter/type 'n' to skip)"))
 				m.textarea.Placeholder = "Enter alias name (e.g. my-server)..."
 			}
-		} else {
+		case msg.HostKeyCode == "ssh_host_key_unknown":
+			m.sshHostKeyPrompt = true
+			m.sshHostKeyFingerprint = msg.Fingerprint
+			m.lines = append(m.lines,
+				textLine(toolLabelStyle.Render("🔐 SSH host key requires trust:")),
+				textLine(toolResultStyle.Render("   Host: "+msg.Host)),
+				textLine(toolResultStyle.Render("   Key type: "+msg.KeyType)),
+				textLine(toolResultStyle.Render("   Fingerprint: "+msg.Fingerprint)),
+				textLine(toolLabelStyle.Render("⚠ SSH:")+" Verify this fingerprint, then type 'yes' to trust it (anything else cancels)."),
+			)
+			m.textarea.Placeholder = "Type yes to trust this exact fingerprint..."
+		default:
 			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
 				toolErrorStyle.Render("✗ SSH Error:"),
 				toolResultStyle.Render(msg.Err.Error()))))

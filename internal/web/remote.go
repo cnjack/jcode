@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,7 +14,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/remote"
+	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/tools"
 )
 
@@ -57,17 +60,39 @@ func (rg *remoteConnRegistry) add(pc *pendingConn) string {
 func (rg *remoteConnRegistry) get(id string) *pendingConn {
 	rg.mu.Lock()
 	defer rg.mu.Unlock()
-	return rg.conns[id]
+	rg.sweepLocked()
+	pc := rg.conns[id]
+	if pc != nil {
+		// The TTL is idle time, not total wizard time. Directory browsing may
+		// legitimately take longer than ten minutes on a large remote tree.
+		pc.createdAt = time.Now()
+	}
+	return pc
 }
 
-// take removes a connection WITHOUT closing it: ownership transfers to the
-// caller (e.g. the live env after a successful bind).
-func (rg *remoteConnRegistry) take(id string) *pendingConn {
+// claim removes a connection WITHOUT closing it while a bind is in progress.
+// This prevents a concurrent cancel or second bind from closing/reusing the
+// executor during candidate construction. The caller either transfers ownership
+// to the published engine or restores the same id on failure.
+func (rg *remoteConnRegistry) claim(id string) *pendingConn {
 	rg.mu.Lock()
 	defer rg.mu.Unlock()
+	rg.sweepLocked()
 	pc := rg.conns[id]
 	delete(rg.conns, id)
 	return pc
+}
+
+func (rg *remoteConnRegistry) restore(id string, pc *pendingConn) {
+	if id == "" || pc == nil {
+		return
+	}
+	rg.mu.Lock()
+	if _, exists := rg.conns[id]; !exists {
+		pc.createdAt = time.Now()
+		rg.conns[id] = pc
+	}
+	rg.mu.Unlock()
 }
 
 // drop removes and closes a pending connection (cancel / abandon).
@@ -78,6 +103,21 @@ func (rg *remoteConnRegistry) drop(id string) {
 	rg.mu.Unlock()
 	if pc != nil && pc.exec != nil {
 		_ = pc.exec.Close()
+	}
+}
+
+// closeAll releases connections that were established in the wizard but never
+// bound to an Engine. Engine teardown only sees published runtimes, so pending
+// SSH transports need their own shutdown path.
+func (rg *remoteConnRegistry) closeAll() {
+	rg.mu.Lock()
+	conns := rg.conns
+	rg.conns = make(map[string]*pendingConn)
+	rg.mu.Unlock()
+	for _, pc := range conns {
+		if pc != nil && pc.exec != nil {
+			_ = pc.exec.Close()
+		}
 	}
 }
 
@@ -112,6 +152,10 @@ func (s *Server) handleRemoteConnect(w http.ResponseWriter, r *http.Request) {
 		KeyPath    string `json:"key_path"`
 		Passphrase string `json:"passphrase"`
 		Container  string `json:"container"` // docker: container id or name
+		// SSH TOFU confirmation: both fields must be supplied together on the
+		// retry after an ssh_host_key_unknown response.
+		AcceptHostKey      bool   `json:"accept_host_key"`
+		HostKeyFingerprint string `json:"host_key_fingerprint"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -119,7 +163,7 @@ func (s *Server) handleRemoteConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Type == "docker" {
-		s.connectDocker(w, r, strings.TrimSpace(req.Container))
+		s.connectDockerWizard(w, r, strings.TrimSpace(req.Container))
 		return
 	}
 	if req.Type != "" && req.Type != "ssh" {
@@ -131,7 +175,13 @@ func (s *Server) handleRemoteConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opts := remote.SSHOptions{Host: req.Host, Port: req.Port, User: req.User}
+	opts := remote.SSHOptions{
+		Host:               req.Host,
+		Port:               req.Port,
+		User:               req.User,
+		AcceptHostKey:      req.AcceptHostKey,
+		HostKeyFingerprint: req.HostKeyFingerprint,
+	}
 	if req.AuthMethod == "password" {
 		opts.Password = req.Password
 	} else {
@@ -139,8 +189,11 @@ func (s *Server) handleRemoteConnect(w http.ResponseWriter, r *http.Request) {
 		opts.Passphrase = req.Passphrase
 	}
 
-	exec, err := remote.Connect(opts)
+	exec, err := remote.ConnectContext(r.Context(), opts)
 	if err != nil {
+		if writeSSHHostKeyError(w, err) {
+			return
+		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
@@ -164,9 +217,34 @@ func (s *Server) handleRemoteConnect(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// writeSSHHostKeyError writes the stable API contract used by Desktop's trust
+// prompt. It deliberately returns 409 for all trust-state conflicts while
+// keeping ordinary authentication/network failures on the existing 502 path.
+func writeSSHHostKeyError(w http.ResponseWriter, err error) bool {
+	var hostKeyErr *remote.SSHHostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		return false
+	}
+	payload := map[string]any{
+		"error":       hostKeyErr.Error(),
+		"code":        hostKeyErr.Code,
+		"host":        hostKeyErr.Host,
+		"fingerprint": hostKeyErr.Fingerprint,
+		"key_type":    hostKeyErr.KeyType,
+	}
+	if hostKeyErr.OldFingerprint != "" {
+		payload["old_fingerprint"] = hostKeyErr.OldFingerprint
+	}
+	if hostKeyErr.ExpectedFingerprint != "" {
+		payload["expected_fingerprint"] = hostKeyErr.ExpectedFingerprint
+	}
+	writeJSON(w, http.StatusConflict, payload)
+	return true
+}
+
 // connectDocker binds (starting if stopped) the named container and parks it in
 // the pending registry, mirroring the SSH connect flow.
-func (s *Server) connectDocker(w http.ResponseWriter, r *http.Request, containerRef string) {
+func (s *Server) connectDockerWizard(w http.ResponseWriter, r *http.Request, containerRef string) {
 	if containerRef == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "container is required"})
 		return
@@ -233,9 +311,10 @@ func (s *Server) handleRemoteListDir(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"path": path, "dirs": dirs})
 }
 
-// handleRemoteBind commits a pending connection: it binds the shared env to the
-// remote executor at the chosen directory and rebuilds the agent (same path as
-// a local project switch).
+// handleRemoteBind atomically turns an explicitly authenticated/trusted pending
+// connection into either a new task or the replacement runtime for a persisted
+// remote conversation. The candidate is hydrated before publication, so a
+// session id never briefly resolves to an empty-history engine.
 func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
 	// No running gate: binding a remote workspace builds a NEW engine; the
 	// previous task keeps running in the background.
@@ -246,12 +325,19 @@ func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ConnectionID string `json:"connection_id"`
 		Path         string `json:"path"`
+		SessionID    string `json:"session_id,omitempty"`
+		Focus        bool   `json:"focus,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	pc := s.remoteConns.get(req.ConnectionID)
+	// Preserve the original wizard contract for new workspaces: older clients
+	// did not send a focus flag because bind always foregrounded the new task.
+	// Existing-session reconnects opt in explicitly so a candidate can be
+	// prepared in the background while its history page is still loading.
+	focus := req.Focus || req.SessionID == ""
+	pc := s.remoteConns.claim(req.ConnectionID)
 	if pc == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "connection expired or not found"})
 		return
@@ -261,45 +347,107 @@ func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
 		remotePwd = remote.DiscoverPwd(r.Context(), pc.exec, "/root")
 	}
 
-	// Snapshot the outgoing task once, then build the new engine BEFORE tearing
-	// anything down — a failed bind must not disrupt the current task's PTYs.
-	prevTaskID, curMode := "", ""
-	if cur := s.activeEngine(); cur != nil {
-		prevTaskID, curMode = cur.taskID, cur.curMode()
-	}
-	eng, err := s.buildRemoteEngine("", pc.exec, remotePwd, curMode)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to bind remote workspace: %v", err)})
+	label := pc.exec.ProjectLabel(remotePwd)
+	target, targetErr := parseConversationTarget(label)
+	if targetErr != nil {
+		s.remoteConns.restore(req.ConnectionID, pc)
+		writeConversationActivationError(w, fmt.Errorf("%w: %v", errInvalidConversationTarget, targetErr))
 		return
 	}
-	s.ptyMgr.closeForTask(prevTaskID) // outgoing task's PTYs only; others keep theirs
-	s.setActiveEngine(eng)
 
-	label := pc.exec.ProjectLabel(remotePwd)
-
-	if eng.todoStore != nil {
-		eng.todoStore.Update(nil)
+	s.taskCreateMu.Lock()
+	var old *Engine
+	if req.SessionID != "" {
+		old = s.resolveEngine(req.SessionID)
+	}
+	buildMode := mode.Approval.String()
+	var (
+		meta  *session.SessionMeta
+		state *session.SessionState
+		err   error
+	)
+	if req.SessionID != "" {
+		meta, err = session.FindSessionMeta(req.SessionID)
+		if err == nil && meta == nil {
+			err = fmt.Errorf("%w: %s", errConversationNotFound, req.SessionID)
+		}
+		if err == nil {
+			var entries []session.Entry
+			entries, err = session.LoadSession(req.SessionID)
+			if err == nil {
+				state = session.ReconstructState(entries)
+			}
+		}
+		if err == nil {
+			persistedTarget, parseErr := parseConversationTarget(meta.Project)
+			if parseErr != nil || !sameConversationLocation(persistedTarget, target) {
+				err = fmt.Errorf("%w: authenticated target %q does not match persisted project %q", errInvalidConversationTarget, label, meta.Project)
+			}
+		}
+		if err == nil {
+			if savedMode, modeErr := session.LoadSessionModeStrict(req.SessionID); modeErr == nil {
+				buildMode = restoredWebSessionMode(savedMode).String()
+			}
+		}
+	}
+	if err == nil && old != nil && old.running.Load() {
+		err = fmt.Errorf("%w: %s", errConversationBusy, req.SessionID)
+	}
+	var eng *Engine
+	if err == nil {
+		eng, err = s.assembleRemoteEngine(req.SessionID, pc.exec, remotePwd, buildMode)
+	}
+	if err == nil && state != nil {
+		hydrateConversationEngine(eng, state, mode.Parse(buildMode))
+	}
+	if err == nil {
+		err = s.publishEngineCandidate(eng, old)
+	}
+	s.taskCreateMu.Unlock()
+	if err != nil {
+		if eng != nil {
+			// The pending registry still owns pc.exec on failure. Clearing env.Exec
+			// prevents candidate teardown from closing that retryable connection.
+			if eng.env != nil {
+				eng.env.Exec = nil
+			}
+			eng.teardown()
+		}
+		s.remoteConns.restore(req.ConnectionID, pc)
+		writeConversationActivationError(w, fmt.Errorf("bind remote conversation: %w", err))
+		return
 	}
 
-	// Ownership of the executor has transferred to the live env; remove the
-	// pending entry WITHOUT closing it.
-	s.remoteConns.take(req.ConnectionID)
+	// Ownership transferred when the hydrated candidate was published; the
+	// claimed registry entry intentionally stays absent.
+	if focus {
+		prevTaskID := ""
+		if cur := s.activeEngine(); cur != nil {
+			prevTaskID = cur.taskID
+		}
+		if prevTaskID != "" && prevTaskID != eng.taskID {
+			s.ptyMgr.closeForTask(prevTaskID)
+		}
+		s.setActiveEngine(eng)
+		s.wsBroker.Broadcast(WSEvent{
+			TaskID: eng.taskID, Type: "project_switched",
+			Data: map[string]string{"pwd": remotePwd, "label": label},
+		})
+	}
+	if req.SessionID == "" {
+		s.stampCloudSync(eng.taskID, "", true)
+	}
 
-	s.wsBroker.Broadcast(WSEvent{
-		Type: "project_switched",
-		Data: map[string]string{"pwd": remotePwd, "label": label},
-	})
-
+	result := activationSnapshot(eng, target.kind, true)
+	result.Focused = focus
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":      "ok",
-		"kind":        pc.kind,
-		"pwd":         remotePwd,
-		"label":       label,
-		"name":        pathpkg.Base(remotePwd),
-		"host":        pc.host,
-		"user":        pc.user,
-		"port":        pc.port,
-		"container":   pc.container,
+		"status": result.Status, "session_id": result.SessionID,
+		"kind": result.Kind, "pwd": result.Pwd, "project": result.Project,
+		"workspace_key": result.WorkspaceKey, "provider": result.Provider,
+		"model": result.Model, "agent": result.Agent, "mode": result.Mode,
+		"running": result.Running, "activated": result.Activated, "focused": result.Focused,
+		"label": label, "name": pathpkg.Base(remotePwd), "host": pc.host,
+		"user": pc.user, "port": pc.port, "container": pc.container,
 		"remote_path": remotePwd,
 	})
 }

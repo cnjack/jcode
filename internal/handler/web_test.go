@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,46 @@ func TestWebHandler_ResolveApprovalOnceVsAll(t *testing.T) {
 	}
 	if r := run(true); !r.Approved || r.Mode != ModeAuto {
 		t.Errorf("approve all: expected {Approved:true, Mode:Auto}, got %+v", r)
+	}
+}
+
+func TestWebHandler_AgentDoneCarriesRemoteErrorCode(t *testing.T) {
+	h := NewWebHandler()
+	h.OnAgentDone(tools.Fatal(&tools.RemoteTransportError{
+		Kind: "ssh", Code: "ssh_connection_failed",
+		Phase:     tools.RemoteTransportOutcomeUnknown,
+		Retryable: true, // The transport is retryable; the dispatched operation is not.
+		Err:       context.DeadlineExceeded,
+	}))
+
+	select {
+	case event := <-h.Events():
+		if event.Event != "agent_done" {
+			t.Fatalf("event = %q", event.Event)
+		}
+		data, ok := event.Data.(WebDoneData)
+		if !ok {
+			t.Fatalf("data = %T, want WebDoneData", event.Data)
+		}
+		if data.Code != "ssh_connection_failed" || data.ErrorKind != "remote_connection" ||
+			data.Kind != "ssh" || data.Phase != string(tools.RemoteTransportOutcomeUnknown) {
+			t.Fatalf("remote agent_done = %+v", data)
+		}
+		if data.Retryable == nil || *data.Retryable {
+			t.Fatalf("retryable = %v, want explicit false", data.Retryable)
+		}
+		wire, err := json.Marshal(data)
+		if err != nil {
+			t.Fatalf("marshal remote agent_done: %v", err)
+		}
+		if !strings.Contains(string(wire), `"retryable":false`) {
+			t.Fatalf("wire data omitted explicit non-retryable state: %s", wire)
+		}
+		if strings.Contains(strings.ToLower(data.Error), "model") {
+			t.Fatalf("remote error mislabelled as model error: %q", data.Error)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for agent_done")
 	}
 }
 

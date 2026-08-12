@@ -66,7 +66,7 @@ export interface WSHandlers {
     artifacts?: import('jcode-ui-core').ArtifactRef[]
   }) => void
   onTokenUpdate?: (data: import('./types').TokenUpdateData) => void
-  onAgentDone?: (data: { error?: string; detail?: string; stopped?: boolean; task_id?: string }) => void
+  onAgentDone?: (data: import('./types').AgentDoneData) => void
   onTodoUpdate?: () => void
   onGoalUpdate?: (data: import('jcode-ui-core').Goal | null) => void
   onApprovalRequest?: (data: import('./types').ApprovalRequestData) => void
@@ -78,7 +78,8 @@ export interface WSHandlers {
   onApprovalModeChanged?: (data: { auto_approve: boolean }) => void
   onSubagentEvent?: (data: import('./types').SubagentEventData) => void
   onSubagentProgress?: (data: import('./types').SubagentProgressData) => void
-  onUserMessage?: (data: { content: string; source: string }) => void
+  onUserMessage?: (data: { content: string; source: string; local_echo?: boolean }) => void
+  onRemoteConnectionStatus?: (data: import('./types').RemoteConnectionStatusData) => void
   onTaskStatus?: (taskId: string, running: boolean, project?: string, updatedAt?: string) => void
   onArtifactUpserted?: (data: {
     task_id: string
@@ -91,6 +92,16 @@ export interface WSHandlers {
   /** Returns the task currently shown in the foreground. Events tagged with a
    *  DIFFERENT task id are dropped so they don't pollute the active view. */
   activeTaskId?: () => string | undefined
+  /** Existing conversation whose history snapshot is ready but has not yet
+   * become foreground. Its task-scoped events are buffered by the bridge. */
+  pendingTaskId?: () => string | undefined
+  onPendingTaskEvent?: (event: PendingTaskEvent) => void
+}
+
+export interface PendingTaskEvent {
+  type: string
+  taskId: string
+  data: unknown
 }
 
 interface WSMessage {
@@ -100,8 +111,36 @@ interface WSMessage {
 }
 
 /** Event types whose data payload gets the envelope task_id merged in. */
-const TASK_ID_DATA_TYPES = new Set(['approval_request', 'ask_user_request', 'agent_done', 'artifact_upserted'])
-const BACKGROUND_EVENT_TYPES = new Set(['agent_done', 'artifact_upserted'])
+const TASK_ID_DATA_TYPES = new Set([
+  'approval_request',
+  'ask_user_request',
+  'agent_done',
+  'artifact_upserted',
+  'remote_connection_status',
+])
+const BACKGROUND_EVENT_TYPES = new Set(['agent_done', 'artifact_upserted', 'remote_connection_status'])
+const PENDING_FOREGROUND_EVENT_TYPES = new Set([
+  'agent_start',
+  'agent_text',
+  'tool_call',
+  'tool_progress',
+  'tool_result',
+  'token_update',
+  'agent_done',
+  'todo_update',
+  'goal_update',
+  'approval_request',
+  'ask_user_request',
+  'session_reset',
+  'model_changed',
+  'agent_changed',
+  'mode_changed',
+  'approval_mode_changed',
+  'subagent_event',
+  'subagent_progress',
+  'user_message',
+  'remote_connection_status',
+])
 
 export class WSClient {
   private ws: WebSocket | null = null
@@ -123,7 +162,6 @@ export class WSClient {
   /** Update the handler set (e.g. when the active task changes). */
   setHandlers(handlers: WSHandlers): void {
     this.handlers = handlers
-    this.handlerMap = null
   }
 
   /** True when the WS is open. */
@@ -156,18 +194,25 @@ export class WSClient {
       try {
         const msg: WSMessage = JSON.parse(event.data)
         const active = this.handlers.activeTaskId?.()
+        let data = msg.data
+        if (msg.task_id && TASK_ID_DATA_TYPES.has(msg.type)) {
+          data = { ...((data && typeof data === 'object' ? data : {}) as Record<string, unknown>), task_id: msg.task_id }
+        }
+        const pending = this.handlers.pendingTaskId?.()
+        if (
+          msg.task_id &&
+          pending === msg.task_id &&
+          msg.task_id !== active &&
+          PENDING_FOREGROUND_EVENT_TYPES.has(msg.type)
+        ) {
+          this.handlers.onPendingTaskEvent?.({ type: msg.type, taskId: msg.task_id, data })
+          return
+        }
         // Events tagged with a different task id are dropped so they don't
         // pollute the active view — EXCEPT agent_done, which the bridge needs
         // for every session to drain that session's type-ahead queue.
         if (msg.task_id && active && msg.task_id !== active && !BACKGROUND_EVENT_TYPES.has(msg.type)) return
-        const handler = this.handlerFor(msg.type)
-        if (handler) {
-          let data = msg.data
-          if (msg.task_id && TASK_ID_DATA_TYPES.has(msg.type)) {
-            data = { ...((data && typeof data === 'object' ? data : {}) as Record<string, unknown>), task_id: msg.task_id }
-          }
-          handler(data)
-        }
+        dispatchWSHandler(this.handlers, msg.type, data)
       } catch {
         // parse error — drop
       }
@@ -243,37 +288,37 @@ export class WSClient {
     }
   }
 
+}
+
+/** Apply one already-routed event to a handler set. Pending-conversation
+ * buffers use this after the target becomes foreground. */
+export function dispatchWSHandler(handlers: WSHandlers, type: string, data: unknown): void {
+  // The wire contract is heterogeneous by event type; narrowing happens at
+  // the strongly typed handler boundary below.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private handlerMap: Record<string, (data: any) => void> | null = null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private handlerFor(type: string): ((data: any) => void) | undefined {
-    if (!this.handlerMap) {
-      const h = this.handlers
-      this.handlerMap = {
-        agent_start: () => h.onAgentStart?.(),
-        agent_text: (d) => h.onAgentText?.(d),
-        tool_call: (d) => h.onToolCall?.(d),
-        tool_progress: (d) => h.onToolProgress?.(d),
-        tool_result: (d) => h.onToolResult?.(d),
-        token_update: (d) => h.onTokenUpdate?.(d),
-        agent_done: (d) => h.onAgentDone?.(d),
-        todo_update: () => h.onTodoUpdate?.(),
-        goal_update: (d) => h.onGoalUpdate?.(d),
-        approval_request: (d) => h.onApprovalRequest?.(d),
-        ask_user_request: (d) => h.onAskUserRequest?.(d),
-        session_reset: (d) => h.onSessionReset?.(d),
-        model_changed: (d) => h.onModelChanged?.(d),
-        agent_changed: (d) => h.onAgentChanged?.(d),
-        mode_changed: (d) => h.onModeChanged?.(d),
-        approval_mode_changed: (d) => h.onApprovalModeChanged?.(d),
-        subagent_event: (d) => h.onSubagentEvent?.(d),
-        subagent_progress: (d) => h.onSubagentProgress?.(d),
-        user_message: (d) => h.onUserMessage?.(d),
-        task_status: (d) => h.onTaskStatus?.(d?.task_id, !!d?.running, d?.project, d?.updated_at),
-        artifact_upserted: (d) => h.onArtifactUpserted?.(d),
-        pong: () => {},
-      }
-    }
-    return this.handlerMap[type]
+  const d = data as any
+  switch (type) {
+    case 'agent_start': handlers.onAgentStart?.(); break
+    case 'agent_text': handlers.onAgentText?.(d); break
+    case 'tool_call': handlers.onToolCall?.(d); break
+    case 'tool_progress': handlers.onToolProgress?.(d); break
+    case 'tool_result': handlers.onToolResult?.(d); break
+    case 'token_update': handlers.onTokenUpdate?.(d); break
+    case 'agent_done': handlers.onAgentDone?.(d); break
+    case 'todo_update': handlers.onTodoUpdate?.(); break
+    case 'goal_update': handlers.onGoalUpdate?.(d); break
+    case 'approval_request': handlers.onApprovalRequest?.(d); break
+    case 'ask_user_request': handlers.onAskUserRequest?.(d); break
+    case 'session_reset': handlers.onSessionReset?.(d); break
+    case 'model_changed': handlers.onModelChanged?.(d); break
+    case 'agent_changed': handlers.onAgentChanged?.(d); break
+    case 'mode_changed': handlers.onModeChanged?.(d); break
+    case 'approval_mode_changed': handlers.onApprovalModeChanged?.(d); break
+    case 'subagent_event': handlers.onSubagentEvent?.(d); break
+    case 'subagent_progress': handlers.onSubagentProgress?.(d); break
+    case 'user_message': handlers.onUserMessage?.(d); break
+    case 'remote_connection_status': handlers.onRemoteConnectionStatus?.(d); break
+    case 'task_status': handlers.onTaskStatus?.(d?.task_id, !!d?.running, d?.project, d?.updated_at); break
+    case 'artifact_upserted': handlers.onArtifactUpserted?.(d); break
   }
 }

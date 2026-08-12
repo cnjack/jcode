@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -282,8 +283,18 @@ func (e *Env) IsRemote() bool {
 // stable, scheme-qualified session key.
 type RemoteExecutor interface {
 	Executor
+	// Probe verifies that the bound transport/target is still usable. Every
+	// implementation must honor ctx and apply its own short upper bound.
+	Probe(ctx context.Context) error
 	Close() error
 	ProjectLabel(pwd string) string
+}
+
+// RemoteLeaseCloner is implemented by transports that can safely share their
+// underlying connection while giving each Engine independent Close ownership.
+// Callers must never share the same RemoteExecutor pointer across engines.
+type RemoteLeaseCloner interface {
+	CloneLease() (RemoteExecutor, error)
 }
 
 // Executor abstracts file and command operations so tools can work
@@ -466,39 +477,127 @@ func (l *LocalExecutor) Label() string    { return "local" }
 // ---------------------------------------------------------------------------
 
 type SSHExecutor struct {
-	client   *ssh.Client
-	host     string
-	user     string
-	platform string
+	transport   *sshTransport
+	host        string
+	user        string
+	platform    string
+	leaseID     uint64
+	releaseOnce sync.Once
+	releaseErr  error
 }
 
-// NewSSHExecutor connects to a remote host and returns an executor.
-// It tries the SSH agent first, then common key paths.
+// sshTransport owns one encrypted TCP transport and its keepalive loop. Every
+// SSHExecutor is a lease; sessions/channels are safe to create concurrently on
+// ssh.Client, while ref-counting prevents one Engine teardown from closing the
+// connection underneath another Engine.
+type sshTransport struct {
+	client           *ssh.Client
+	clientGeneration uint64
+	user             string
+	host             string
+	dial             func(context.Context) (*ssh.Client, error)
+	backoff          func(int) time.Duration
+	lifetimeCtx      context.Context
+	lifetimeCancel   context.CancelFunc
+	keepaliveStop    chan struct{}
+
+	mu               sync.Mutex
+	refs             int
+	nextLeaseID      uint64
+	observers        map[uint64]RemoteConnectionStatusHandler
+	closed           bool
+	closeErr         error
+	reconnecting     bool
+	reconnectDone    chan struct{}
+	reconnectErr     error
+	reconnectCause   error
+	reconnectCancel  context.CancelFunc
+	reconnectWaiters int
+}
+
+const (
+	sshDialTimeout             = 10 * time.Second
+	sshProbeTimeout            = 5 * time.Second
+	sshFailureProbeTimeout     = time.Second
+	sshSessionOpenTimeout      = 5 * time.Second
+	sshKeepaliveEvery          = 25 * time.Second
+	sshReconnectAttemptTimeout = 5 * time.Second
+	sshReconnectTotalTimeout   = 65 * time.Second
+	sshReconnectMaxAttempts    = 8
+	sshReconnectInitialBackoff = 250 * time.Millisecond
+	sshReconnectMaxBackoff     = 4 * time.Second
+	sshOperationMaxAttempts    = 3
+	sshKeepaliveRetryEvery     = time.Minute
+)
+
+// NewSSHExecutor connects with JCode's strict ~/.jcode/known_hosts policy.
+// It is retained for TUI/tool compatibility; web callers use
+// NewSSHExecutorContext so request cancellation is propagated.
 func NewSSHExecutor(addr, user string, authMethods []ssh.AuthMethod) (*SSHExecutor, error) {
+	hostKeyCallback, err := NewSSHHostKeyCallback(SSHHostKeyPolicy{})
+	if err != nil {
+		return nil, err
+	}
+	return NewSSHExecutorContext(context.Background(), addr, user, authMethods, hostKeyCallback)
+}
+
+// NewSSHExecutorContext connects to a remote host using the supplied strict
+// host-key callback. TCP dial and SSH handshake share a ten-second upper bound.
+func NewSSHExecutorContext(
+	ctx context.Context,
+	addr, user string,
+	authMethods []ssh.AuthMethod,
+	hostKeyCallback ssh.HostKeyCallback,
+) (*SSHExecutor, error) {
+	if hostKeyCallback == nil {
+		return nil, fmt.Errorf("SSH host-key callback is required")
+	}
+	normalizedAddr, err := normalizeSSHAddress(addr)
+	if err != nil {
+		return nil, err
+	}
 	config := &ssh.ClientConfig{
 		User:            user,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         10 * time.Second,
+		HostKeyCallback: hostKeyCallback,
+		Timeout:         sshDialTimeout,
 	}
 
-	// Ensure addr includes port
-	if !strings.Contains(addr, ":") {
-		addr += ":22"
-	}
-
-	appconfig.Logger().Printf("[ssh] dial tcp %s@%s", user, addr)
-	start := time.Now()
-	client, err := ssh.Dial("tcp", addr, config)
+	client, err := dialSSHClient(ctx, normalizedAddr, user, config, sshDialTimeout)
 	if err != nil {
-		appconfig.Logger().Printf("[ssh] dial failed after %v: %v", time.Since(start), err)
-		return nil, fmt.Errorf("ssh dial %s@%s: %w", user, addr, err)
+		return nil, err
 	}
-	appconfig.Logger().Printf("[ssh] dial success %s@%s in %v", user, addr, time.Since(start))
+	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
+	dial := func(dialCtx context.Context) (*ssh.Client, error) {
+		return dialSSHClient(dialCtx, normalizedAddr, user, config, sshReconnectAttemptTimeout)
+	}
+
+	executor := &SSHExecutor{
+		transport: &sshTransport{
+			client:           client,
+			clientGeneration: 1,
+			user:             user,
+			host:             normalizedAddr,
+			dial:             dial,
+			backoff:          sshReconnectBackoff,
+			lifetimeCtx:      lifetimeCtx,
+			lifetimeCancel:   lifetimeCancel,
+			keepaliveStop:    make(chan struct{}),
+			refs:             1,
+			nextLeaseID:      1,
+			observers:        make(map[uint64]RemoteConnectionStatusHandler),
+		},
+		host:     normalizedAddr,
+		user:     user,
+		platform: "linux/amd64",
+		leaseID:  1,
+	}
 
 	// Detect remote platform
-	platform := "linux/amd64"
-	if out, _, err := sshExecSimple(client, "uname -sm"); err == nil {
+	platformCtx, platformCancel := context.WithTimeout(ctx, sshProbeTimeout)
+	if out, _, platformErr := executor.runWithRetry(
+		platformCtx, "uname -sm", "", sshProbeTimeout, true,
+	); platformErr == nil {
 		parts := strings.Fields(strings.TrimSpace(out))
 		if len(parts) == 2 {
 			os := strings.ToLower(parts[0])
@@ -509,31 +608,108 @@ func NewSSHExecutor(addr, user string, authMethods []ssh.AuthMethod) (*SSHExecut
 			case "aarch64":
 				arch = "arm64"
 			}
-			platform = os + "/" + arch
+			executor.platform = os + "/" + arch
 		}
 	}
+	platformCancel()
+	if !executor.transport.isOpen() {
+		return nil, fmt.Errorf("SSH transport %s@%s became unavailable during initialization", user, normalizedAddr)
+	}
 
-	return &SSHExecutor{
-		client:   client,
-		host:     addr,
-		user:     user,
-		platform: platform,
-	}, nil
+	go executor.transport.keepaliveLoop()
+	return executor, nil
+}
+
+func dialSSHClient(
+	ctx context.Context,
+	addr, user string,
+	config *ssh.ClientConfig,
+	timeout time.Duration,
+) (*ssh.Client, error) {
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	appconfig.Logger().Printf("[ssh] dial tcp %s@%s", user, addr)
+	start := time.Now()
+	netConn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", addr)
+	if err != nil {
+		appconfig.Logger().Printf("[ssh] dial failed after %v: %v", time.Since(start), err)
+		return nil, fmt.Errorf("ssh dial %s@%s: %w", user, addr, err)
+	}
+	deadline, _ := dialCtx.Deadline()
+	if err := netConn.SetDeadline(deadline); err != nil {
+		_ = netConn.Close()
+		return nil, fmt.Errorf("ssh handshake deadline %s@%s: %w", user, addr, err)
+	}
+	clientConn, channels, requests, err := ssh.NewClientConn(netConn, addr, config)
+	if err != nil {
+		_ = netConn.Close()
+		appconfig.Logger().Printf("[ssh] handshake failed after %v: %v", time.Since(start), err)
+		return nil, fmt.Errorf("ssh handshake %s@%s: %w", user, addr, err)
+	}
+	if err := netConn.SetDeadline(time.Time{}); err != nil {
+		_ = clientConn.Close()
+		return nil, fmt.Errorf("ssh clear handshake deadline %s@%s: %w", user, addr, err)
+	}
+	client := ssh.NewClient(clientConn, channels, requests)
+	appconfig.Logger().Printf("[ssh] dial success %s@%s in %v", user, addr, time.Since(start))
+	return client, nil
 }
 
 func (s *SSHExecutor) Close() error {
-	if s.client != nil {
-		return s.client.Close()
+	s.releaseOnce.Do(func() {
+		if s.transport != nil {
+			s.releaseErr = s.transport.release(s.leaseID)
+		}
+	})
+	return s.releaseErr
+}
+
+// CloneLease gives another Engine independent ownership of the same healthy
+// SSH transport. The clone opens its own SSH channels but Close only decrements
+// the shared ref-count.
+func (s *SSHExecutor) CloneLease() (RemoteExecutor, error) {
+	if s.transport == nil {
+		return nil, fmt.Errorf("SSH transport %s@%s is closed", s.user, s.host)
 	}
-	return nil
+	leaseID, ok := s.transport.retain()
+	if !ok {
+		return nil, fmt.Errorf("SSH transport %s@%s is closed", s.user, s.host)
+	}
+	return &SSHExecutor{
+		transport: s.transport,
+		host:      s.host,
+		user:      s.user,
+		platform:  s.platform,
+		leaseID:   leaseID,
+	}, nil
+}
+
+// SetRemoteConnectionStatusHandler binds an observer to this executor lease.
+// Replacing or closing one Engine's lease cannot remove another Engine's
+// observer even though both share the same SSH transport.
+func (s *SSHExecutor) SetRemoteConnectionStatusHandler(handler RemoteConnectionStatusHandler) {
+	if s.transport != nil {
+		s.transport.setObserver(s.leaseID, handler)
+	}
+}
+
+// Probe performs a bounded transport round trip. OpenSSH servers commonly
+// reply false to this request; a reply of either polarity proves the encrypted
+// transport is alive. A timeout closes the client to unblock the pending SSH
+// request and make subsequent activation reconnect instead of reusing a zombie.
+func (s *SSHExecutor) Probe(ctx context.Context) error {
+	if s.transport == nil {
+		return fmt.Errorf("ssh probe: missing transport")
+	}
+	return s.transport.probe(ctx)
 }
 
 func (s *SSHExecutor) ReadFile(ctx context.Context, path string) ([]byte, error) {
-	out, serr, err := s.run(ctx, fmt.Sprintf("cat %s", ShellQuote(path)), "", 30*time.Second)
+	out, serr, err := s.runWithRetry(ctx, fmt.Sprintf("cat %s", ShellQuote(path)), "", 30*time.Second, true)
 	if err != nil {
 		detail := strings.TrimSpace(serr)
 		if detail != "" {
-			return nil, fmt.Errorf("%s", detail)
+			return nil, fmt.Errorf("%s: %w", detail, err)
 		}
 		return nil, err
 	}
@@ -543,14 +719,14 @@ func (s *SSHExecutor) ReadFile(ctx context.Context, path string) ([]byte, error)
 func (s *SSHExecutor) WriteFile(ctx context.Context, path string, data []byte, perm os.FileMode) error {
 	// Create parent dirs, then write via stdin
 	mkdirCmd := fmt.Sprintf("mkdir -p %s", ShellQuote(filepath.Dir(path)))
-	if _, _, err := s.run(ctx, mkdirCmd, "", 10*time.Second); err != nil {
+	if _, _, err := s.runWithRetry(ctx, mkdirCmd, "", 10*time.Second, false); err != nil {
 		return fmt.Errorf("mkdir failed: %w", err)
 	}
 
 	// Use cat with heredoc-style write. Encode data as base64 to avoid shell escaping issues.
 	encoded := base64Encode(data)
 	writeCmd := sshAtomicWriteCmd(encoded, path, perm)
-	if _, serr, err := s.run(ctx, writeCmd, "", 30*time.Second); err != nil {
+	if _, serr, err := s.runWithRetry(ctx, writeCmd, "", 30*time.Second, false); err != nil {
 		return fmt.Errorf("write failed: %s %w", serr, err)
 	}
 	return nil
@@ -566,7 +742,9 @@ func sshAtomicWriteCmd(encoded, path string, perm os.FileMode) string {
 }
 
 func (s *SSHExecutor) MkdirAll(ctx context.Context, path string, _ os.FileMode) error {
-	_, serr, err := s.run(ctx, fmt.Sprintf("mkdir -p %s", ShellQuote(path)), "", 10*time.Second)
+	_, serr, err := s.runWithRetry(
+		ctx, fmt.Sprintf("mkdir -p %s", ShellQuote(path)), "", 10*time.Second, false,
+	)
 	if err != nil {
 		return fmt.Errorf("mkdir -p failed: %s %w", serr, err)
 	}
@@ -575,10 +753,10 @@ func (s *SSHExecutor) MkdirAll(ctx context.Context, path string, _ os.FileMode) 
 
 func (s *SSHExecutor) Stat(ctx context.Context, path string) (*FileInfo, error) {
 	// Use test command for existence and type checks
-	out, _, err := s.run(ctx, fmt.Sprintf(
+	out, _, err := s.runWithRetry(ctx, fmt.Sprintf(
 		`if [ -e %s ]; then if [ -d %s ]; then echo "dir"; else echo "file"; fi; else echo "none"; fi`,
 		ShellQuote(path), ShellQuote(path),
-	), "", 5*time.Second)
+	), "", 5*time.Second, true)
 	if err != nil {
 		return nil, err
 	}
@@ -594,13 +772,33 @@ func (s *SSHExecutor) Stat(ctx context.Context, path string) (*FileInfo, error) 
 }
 
 func (s *SSHExecutor) Exec(ctx context.Context, command, workDir string, timeout time.Duration) (string, string, error) {
+	return s.exec(ctx, command, workDir, timeout, false)
+}
+
+// ExecReadOnly explicitly allows replay after a post-dispatch transport loss.
+// Only built-in read/grep/glob/discovery callers use this method; arbitrary
+// execute tool input always goes through Exec and is never replayed.
+func (s *SSHExecutor) ExecReadOnly(
+	ctx context.Context,
+	command, workDir string,
+	timeout time.Duration,
+) (string, string, error) {
+	return s.exec(ctx, command, workDir, timeout, true)
+}
+
+func (s *SSHExecutor) exec(
+	ctx context.Context,
+	command, workDir string,
+	timeout time.Duration,
+	readOnly bool,
+) (string, string, error) {
 	// Prepend environment variables to disable pagers/editors/prompts on remote.
 	envPrefix := "export GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat GIT_EDITOR=true; "
 	fullCmd := envPrefix + command
 	if workDir != "" {
 		fullCmd = fmt.Sprintf("cd %s && %s", ShellQuote(workDir), envPrefix+command)
 	}
-	return s.run(ctx, fullCmd, "", timeout)
+	return s.runWithRetry(ctx, fullCmd, "", timeout, readOnly)
 }
 
 func (s *SSHExecutor) Platform() string { return s.platform }
@@ -621,55 +819,203 @@ func (s *SSHExecutor) ProjectLabel(pwd string) string {
 	return fmt.Sprintf("ssh://%s@%s%s", s.user, s.host, normalizeAbs(pwd))
 }
 
-// isSSHConnDead reports whether err means the underlying SSH connection is
-// permanently gone (EOF or a closed network connection), as opposed to a
-// per-command failure. Deliberately narrow (#16): command exit errors and
-// timeouts stay retryable.
+// isSSHConnDead reports whether err means the current SSH client generation is
+// unusable (EOF or a closed network connection), as opposed to a per-command
+// failure. The lease-owning transport may replace that generation by redialing.
 func isSSHConnDead(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, io.EOF) {
+	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, io.ErrClosedPipe) {
 		return true
 	}
-	return strings.Contains(err.Error(), "use of closed network connection")
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "use of closed network connection") ||
+		strings.Contains(lower, "connection reset by peer") ||
+		strings.Contains(lower, "broken pipe") ||
+		strings.Contains(lower, "connection lost") ||
+		strings.Contains(lower, "ssh: disconnect")
 }
 
-// run executes a command over SSH, respecting both the context and timeout.
-func (s *SSHExecutor) run(ctx context.Context, command, _ string, timeout time.Duration) (string, string, error) {
-	session, err := s.client.NewSession()
-	if err != nil {
-		// A dead connection makes every future tool call fail identically:
-		// mark it Fatal so the run aborts instead of burning iterations.
-		// All SSHExecutor methods (Exec/ReadFile/WriteFile/Stat/MkdirAll)
-		// funnel through run(), so this covers the whole surface.
-		wrapped := fmt.Errorf("ssh session: %w", err)
-		if isSSHConnDead(err) {
-			return "", "", Fatal(wrapped)
+// runWithRetry separates transport repair from operation replay. Channel-open
+// failures are known to be before dispatch and are safe to retry for every
+// operation. Once session.Run has been called, only explicitly read-only
+// operations may be replayed; all others return a Fatal outcome-unknown error.
+func (s *SSHExecutor) runWithRetry(
+	ctx context.Context,
+	command, _ string,
+	timeout time.Duration,
+	readOnly bool,
+) (string, string, error) {
+	var lastTransportErr *RemoteTransportError
+	for attempt := 1; attempt <= sshOperationMaxAttempts; attempt++ {
+		client, generation, err := s.transport.connectedClient(ctx, lastTransportErr)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", "", ctx.Err()
+			}
+			code, retryable := classifySSHReconnectError(err)
+			return "", "", Fatal(&RemoteTransportError{
+				Kind: "ssh", Code: code, Phase: RemoteTransportBeforeDispatch,
+				Retryable: retryable, Err: err, ReconnectErr: err,
+			})
 		}
-		return "", "", wrapped
+
+		stdout, stderr, runErr := s.runOnce(ctx, client, generation, command, timeout)
+		if runErr == nil {
+			return stdout, stderr, nil
+		}
+		if ctx.Err() != nil {
+			return stdout, stderr, ctx.Err()
+		}
+		var transportErr *RemoteTransportError
+		if !errors.As(runErr, &transportErr) {
+			return stdout, stderr, runErr
+		}
+		lastTransportErr = transportErr
+		s.transport.invalidateClient(client, generation)
+		if ctx.Err() != nil {
+			return stdout, stderr, ctx.Err()
+		}
+		reconnectErr := s.transport.ensureConnected(ctx, transportErr)
+		if ctx.Err() != nil {
+			return stdout, stderr, ctx.Err()
+		}
+		if reconnectErr != nil {
+			code, retryable := classifySSHReconnectError(reconnectErr)
+			transportErr.Code = code
+			transportErr.Retryable = retryable
+			transportErr.ReconnectErr = reconnectErr
+			return stdout, stderr, Fatal(transportErr)
+		}
+		if transportErr.Phase == RemoteTransportOutcomeUnknown && !readOnly {
+			return stdout, stderr, Fatal(transportErr)
+		}
+		if attempt == sshOperationMaxAttempts {
+			transportErr.Err = fmt.Errorf(
+				"SSH operation transport retry limit (%d) reached: %w",
+				sshOperationMaxAttempts, transportErr.Err,
+			)
+			return stdout, stderr, Fatal(transportErr)
+		}
+		appconfig.Logger().Printf(
+			"[ssh] replaying %s operation on %s@%s after transport recovery (attempt %d/%d)",
+			map[bool]string{true: "read-only", false: "before-dispatch"}[readOnly],
+			s.user, s.host, attempt+1, sshOperationMaxAttempts,
+		)
 	}
+	return "", "", Fatal(lastTransportErr)
+}
+
+func (s *SSHExecutor) runOnce(
+	ctx context.Context,
+	client *ssh.Client,
+	generation uint64,
+	command string,
+	timeout time.Duration,
+) (string, string, error) {
+	openCtx, openCancel := context.WithTimeout(ctx, sshSessionOpenTimeout)
+	defer openCancel()
+	type sessionResult struct {
+		session *ssh.Session
+		err     error
+	}
+	sessionReady := make(chan sessionResult, 1)
+	go func() {
+		session, err := client.NewSession()
+		sessionReady <- sessionResult{session: session, err: err}
+	}()
+
+	var session *ssh.Session
+	select {
+	case result := <-sessionReady:
+		if result.err != nil {
+			if isSSHConnDead(result.err) {
+				return "", "", newSSHTransportError(RemoteTransportBeforeDispatch, result.err)
+			}
+			var openErr *ssh.OpenChannelError
+			if !errors.As(result.err, &openErr) {
+				if probeErr := probeSSHClient(openCtx, client, sshFailureProbeTimeout); probeErr != nil {
+					return "", "", newSSHTransportError(
+						RemoteTransportBeforeDispatch,
+						fmt.Errorf("%v; SSH transport probe failed: %w", result.err, probeErr),
+					)
+				}
+			}
+			return "", "", fmt.Errorf("ssh session: %w", result.err)
+		}
+		session = result.session
+	case <-openCtx.Done():
+		// Opening an SSH channel has no cancellation API. Closing the transport
+		// is the only way to unblock the goroutine and avoids leaking it forever.
+		s.transport.invalidateClient(client, generation)
+		return "", "", newSSHTransportError(RemoteTransportBeforeDispatch, openCtx.Err())
+	}
+	if session == nil {
+		return "", "", Fatal(fmt.Errorf("ssh session: empty session"))
+	}
+	openCancel()
 	defer func() { _ = session.Close() }()
 
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
-	// Run with timeout via goroutine
 	done := make(chan error, 1)
 	go func() {
 		done <- session.Run(command)
 	}()
 
+	commandCtx, commandCancel := context.WithTimeout(ctx, timeout)
+	defer commandCancel()
 	select {
 	case err := <-done:
+		if isSSHConnDead(err) {
+			return stdout.String(), stderr.String(), newSSHTransportError(RemoteTransportOutcomeUnknown, err)
+		}
+		if err != nil {
+			var exitErr *ssh.ExitError
+			if !errors.As(err, &exitErr) {
+				if probeErr := probeSSHClient(commandCtx, client, sshFailureProbeTimeout); probeErr != nil {
+					return stdout.String(), stderr.String(), newSSHTransportError(
+						RemoteTransportOutcomeUnknown,
+						fmt.Errorf("%v; SSH transport probe failed: %w", err, probeErr),
+					)
+				}
+			}
+		}
 		return stdout.String(), stderr.String(), err
-	case <-time.After(timeout):
-		terminateSSHCommand(session, done)
+	case <-commandCtx.Done():
+		terminateDone := make(chan struct{})
+		go func() {
+			terminateSSHCommand(session, done)
+			close(terminateDone)
+		}()
+		select {
+		case <-terminateDone:
+		case <-time.After(sshFailureProbeTimeout):
+			_ = session.Close()
+		}
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), sshFailureProbeTimeout)
+		probeErr := probeSSHClient(probeCtx, client, sshFailureProbeTimeout)
+		probeCancel()
+		if probeErr != nil {
+			return stdout.String(), stderr.String(), newSSHTransportError(
+				RemoteTransportOutcomeUnknown,
+				fmt.Errorf("command timed out; SSH transport probe failed: %w", probeErr),
+			)
+		}
 		return stdout.String(), stderr.String(), fmt.Errorf("command timed out after %v", timeout)
-	case <-ctx.Done():
-		terminateSSHCommand(session, done)
-		return stdout.String(), stderr.String(), fmt.Errorf("command cancelled: %w", ctx.Err())
+	}
+}
+
+func newSSHTransportError(phase RemoteTransportPhase, err error) *RemoteTransportError {
+	return &RemoteTransportError{
+		Kind:      "ssh",
+		Code:      "ssh_connection_failed",
+		Phase:     phase,
+		Retryable: true,
+		Err:       err,
 	}
 }
 
@@ -692,18 +1038,24 @@ func terminateSSHCommand(session *ssh.Session, done <-chan error) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func sshExecSimple(client *ssh.Client, command string) (string, string, error) {
-	session, err := client.NewSession()
-	if err != nil {
-		return "", "", err
+func normalizeSSHAddress(addr string) (string, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", fmt.Errorf("SSH address is required")
 	}
-	defer func() { _ = session.Close() }()
-
-	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
-	err = session.Run(command)
-	return stdout.String(), stderr.String(), err
+	if host, port, err := net.SplitHostPort(addr); err == nil {
+		if host == "" || port == "" {
+			return "", fmt.Errorf("invalid SSH address %q", addr)
+		}
+		return net.JoinHostPort(host, port), nil
+	}
+	if ip := net.ParseIP(strings.Trim(addr, "[]")); ip != nil {
+		return net.JoinHostPort(ip.String(), "22"), nil
+	}
+	if strings.Contains(addr, ":") {
+		return "", fmt.Errorf("invalid SSH address %q", addr)
+	}
+	return net.JoinHostPort(addr, "22"), nil
 }
 
 func ShellQuote(s string) string {

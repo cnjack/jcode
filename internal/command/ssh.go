@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -29,6 +30,8 @@ func HandleSSHConnect(
 	chatModel einomodel.ToolCallingChatModel,
 	createAgent func() (*adk.ChatModelAgent, error),
 	skillDescriptions string,
+	acceptHostKey bool,
+	hostKeyFingerprint string,
 ) {
 	user := "root"
 	host := addr
@@ -37,8 +40,25 @@ func HandleSSHConnect(
 		host = parts[1]
 	}
 
-	executor, err := remote.Connect(remote.SSHOptions{Host: host, User: user})
+	executor, err := remote.ConnectContext(ctx, remote.SSHOptions{
+		Host:               host,
+		User:               user,
+		AcceptHostKey:      acceptHostKey,
+		HostKeyFingerprint: hostKeyFingerprint,
+	})
 	if err != nil {
+		var hostKeyErr *remote.SSHHostKeyError
+		if errors.As(err, &hostKeyErr) {
+			p.Send(tui.SSHStatusMsg{
+				Success:     false,
+				Err:         err,
+				HostKeyCode: hostKeyErr.Code,
+				Host:        hostKeyErr.Host,
+				Fingerprint: hostKeyErr.Fingerprint,
+				KeyType:     hostKeyErr.KeyType,
+			})
+			return
+		}
 		p.Send(tui.SSHStatusMsg{Success: false, Err: err})
 		return
 	}

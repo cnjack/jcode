@@ -42,4 +42,31 @@ describe('WSClient artifact routing', () => {
     })
     client.disconnect()
   })
+
+  it('buffers foreground mutations for a pending conversation instead of dropping them', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const onAgentText = vi.fn()
+    const onPendingTaskEvent = vi.fn()
+    const client = new WSClient({
+      activeTaskId: () => 'task-active',
+      pendingTaskId: () => 'task-pending',
+      onPendingTaskEvent,
+      onAgentText,
+    })
+    client.connect()
+
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({
+      type: 'agent_text',
+      task_id: 'task-pending',
+      data: { text: 'arrived during navigation' },
+    }) })
+
+    expect(onAgentText).not.toHaveBeenCalled()
+    expect(onPendingTaskEvent).toHaveBeenCalledWith({
+      type: 'agent_text',
+      taskId: 'task-pending',
+      data: { text: 'arrived during navigation' },
+    })
+    client.disconnect()
+  })
 })

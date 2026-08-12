@@ -7,21 +7,23 @@
  * dispatches the matching action for each event type.
  */
 
-import type { WSClient, WSHandlers } from '../lib/ws'
+import { dispatchWSHandler, type WSClient, type WSHandlers } from '../lib/ws'
 import type { AppDispatch, RootState } from './store'
 import {
   chatActions,
   sessionActions,
+  remoteConnectionActions,
   modelActions,
   sendMessage,
   loadTasks,
   loadSessions,
   loadSession,
   hasToolLifecycleHost,
+  bufferPendingConversationEvent,
 } from './store'
 import { api } from '../lib/api'
 import type { Approval, Goal } from 'jcode-ui-core'
-import { normalizeMode } from '../lib/types'
+import { normalizeMode, type AgentDoneData } from '../lib/types'
 import { i18n } from '../i18n'
 import { normalizeWireLifecycle } from './toolLifecycle'
 
@@ -33,6 +35,61 @@ export function createWSHandlers(
   getState: () => RootState,
   dispatch: AppDispatch,
 ): WSHandlers {
+  const applyForegroundAgentDone = (data?: AgentDoneData, taskId?: string) => {
+    const effectiveTaskId = taskId || getState().session.currentSessionId
+    // A remote transport failure has its own task-scoped, actionable status
+    // strip. Do not duplicate it as a permanent model-error card in the chat.
+    const structuredRemoteError = data?.error_kind === 'remote_connection' || (!!data?.code && (
+      data.code.startsWith('ssh_') || data.code.startsWith('docker_') || data.code === 'remote_connection_failed'
+    ))
+    const suppressRemoteError = !!data?.error && structuredRemoteError
+    if (effectiveTaskId && suppressRemoteError) {
+      const previous = getState().remoteConnection.byTaskId[effectiveTaskId]
+      const outcomeUnknown = data?.phase === 'outcome_unknown'
+      const actionRequired = outcomeUnknown || data?.code === 'ssh_auth_required' ||
+        data?.code === 'ssh_host_key_unknown' || data?.code === 'ssh_host_key_changed' ||
+        data?.code === 'ssh_host_key_confirmation_mismatch'
+      dispatch(remoteConnectionActions.statusReceived({
+        task_id: effectiveTaskId,
+        kind: data?.kind || previous?.kind || 'ssh',
+        status: actionRequired ? 'action_required' : 'failed',
+        attempt: previous?.attempt || 0,
+        max_attempts: previous?.max_attempts || 0,
+        host: previous?.host,
+        error: data?.detail || data?.error,
+        code: outcomeUnknown ? 'remote_outcome_unknown' : data?.code,
+        retryable: outcomeUnknown ? false : data?.retryable,
+      }))
+    }
+    if (effectiveTaskId && data?.stopped) {
+      dispatch(remoteConnectionActions.clearTransient(effectiveTaskId))
+    }
+    dispatch(chatActions.agentDone(data
+      ? {
+          error: suppressRemoteError ? undefined : data.error,
+          detail: suppressRemoteError ? undefined : data.detail,
+          stopped: data.stopped,
+        }
+      : undefined))
+  }
+
+  const applyAgentDoneBackgroundEffects = (taskId: string | undefined, background: boolean) => {
+    // These effects belong to the completed task even when its foreground
+    // transcript is still pending or the user later cancels navigation.
+    void dispatch(loadTasks() as never)
+    void dispatch(loadSessions() as never)
+    const queued = taskId ? getState().chat.queuedBySession[taskId] : undefined
+    if (!taskId || !queued || queued.length === 0) return
+    const next = queued[0]
+    dispatch(chatActions.shiftQueued(taskId))
+    void dispatch(sendMessage({
+      text: next.text,
+      images: next.images,
+      sessionId: taskId,
+      background,
+    }) as never)
+  }
+
   const refreshMissingLifecycleHost = (
     toolCallID: string,
     operationID: string | undefined,
@@ -44,7 +101,7 @@ export function createWSHandlers(
     const key = `${taskID}\u0000${toolCallID}\u0000${operationID || ''}`
     let refresh = pendingLifecycleRefreshes.get(key)
     if (!refresh) {
-      refresh = Promise.resolve(dispatch(loadSession(taskID))).then(
+      refresh = Promise.resolve(dispatch(loadSession({ uuid: taskID, background: true }))).then(
         () => undefined,
         () => undefined,
       )
@@ -66,8 +123,34 @@ export function createWSHandlers(
     })
   }
 
-  return {
+  const handlers: WSHandlers = {
     activeTaskId: () => getState().session.currentSessionId || undefined,
+    pendingTaskId: () => {
+      const load = getState().conversationLoad
+      return load.phase !== 'idle' && load.historyStatus === 'ready'
+        ? load.target?.uuid
+        : undefined
+    },
+    onPendingTaskEvent: (event) => {
+      const load = getState().conversationLoad
+      if (!load.target || load.target.uuid !== event.taskId || load.historyStatus !== 'ready') return
+      if (event.type === 'agent_done') {
+        const data = (event.data && typeof event.data === 'object'
+          ? event.data
+          : {}) as AgentDoneData
+        // Drain metadata/type-ahead now so Cancel cannot discard task-owned
+        // side effects. Buffer only the foreground timeline completion; using
+        // dispatchWSHandler here would drain the queue a second time on commit.
+        applyAgentDoneBackgroundEffects(event.taskId, true)
+        bufferPendingConversationEvent(load.requestId, event.taskId, () => {
+          applyForegroundAgentDone(data, event.taskId)
+        })
+        return
+      }
+      bufferPendingConversationEvent(load.requestId, event.taskId, () => {
+        dispatchWSHandler(handlers, event.type, event.data)
+      })
+    },
     onConnectionChange: (connected) => dispatch(sessionActions.setWsConnected(connected)),
     onAgentStart: () => dispatch(chatActions.setRunning(true)),
     onAgentText: (d) => dispatch(chatActions.appendAgentText(d.text)),
@@ -154,20 +237,10 @@ export function createWSHandlers(
       const activeId = getState().session.currentSessionId
       const isForeground = !taskId || taskId === activeId
       if (isForeground) {
-        dispatch(chatActions.agentDone(d ? { error: d.error, detail: d.detail, stopped: d.stopped } : undefined))
+        applyForegroundAgentDone(d, taskId || activeId)
       }
-      // Refresh sidebar metadata (title / updated_at / running) after a turn.
-      void dispatch(loadTasks() as never)
-      void dispatch(loadSessions() as never)
-      // Drain one queued type-ahead message (terminal-style) from the session
-      // that just finished — wherever the user is currently looking.
       const key = taskId || activeId
-      const queued = key ? getState().chat.queuedBySession[key] : undefined
-      if (key && queued && queued.length > 0) {
-        const next = queued[0]
-        dispatch(chatActions.shiftQueued(key))
-        void dispatch(sendMessage({ text: next.text, images: next.images, sessionId: key, background: !isForeground }) as never)
-      }
+      applyAgentDoneBackgroundEffects(key, !isForeground)
     },
     onTodoUpdate: () => {
       void api.todos().then((todos) => dispatch(chatActions.setTodos(todos)))
@@ -233,8 +306,15 @@ export function createWSHandlers(
         detail: d.detail,
       })),
     onUserMessage: (d) => {
+      // Local Web/Desktop sends are inserted optimistically by sendMessage.
+      // The backend still emits them for the durable Cloud relay, tagged as a
+      // local echo; replaying that frame here would show the turn twice.
+      if (d.local_echo) return
       dispatch(chatActions.addMessage({ role: 'user', content: d.content, source: d.source }))
       dispatch(chatActions.setRunning(true))
+    },
+    onRemoteConnectionStatus: (d) => {
+      dispatch(remoteConnectionActions.statusReceived(d))
     },
     onTaskStatus: (taskId, running, project, updatedAt) => {
       dispatch(sessionActions.setTaskRunning({ taskId, running }))
@@ -261,6 +341,7 @@ export function createWSHandlers(
     },
     onSessionReset: () => dispatch(chatActions.clearChat()),
   }
+  return handlers
 }
 
 /** Wire a WSClient to the store. Returns the client (already connecting). */

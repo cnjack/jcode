@@ -670,25 +670,37 @@ func (r *Recorder) UUID() string {
 // Project returns the workspace path this recorder is scoped to.
 func (r *Recorder) Project() string { return r.project }
 
-// Provider returns the provider the session was opened with.
-func (r *Recorder) Provider() string { return r.provider }
+// Provider returns the provider currently attributed to recorded usage.
+func (r *Recorder) Provider() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.provider
+}
 
-// Model returns the model currently attributed to recorded usage. It is the
-// model the session was opened with unless SetModel updated it after a switch.
+// Model returns the model currently attributed to recorded usage.
 func (r *Recorder) Model() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.model
 }
 
-// SetModel updates the model attributed to subsequently recorded usage so a
-// mid-session model switch attributes new turns to the new model rather than
-// the one the session was opened with. The session-start header is unchanged
-// (it records the opening model).
-func (r *Recorder) SetModel(model string) {
+// SetProviderModel updates the inseparable provider/model pair attributed to
+// subsequently recorded usage. Before the first entry it also determines the
+// session_start pair; afterwards the immutable opening header is retained while
+// the session index follows the current pair.
+func (r *Recorder) SetProviderModel(provider, model string) {
 	r.mu.Lock()
+	r.provider = provider
 	r.model = model
+	hasRecording := r.file != nil
+	id := r.uuid
 	r.mu.Unlock()
+	if hasRecording {
+		_, _ = UpdateSessionMeta(id, func(m *SessionMeta) {
+			m.Provider = provider
+			m.Model = model
+		})
+	}
 }
 
 // SetAgent records the selected top-level custom agent. Empty means the default
@@ -1838,6 +1850,35 @@ func ListAllSessions() (map[string][]SessionMeta, error) {
 		return nil, err
 	}
 	return idx.Sessions, nil
+}
+
+// FindSessionMeta returns the indexed metadata for uuid regardless of which
+// project owns it. The project is populated from the index key because older
+// index entries may omit the redundant Project field. A nil result means the
+// UUID is not indexed.
+func FindSessionMeta(uuid string) (*SessionMeta, error) {
+	if err := ValidateSessionID(uuid); err != nil {
+		return nil, err
+	}
+	all, err := ListAllSessions()
+	if err != nil {
+		return nil, err
+	}
+	var found *SessionMeta
+	for project, metas := range all {
+		for i := range metas {
+			if metas[i].UUID != uuid {
+				continue
+			}
+			if found != nil {
+				return nil, fmt.Errorf("session %s is indexed under multiple projects", uuid)
+			}
+			meta := metas[i]
+			meta.Project = project
+			found = &meta
+		}
+	}
+	return found, nil
 }
 
 // ListProjectMeta returns the per-project metadata (last-activity timestamps)

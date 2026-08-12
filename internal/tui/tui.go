@@ -101,9 +101,11 @@ type Model struct {
 	sshAliasPicker  list.Model
 	pickingSSHAlias bool
 
-	sshSavePrompt bool
-	sshSaveAddr   string
-	sshSavePath   string
+	sshSavePrompt         bool
+	sshSaveAddr           string
+	sshSavePath           string
+	sshHostKeyPrompt      bool
+	sshHostKeyFingerprint string
 
 	history      []string
 	historyIndex int
@@ -419,7 +421,7 @@ func (m *Model) confirmCancelAgent() {
 }
 
 func (m Model) inputActive() bool {
-	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.managingModels && !m.pickingTheme && !m.showingSetting && !m.showingHelp && !m.showingTranscript && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
+	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt || m.sshHostKeyPrompt) && !m.pickingModel && !m.managingModels && !m.pickingTheme && !m.showingSetting && !m.showingHelp && !m.showingTranscript && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
 
 // ModelOption configures a Model before the BubbleTea program starts.

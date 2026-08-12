@@ -307,23 +307,23 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
-	eng := s.activeEngine()
-	if eng == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
-		return
-	}
-	// No running gate: applyModelSwitch swaps eng.agent under eng.emu (the lock the
-	// run reads it under), so a mid-run switch is safe and takes effect next turn —
-	// consistent with mode/approval switching.
-
 	var req struct {
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
+		TaskID   string `json:"task_id,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
+	eng := s.resolveEngine(req.TaskID)
+	if eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	// No running gate: applyModelSwitch swaps eng.agent under eng.emu (the lock the
+	// run reads it under), so a mid-run switch is safe and takes effect next turn —
+	// consistent with mode/approval switching.
 	if req.Provider == "" || req.Model == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
 		return
@@ -350,6 +350,14 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 	}
 	eng.applyModelSwitch(ag, req.Provider, req.Model)
 	eng.rebuildMu.Unlock()
+	if req.TaskID != "" {
+		s.wsBroker.Broadcast(WSEvent{Type: "model_changed", TaskID: eng.taskID, Data: map[string]string{
+			"provider": req.Provider,
+			"model":    req.Model,
+		}})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 
 	// Persist the selection so a restart resumes on this model — matches the
 	// TUI model picker, which writes cfg.Model on every switch. In-place on the
@@ -391,7 +399,8 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Mode string `json:"mode"`
+		Mode   string `json:"mode"`
+		TaskID string `json:"task_id,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -406,9 +415,9 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 	}
 	sm := mode.Parse(req.Mode)
 
-	eng := s.activeEngine()
+	eng := s.resolveEngine(req.TaskID)
 	if eng == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
 	// No running gate: applyModeSwitch writes eng.agent under eng.emu, the same

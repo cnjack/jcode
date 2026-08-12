@@ -25,11 +25,13 @@ import type {
   QueuedMessage,
   AskUserQuestion,
 } from 'jcode-ui-core'
-import { api } from '../lib/api'
+import { api, isAPIError } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
-import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
+import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef, type RemoteConnectRequest, type RemoteHostKeyErrorPayload, type RemoteHostKeyErrorCode, type RemoteConnectionStatusData, type SessionActivationResponse } from '../lib/types'
+import { parseRemoteLabel } from '../lib/remote'
 import { i18n, setLocale, SUPPORTED_LOCALES } from '../i18n'
 import { hydrateTheme } from '../lib/useTheme'
+import { isTauri } from '../lib/useDesktop'
 import { mergeToolLifecycle, normalizeWireLifecycle, settleIncompleteImageTool } from './toolLifecycle'
 
 // ─── seq counter (stable DOM identity across streaming updates) ───
@@ -1015,6 +1017,212 @@ const sessionSlice = createSlice({
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
+// conversation-load slice — foreground navigation + recoverable remote setup
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ConversationLoadTarget {
+  uuid: string
+  project: string
+  title?: string
+}
+
+export type ConversationLoadPhase =
+  | 'idle'
+  | 'loading'
+  | 'connecting'
+  | 'awaiting_host_key'
+  | 'awaiting_auth'
+  | 'activating'
+  | 'error'
+
+export type ConversationLoadIssue =
+  | 'none'
+  | 'authentication'
+  | 'remote'
+  | 'history'
+  | 'host_key_unknown'
+  | 'host_key_changed'
+  | 'host_key_confirmation_mismatch'
+
+export interface ConversationLoadState {
+  requestId: string
+  target: ConversationLoadTarget | null
+  phase: ConversationLoadPhase
+  historyStatus: 'idle' | 'loading' | 'ready' | 'error'
+  environmentStatus: 'idle' | 'loading' | 'ready' | 'action_required' | 'error'
+  previewTimeline: ThreadItem[]
+  issue: ConversationLoadIssue
+  error: string
+  errorCode: string
+  retryable: boolean
+  hostKey: RemoteHostKeyErrorPayload | null
+}
+
+const initialConversationLoad: ConversationLoadState = {
+  requestId: '',
+  target: null,
+  phase: 'idle',
+  historyStatus: 'idle',
+  environmentStatus: 'idle',
+  previewTimeline: [],
+  issue: 'none',
+  error: '',
+  errorCode: '',
+  retryable: true,
+  hostKey: null,
+}
+
+const conversationLoadSlice = createSlice({
+  name: 'conversationLoad',
+  initialState: initialConversationLoad,
+  reducers: {
+    begin(s, a: { payload: { requestId: string; target: ConversationLoadTarget } }) {
+      s.requestId = a.payload.requestId
+      s.target = a.payload.target
+      s.phase = 'loading'
+      s.historyStatus = 'loading'
+      s.environmentStatus = 'loading'
+      s.previewTimeline = []
+      s.issue = 'none'
+      s.error = ''
+      s.errorCode = ''
+      s.retryable = true
+      s.hostKey = null
+    },
+    historyReady(s, a: { payload: { requestId: string; timeline: ThreadItem[] } }) {
+      if (s.requestId !== a.payload.requestId) return
+      s.historyStatus = 'ready'
+      s.previewTimeline = a.payload.timeline
+    },
+    historyLoading(s, a: { payload: { requestId: string } }) {
+      if (s.requestId !== a.payload.requestId) return
+      s.historyStatus = 'loading'
+      if (s.issue === 'history') {
+        s.issue = 'none'
+        s.error = ''
+        s.errorCode = ''
+        s.retryable = true
+      }
+    },
+    historyFailed(s, a: { payload: { requestId: string; error: string } }) {
+      if (s.requestId !== a.payload.requestId) return
+      s.historyStatus = 'error'
+      // History may still arrive in the activation response, so this does not
+      // make the whole navigation terminal by itself.
+      if (!s.error) s.error = a.payload.error
+    },
+    setPhase(s, a: { payload: { requestId: string; phase: ConversationLoadPhase; environmentStatus?: ConversationLoadState['environmentStatus'] } }) {
+      if (s.requestId !== a.payload.requestId) return
+      s.phase = a.payload.phase
+      if (a.payload.environmentStatus) s.environmentStatus = a.payload.environmentStatus
+      s.issue = 'none'
+      s.error = ''
+      s.errorCode = ''
+      s.retryable = true
+      s.hostKey = null
+    },
+    requireHostKey(s, a: { payload: { requestId: string; prompt: RemoteHostKeyErrorPayload } }) {
+      if (s.requestId !== a.payload.requestId) return
+      s.phase = 'awaiting_host_key'
+      s.environmentStatus = 'action_required'
+      s.hostKey = a.payload.prompt
+      s.issue = hostKeyIssue(a.payload.prompt.code)
+      s.error = a.payload.prompt.error
+      s.errorCode = a.payload.prompt.code
+      s.retryable = a.payload.prompt.code !== 'ssh_host_key_changed'
+    },
+    requireAuth(s, a: { payload: { requestId: string; error: string; code?: string; retryable?: boolean } }) {
+      if (s.requestId !== a.payload.requestId) return
+      s.phase = 'awaiting_auth'
+      s.environmentStatus = 'action_required'
+      s.issue = 'authentication'
+      s.error = a.payload.error
+      s.errorCode = a.payload.code || 'ssh_auth_required'
+      s.retryable = a.payload.retryable !== false
+      s.hostKey = null
+    },
+    failed(s, a: { payload: { requestId: string; error: string; issue?: ConversationLoadIssue; code?: string; retryable?: boolean } }) {
+      if (s.requestId !== a.payload.requestId) return
+      s.phase = 'error'
+      s.issue = a.payload.issue || 'remote'
+      if (s.issue !== 'history' || s.environmentStatus !== 'ready') {
+        s.environmentStatus = 'error'
+      }
+      s.error = a.payload.error
+      s.errorCode = a.payload.code || ''
+      s.retryable = a.payload.retryable !== false
+      s.hostKey = null
+    },
+    finish(s, a: { payload: { requestId: string } }) {
+      if (s.requestId !== a.payload.requestId) return
+      Object.assign(s, initialConversationLoad)
+    },
+    reset(s) {
+      Object.assign(s, initialConversationLoad)
+    },
+  },
+})
+
+function hostKeyIssue(code: RemoteHostKeyErrorCode): ConversationLoadIssue {
+  if (code === 'ssh_host_key_changed') return 'host_key_changed'
+  if (code === 'ssh_host_key_confirmation_mismatch') return 'host_key_confirmation_mismatch'
+  return 'host_key_unknown'
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// remote connection slice — quiet, task-scoped SSH/Docker recovery notices
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface RemoteConnectionNotice extends RemoteConnectionStatusData {
+  task_id: string
+  /** Changes for every wire update so a ready-dismiss timer cannot clear a
+   * newer reconnect cycle for the same task. */
+  revision: number
+}
+
+interface RemoteConnectionState {
+  byTaskId: Record<string, RemoteConnectionNotice>
+}
+
+const initialRemoteConnection: RemoteConnectionState = { byTaskId: {} }
+
+const remoteConnectionSlice = createSlice({
+  name: 'remoteConnection',
+  initialState: initialRemoteConnection,
+  reducers: {
+    statusReceived(s, a: { payload: RemoteConnectionStatusData }) {
+      const taskId = a.payload.task_id
+      if (!taskId) return
+      const previous = s.byTaskId[taskId]
+      const retryInMs = a.payload.retry_in_ms ?? a.payload.retry_after_ms
+      s.byTaskId[taskId] = {
+        ...a.payload,
+        task_id: taskId,
+        attempt: Math.max(0, a.payload.attempt || 0),
+        max_attempts: Math.max(0, a.payload.max_attempts || 0),
+        retry_in_ms: retryInMs === undefined ? undefined : Math.max(0, retryInMs),
+        revision: (previous?.revision || 0) + 1,
+      }
+    },
+    clearTransient(s, a: { payload: string }) {
+      const current = s.byTaskId[a.payload]
+      if (current?.status === 'waiting' || current?.status === 'reconnecting') {
+        delete s.byTaskId[a.payload]
+      }
+    },
+    clear(s, a: { payload: { taskId: string; revision?: number } }) {
+      const current = s.byTaskId[a.payload.taskId]
+      if (!current) return
+      if (a.payload.revision !== undefined && current.revision !== a.payload.revision) return
+      delete s.byTaskId[a.payload.taskId]
+    },
+    reset(s) {
+      s.byTaskId = {}
+    },
+  },
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
 // model slice — provider/model/mode/favorites
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1234,6 +1442,8 @@ const uiSlice = createSlice({
 
 export const chatActions = chatSlice.actions
 export const sessionActions = sessionSlice.actions
+export const conversationLoadActions = conversationLoadSlice.actions
+export const remoteConnectionActions = remoteConnectionSlice.actions
 export const modelActions = modelSlice.actions
 export const uiActions = uiSlice.actions
 
@@ -1546,7 +1756,7 @@ export const loadConfig = createAsyncThunk('model/loadConfig', async (_, { dispa
 export const loadStatus = createAsyncThunk('app/loadStatus', async (_, { dispatch }) => {
   const status = await api.status()
   dispatch(chatActions.setRunning(!!status.running))
-  dispatch(sessionActions.setProjectPath(status.pwd))
+  dispatch(sessionActions.setProjectPath(status.project || status.workspace_key || status.pwd))
   dispatch(modelActions.setProvider(status.provider))
   dispatch(modelActions.setModel(status.model))
   dispatch(modelActions.setAgent(status.agent || ''))
@@ -1626,87 +1836,651 @@ export const loadWorkspaceState = createAsyncThunk('app/loadWorkspaceState', asy
   ])
 })
 
-/**
- * Load (replay) a session's history into the timeline.
- *
- * Fast path: a SINGLE POST /api/sessions round trip both resumes the session
- * server-side and returns everything the view needs to repaint — the raw
- * JSONL entries (the server reuses its own reconstructing read; the file is
- * not read twice) plus goal/todos/status. The pane swaps to a skeleton the
- * instant the click lands, so perceived latency is ~0 and the old flow's
- * four serial follow-up GETs (status, ask/approval pending, goal, todos)
- * are gone. Legacy fallback (older server): fetch the entries via GET and
- * the rest individually, in parallel, without gating the repaint.
- */
+export interface ConversationRemoteCredentials {
+  authMethod: 'key' | 'password'
+  password?: string
+  keyPath?: string
+  passphrase?: string
+}
+
+type ConversationHistoryResult = {
+  entries?: SessionEntry[]
+  error?: string
+}
+
+let activeConversationLoad: {
+  requestId: string
+  targetId: string
+  controller: AbortController
+  /** Ephemeral only: preserve an explicitly submitted credential across the
+   * host-key confirmation round trip without putting secrets in Redux. */
+  credentials?: ConversationRemoteCredentials
+} | null = null
+let conversationNavigationGeneration = 0
+const conversationHistories = new Map<string, Promise<ConversationHistoryResult>>()
+type PendingConversationEvent = () => void
+const maxPendingConversationEvents = 256
+let pendingConversationEvents: {
+  requestId: string
+  targetId: string
+  events: PendingConversationEvent[]
+} | null = null
+export const conversationLoadTimeouts = {
+  historyMs: 15_000,
+  activationMs: 30_000,
+} as const
+
+function deadlineSignal(parent: AbortSignal, timeoutMs: number) {
+  const controller = new AbortController()
+  let timedOut = false
+  let disposed = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const dispose = () => {
+    if (disposed) return
+    disposed = true
+    if (timer !== undefined) clearTimeout(timer)
+    parent.removeEventListener('abort', onParentAbort)
+  }
+  const onParentAbort = () => {
+    dispose()
+    controller.abort(parent.reason)
+  }
+  if (parent.aborted) {
+    controller.abort(parent.reason)
+  } else {
+    parent.addEventListener('abort', onParentAbort, { once: true })
+    timer = setTimeout(() => {
+      dispose()
+      timedOut = true
+      controller.abort(new DOMException('Request timed out', 'TimeoutError'))
+    }, timeoutMs)
+  }
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    dispose,
+  }
+}
+
+function resetPendingConversationEvents(requestId: string, targetId: string) {
+  pendingConversationEvents = { requestId, targetId, events: [] }
+}
+
+function clearPendingConversationEvents(requestId?: string) {
+  if (!requestId || pendingConversationEvents?.requestId === requestId) pendingConversationEvents = null
+}
+
+/** Queue a task-scoped WS mutation while its durable transcript is visible in
+ * the loading preview but has not yet become the committed foreground. */
+export function bufferPendingConversationEvent(
+  requestId: string,
+  targetId: string,
+  apply: PendingConversationEvent,
+): boolean {
+  if (
+    activeConversationLoad?.requestId !== requestId ||
+    activeConversationLoad.targetId !== targetId ||
+    pendingConversationEvents?.requestId !== requestId ||
+    pendingConversationEvents.targetId !== targetId
+  ) return false
+  pendingConversationEvents.events.push(apply)
+  if (pendingConversationEvents.events.length > maxPendingConversationEvents) {
+    pendingConversationEvents.events.shift()
+  }
+  return true
+}
+
+function flushPendingConversationEvents(requestId: string, targetId: string) {
+  if (
+    pendingConversationEvents?.requestId !== requestId ||
+    pendingConversationEvents.targetId !== targetId
+  ) return
+  const events = pendingConversationEvents.events
+  pendingConversationEvents = null
+  for (const apply of events) apply()
+}
+
+function isConversationLoadCurrent(getState: () => unknown, requestId: string): boolean {
+  return (getState() as RootState).conversationLoad.requestId === requestId
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : error instanceof Error && error.name === 'AbortError'
+}
+
+function remoteHostKeyPrompt(error: unknown): RemoteHostKeyErrorPayload | null {
+  if (!isAPIError(error) || error.status !== 409 || !error.body || typeof error.body !== 'object') return null
+  const body = error.body as Partial<RemoteHostKeyErrorPayload>
+  if (
+    body.code !== 'ssh_host_key_unknown' &&
+    body.code !== 'ssh_host_key_changed' &&
+    body.code !== 'ssh_host_key_confirmation_mismatch'
+  ) return null
+  if (!body.host || !body.fingerprint || !body.key_type) return null
+  return {
+    error: body.error || error.message,
+    code: body.code,
+    host: body.host,
+    fingerprint: body.fingerprint,
+    key_type: body.key_type,
+    old_fingerprint: body.old_fingerprint,
+    expected_fingerprint: body.expected_fingerprint,
+  }
+}
+
+function looksLikeSSHAuthenticationError(error: unknown): boolean {
+  if (isAPIError(error) && error.body && typeof error.body === 'object') {
+    if ((error.body as { code?: unknown }).code === 'ssh_auth_required') return true
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return /auth|permission denied|private key|public key|passphrase|password/i.test(message)
+}
+
+function conversationLoadError(error: unknown): { error: string; code?: string; retryable: boolean } {
+  const message = error instanceof Error ? error.message : String(error)
+  if (!isAPIError(error) || !error.body || typeof error.body !== 'object') {
+    return { error: message, retryable: true }
+  }
+  const body = error.body as { code?: unknown; retryable?: unknown }
+  return {
+    error: message,
+    code: typeof body.code === 'string' ? body.code : error.code,
+    retryable: body.retryable !== false,
+  }
+}
+
+function beginConversationHistory(
+  requestId: string,
+  target: ConversationLoadTarget,
+  signal: AbortSignal,
+  dispatch: AppDispatch,
+  getState: () => unknown,
+): Promise<ConversationHistoryResult> {
+  dispatch(conversationLoadActions.historyLoading({ requestId }))
+  const history = (async (): Promise<ConversationHistoryResult> => {
+    const deadline = deadlineSignal(signal, conversationLoadTimeouts.historyMs)
+    try {
+      const entries = await api.session(target.uuid, deadline.signal)
+      if (isConversationLoadCurrent(getState, requestId)) {
+        // The GET response is the durable barrier. Only WS frames received
+        // after this point need to be layered over the replay at commit.
+        resetPendingConversationEvents(requestId, target.uuid)
+        // A preview is deliberately never marked running: it is a read-only
+        // durable transcript while the environment catches up.
+        dispatch(conversationLoadActions.historyReady({
+          requestId,
+          timeline: replayTimeline(entries, false),
+        }))
+      }
+      return { entries }
+    } catch (error) {
+      if (deadline.timedOut()) {
+        const message = i18n.t('conversationLoading.error.historyTimeout')
+        if (isConversationLoadCurrent(getState, requestId)) {
+          dispatch(conversationLoadActions.historyFailed({ requestId, error: message }))
+        }
+        return { error: message }
+      }
+      if (isAbortError(error)) return {}
+      const message = error instanceof Error ? error.message : String(error)
+      if (isConversationLoadCurrent(getState, requestId)) {
+        dispatch(conversationLoadActions.historyFailed({ requestId, error: message }))
+      }
+      return { error: message }
+    } finally {
+      deadline.dispose()
+    }
+  })()
+  conversationHistories.set(requestId, history)
+  return history
+}
+
+function sshConnectRequest(
+  target: ConversationLoadTarget,
+  credentials?: ConversationRemoteCredentials,
+  confirmedFingerprint?: string,
+): RemoteConnectRequest {
+  const remote = parseRemoteLabel(target.project)
+  if (!remote || remote.kind !== 'ssh') throw new Error('Invalid SSH workspace address')
+  const authMethod = credentials?.authMethod
+  return {
+    type: 'ssh',
+    host: remote.host,
+    port: remote.port || 22,
+    user: remote.user || 'root',
+    // Omit authentication fields when the user only confirmed a host key.
+    // The backend then preserves its ssh-agent/default-key fallback chain.
+    auth_method: authMethod,
+    password: authMethod === 'password' ? credentials?.password : undefined,
+    key_path: authMethod === 'key' ? credentials?.keyPath : undefined,
+    passphrase: authMethod === 'key' ? credentials?.passphrase : undefined,
+    accept_host_key: confirmedFingerprint ? true : undefined,
+    host_key_fingerprint: confirmedFingerprint,
+  }
+}
+
+async function connectAndBindConversation(
+  target: ConversationLoadTarget,
+  credentials: ConversationRemoteCredentials | undefined,
+  confirmedFingerprint: string | undefined,
+  signal: AbortSignal,
+): Promise<SessionActivationResponse> {
+  const remote = parseRemoteLabel(target.project)
+  if (!remote || remote.kind !== 'ssh') throw new Error('Invalid SSH workspace address')
+  const request = sshConnectRequest(target, credentials, confirmedFingerprint)
+  let connectionId = ''
+  let bound = false
+  try {
+    const connection = await api.remoteConnect(request, signal)
+    connectionId = connection.connection_id
+    const bind = await api.remoteBind(
+      connection.connection_id,
+      remote.remotePath || connection.remote_pwd,
+      { session_id: target.uuid, focus: false },
+      signal,
+    )
+    bound = true
+    if (!bind.session_id) throw new Error('Remote workspace did not activate the requested conversation')
+    return {
+      status: bind.status,
+      session_id: bind.session_id,
+      kind: bind.kind || 'ssh',
+      pwd: bind.pwd,
+      project: bind.project || bind.label || target.project,
+      workspace_key: bind.workspace_key || bind.project || bind.label || target.project,
+      provider: bind.provider,
+      model: bind.model,
+      agent: bind.agent,
+      mode: bind.mode || 'approval',
+      running: !!bind.running,
+      activated: !!bind.activated,
+      focused: !!bind.focused,
+    }
+  } finally {
+    if (connectionId && !bound) void api.remoteCancel(connectionId).catch(() => undefined)
+  }
+}
+
+async function commitConversation(
+  requestId: string,
+  target: ConversationLoadTarget,
+  response: SessionActivationResponse,
+  history: ConversationHistoryResult,
+  dispatch: AppDispatch,
+  getState: () => unknown,
+): Promise<void> {
+  if (!isConversationLoadCurrent(getState, requestId)) return
+  const timeline = history.entries ? replayTimeline(history.entries, !!response.running) : undefined
+  if (!timeline) throw new Error(history.error || 'Conversation history is unavailable')
+
+  dispatch(chatActions.clearChat())
+  dispatch(chatActions.setTimeline(timeline))
+  const resumedId = response.session_id || target.uuid
+  dispatch(sessionActions.setCurrentSession(resumedId))
+  dispatch(sessionActions.setProjectPath(response.project || response.workspace_key || target.project || response.pwd))
+  dispatch(remoteConnectionActions.clear({ taskId: resumedId }))
+  dispatch(chatActions.setRunning(!!response.running))
+  dispatch(modelActions.setProvider(response.provider || ''))
+  dispatch(modelActions.setModel(response.model || ''))
+  dispatch(modelActions.setAgent(response.agent || ''))
+  dispatch(modelActions.setMode(normalizeMode(response.mode || '')))
+  flushPendingConversationEvents(requestId, resumedId)
+  // Activation deliberately has no transcript/task-detail payload. These
+  // task-owned details hydrate independently after the atomic foreground commit.
+  void dispatch(loadGoal())
+  void dispatch(loadTodos())
+  void dispatch(reconcilePendingInteractions())
+  void dispatch(loadSessions())
+  void dispatch(loadTasks())
+  void dispatch(loadProjects())
+  dispatch(conversationLoadActions.finish({ requestId }))
+  conversationHistories.delete(requestId)
+  clearPendingConversationEvents(requestId)
+  if (activeConversationLoad?.requestId === requestId) activeConversationLoad = null
+}
+
+async function resumeConversationEnvironment(
+  requestId: string,
+  target: ConversationLoadTarget,
+  credentials: ConversationRemoteCredentials | undefined,
+  confirmedFingerprint: string | undefined,
+  dispatch: AppDispatch,
+  getState: () => unknown,
+): Promise<void> {
+  const active = activeConversationLoad
+  if (!active || active.requestId !== requestId || !isConversationLoadCurrent(getState, requestId)) return
+  if (credentials) active.credentials = credentials
+  const effectiveCredentials = credentials || active.credentials
+  const manualSSH = !!effectiveCredentials || !!confirmedFingerprint
+  dispatch(conversationLoadActions.setPhase({
+    requestId,
+    phase: manualSSH ? 'connecting' : 'activating',
+    environmentStatus: 'loading',
+  }))
+  try {
+    const deadline = deadlineSignal(active.controller.signal, conversationLoadTimeouts.activationMs)
+    let response: SessionActivationResponse
+    try {
+      response = manualSSH
+        ? await connectAndBindConversation(target, effectiveCredentials, confirmedFingerprint, deadline.signal)
+        : await api.activateSession({
+            session_id: target.uuid,
+            project_path: target.project || undefined,
+            focus: false,
+          }, deadline.signal)
+    } catch (error) {
+      if (deadline.timedOut()) throw new Error(i18n.t('conversationLoading.error.activationTimeout'))
+      throw error
+    } finally {
+      deadline.dispose()
+    }
+    if (!isConversationLoadCurrent(getState, requestId)) return
+    dispatch(conversationLoadActions.setPhase({
+      requestId,
+      phase: 'loading',
+      environmentStatus: 'ready',
+    }))
+    const history = await (
+      conversationHistories.get(requestId) || Promise.resolve<ConversationHistoryResult>({})
+    )
+    if (!isConversationLoadCurrent(getState, requestId)) return
+    if (!history.entries) throw new Error(history.error || 'Conversation history is unavailable')
+
+    // Preparing an engine is deliberately non-focusing. Once the transcript is
+    // ready, focus the exact hydrated session and synchronously commit it to the
+    // foreground; Cancel before this point leaves the previous engine active.
+    dispatch(conversationLoadActions.setPhase({
+      requestId,
+      phase: 'activating',
+      environmentStatus: 'ready',
+    }))
+    const focusDeadline = deadlineSignal(active.controller.signal, conversationLoadTimeouts.activationMs)
+    try {
+      response = await api.activateSession({
+        session_id: response.session_id || target.uuid,
+        project_path: response.project || response.workspace_key || target.project || undefined,
+        focus: true,
+      }, focusDeadline.signal)
+    } catch (error) {
+      if (focusDeadline.timedOut()) throw new Error(i18n.t('conversationLoading.error.activationTimeout'))
+      throw error
+    } finally {
+      focusDeadline.dispose()
+    }
+    if (!isConversationLoadCurrent(getState, requestId)) return
+    await commitConversation(requestId, target, response, history, dispatch, getState)
+  } catch (error) {
+    if (isAbortError(error) || !isConversationLoadCurrent(getState, requestId)) return
+    const prompt = remoteHostKeyPrompt(error)
+    if (prompt) {
+      dispatch(conversationLoadActions.requireHostKey({ requestId, prompt }))
+      return
+    }
+    if (target.project.startsWith('ssh://') && looksLikeSSHAuthenticationError(error)) {
+      const issue = conversationLoadError(error)
+      dispatch(conversationLoadActions.requireAuth({
+        requestId,
+        ...issue,
+      }))
+      return
+    }
+    const loadState = (getState() as RootState).conversationLoad
+    const historyOnly = loadState.environmentStatus === 'ready' && loadState.historyStatus === 'error'
+    const issue = conversationLoadError(error)
+    dispatch(conversationLoadActions.failed({
+      requestId,
+      ...issue,
+      issue: historyOnly ? 'history' : 'remote',
+    }))
+  }
+}
+
+/** Open an existing conversation. History and environment activation begin at
+ *  the same time; only the newest request is allowed to commit. */
+export const openConversation = createAsyncThunk(
+  'conversation/open',
+  async (input: ConversationLoadTarget, { dispatch, getState, requestId }) => {
+    conversationNavigationGeneration += 1
+    const previousRequestId = activeConversationLoad?.requestId
+    activeConversationLoad?.controller.abort()
+    if (previousRequestId) {
+      conversationHistories.delete(previousRequestId)
+      clearPendingConversationEvents(previousRequestId)
+    }
+    const controller = new AbortController()
+    activeConversationLoad = { requestId, targetId: input.uuid, controller }
+    const state = getState() as RootState
+    const indexedTask = state.session.tasks.find((task) => task.uuid === input.uuid)
+    const indexedSession = state.session.sessions.find((session) => session.uuid === input.uuid)
+    const target: ConversationLoadTarget = {
+      uuid: input.uuid,
+      project: input.project || indexedTask?.project || state.session.projectPath,
+      title: input.title || indexedTask?.title || indexedSession?.title,
+    }
+    dispatch(uiActions.setView('chat'))
+    dispatch(conversationLoadActions.begin({ requestId, target }))
+    beginConversationHistory(requestId, target, controller.signal, dispatch as AppDispatch, getState)
+    await resumeConversationEnvironment(
+      requestId,
+      target,
+      undefined,
+      undefined,
+      dispatch as AppDispatch,
+      getState,
+    )
+  },
+)
+
+/** Retry a task whose transparent remote recovery was exhausted. Ordinary
+ * transport failures are retried in place; credential/host-key problems move
+ * into the existing ConversationLoadingView's inline action flow (never the
+ * new-workspace RemoteConnectWizard modal). */
+export const retryRemoteConnection = createAsyncThunk(
+  'remoteConnection/retry',
+  async (input: { taskId: string }, { dispatch, getState }) => {
+    const initial = getState() as RootState
+    const notice = initial.remoteConnection.byTaskId[input.taskId]
+    if (!notice) return
+    if (initial.session.currentSessionId === input.taskId && initial.chat.isRunning) return
+    const task = initial.session.tasks.find((candidate) => candidate.uuid === input.taskId)
+    const session = initial.session.sessions.find((candidate) => candidate.uuid === input.taskId)
+    const target: ConversationLoadTarget = {
+      uuid: input.taskId,
+      project: task?.project || (initial.session.currentSessionId === input.taskId ? initial.session.projectPath : ''),
+      title: task?.title || session?.title,
+    }
+
+    if (notice.status === 'action_required') {
+      await dispatch(openConversation(target))
+      return
+    }
+
+    dispatch(remoteConnectionActions.statusReceived({
+      ...notice,
+      status: 'reconnecting',
+      attempt: 0,
+      max_attempts: 0,
+      retry_in_ms: undefined,
+      retry_after_ms: undefined,
+      error: undefined,
+      code: undefined,
+    }))
+
+    try {
+      // Repair without changing focus. Existing foreground runtimes retain
+      // their active pointer during the atomic swap; cold/background tasks are
+      // routed by task id. A second focus request would introduce a TOCTOU in
+      // which a late response could steal focus after the user switched tasks.
+      const response = await api.activateSession({
+        session_id: input.taskId,
+        project_path: target.project || undefined,
+        source: isTauri ? 'desktop' : undefined,
+        focus: false,
+      })
+      const current = getState() as RootState
+      if (current.session.currentSessionId !== input.taskId) {
+        dispatch(remoteConnectionActions.clear({ taskId: input.taskId }))
+        return
+      }
+      dispatch(sessionActions.setProjectPath(response.project || response.workspace_key || target.project || response.pwd))
+      dispatch(remoteConnectionActions.statusReceived({
+        task_id: input.taskId,
+        kind: response.kind === 'docker' ? 'docker' : 'ssh',
+        status: 'ready',
+        attempt: 0,
+        max_attempts: 0,
+        host: notice.host,
+      }))
+    } catch (error) {
+      if ((getState() as RootState).session.currentSessionId !== input.taskId) {
+        dispatch(remoteConnectionActions.clear({ taskId: input.taskId }))
+        return
+      }
+      const issue = remoteRetryIssue(error, notice.kind)
+      if (issue.actionRequired) {
+        // The dedicated load view owns host-key confirmation and credentials.
+        // Reusing it also preserves the conversation's session-aware bind.
+        dispatch(remoteConnectionActions.statusReceived({
+          task_id: input.taskId,
+          kind: notice.kind,
+          status: 'action_required',
+          attempt: notice.attempt,
+          max_attempts: notice.max_attempts,
+          host: notice.host,
+          error: issue.error,
+          code: issue.code,
+          retryable: issue.retryable,
+        }))
+        await dispatch(openConversation(target))
+        return
+      }
+      dispatch(remoteConnectionActions.statusReceived({
+        task_id: input.taskId,
+        kind: notice.kind,
+        status: 'failed',
+        attempt: notice.attempt,
+        max_attempts: notice.max_attempts,
+        host: notice.host,
+        error: issue.error,
+        code: issue.code,
+        retryable: issue.retryable,
+      }))
+    }
+  },
+)
+
+function remoteRetryIssue(error: unknown, kind: RemoteConnectionStatusData['kind']): {
+  error: string
+  code?: string
+  retryable: boolean
+  actionRequired: boolean
+} {
+  const body = isAPIError(error) && error.body && typeof error.body === 'object'
+    ? error.body as Record<string, unknown>
+    : undefined
+  const code = isAPIError(error) ? error.code : undefined
+  const actionRequired = code === 'ssh_auth_required' || code === 'ssh_host_key_unknown' ||
+    code === 'ssh_host_key_changed' || code === 'ssh_host_key_confirmation_mismatch'
+  return {
+    error: error instanceof Error
+      ? error.message
+      : i18n.t('remoteConnection.failed.title', {
+          transport: i18n.t(`remoteConnection.transport.${kind}`),
+        }),
+    code,
+    retryable: typeof body?.retryable === 'boolean' ? body.retryable : !actionRequired,
+    actionRequired,
+  }
+}
+
+export const continueConversationLoad = createAsyncThunk(
+  'conversation/continue',
+  async (
+    input: { requestId: string; credentials?: ConversationRemoteCredentials; acceptHostKey?: boolean },
+    { dispatch, getState },
+  ) => {
+    const state = getState() as RootState
+    if (state.conversationLoad.requestId !== input.requestId || !state.conversationLoad.target) return
+    const target = state.conversationLoad.target
+    const confirmedFingerprint = input.acceptHostKey ? state.conversationLoad.hostKey?.fingerprint : undefined
+    if (!activeConversationLoad || activeConversationLoad.requestId !== input.requestId || activeConversationLoad.controller.signal.aborted) {
+      const retainedCredentials = activeConversationLoad?.requestId === input.requestId
+        ? activeConversationLoad.credentials
+        : undefined
+      activeConversationLoad = {
+        requestId: input.requestId,
+        targetId: target.uuid,
+        controller: new AbortController(),
+        credentials: retainedCredentials,
+      }
+    }
+    if (state.conversationLoad.historyStatus === 'error') {
+      beginConversationHistory(
+        input.requestId,
+        target,
+        activeConversationLoad.controller.signal,
+        dispatch as AppDispatch,
+        getState,
+      )
+    }
+    await resumeConversationEnvironment(
+      input.requestId,
+      target,
+      input.credentials,
+      confirmedFingerprint,
+      dispatch as AppDispatch,
+      getState,
+    )
+  },
+)
+
+export const cancelConversationLoad = createAsyncThunk(
+  'conversation/cancel',
+  async (_, { dispatch, getState }) => {
+    conversationNavigationGeneration += 1
+    const requestId = (getState() as RootState).conversationLoad.requestId
+    if (activeConversationLoad?.requestId === requestId) {
+      activeConversationLoad.controller.abort()
+      activeConversationLoad = null
+    }
+    conversationHistories.delete(requestId)
+    clearPendingConversationEvents(requestId)
+    dispatch(conversationLoadActions.reset())
+  },
+)
+
+/** Replay the already-focused session without mutating backend focus. This is
+ * used to repair a missing WS tool lifecycle host, so it must be a pure history
+ * GET and must not outlive a foreground navigation that started after it. */
 export const loadSession = createAsyncThunk(
   'session/loadOne',
-  async (uuid: string, { dispatch, getState }) => {
+  async (input: string | { uuid: string; background?: boolean }, { dispatch, getState }) => {
+    const uuid = typeof input === 'string' ? input : input.uuid
+    const background = typeof input === 'object' && !!input.background
+    const startState = getState() as RootState
+    if (startState.session.currentSessionId !== uuid) return
+    if (background && startState.conversationLoad.phase !== 'idle') return
+    const navigationRequestId = startState.conversationLoad.requestId
+    const navigationGeneration = conversationNavigationGeneration
     // Immediate skeleton: the pane reacts to the click, not to the network.
-    dispatch(chatActions.setSessionLoading(true))
+    if (!background) dispatch(chatActions.setSessionLoading(true))
     try {
-      const resp = await api.newSession(uuid)
-      dispatch(sessionActions.setCurrentSession(resp.session_id || uuid))
-
-      // One-shot resume payload (entries + goal + todos + status). `provider`
-      // discriminates an older server without the one-shot payload at all;
-      // `entries` is omitted when the server could not read the session file
-      // — fall back to the dedicated endpoint then (a transient read failure
-      // must not blank a conversation that has history).
-      const oneShot = resp.provider !== undefined
-      let entries: SessionEntry[] | null | undefined = resp.entries
-      if (entries === undefined) {
-        // Older server (no one-shot payload) OR current server with an
-        // unreadable session file. A 404 means the session has no JSONL yet
-        // (fresh, never-used session) — return without rebuilding so the
-        // caller can fall back to a different session.
-        try {
-          entries = await api.session(uuid)
-        } catch {
-          return
-        }
-      }
-
-      // Clear the UI before rebuilding.
+      const entries = await api.session(uuid)
+      const state = getState() as RootState
+      if (
+        state.session.currentSessionId !== uuid ||
+        conversationNavigationGeneration !== navigationGeneration ||
+        state.conversationLoad.requestId !== navigationRequestId ||
+        state.conversationLoad.phase !== 'idle'
+      ) return
+      const running = !!state.session.tasks.find((task) => task.uuid === uuid)?.running
       dispatch(chatActions.clearChat())
-
-      const resumedId = resp.session_id || uuid
-      const replayRunning = oneShot
-        ? !!resp.running
-        : !!(getState() as RootState).session.tasks.find((task) => task.uuid === resumedId)?.running
-      const timeline = replayTimeline(entries || [], replayRunning)
-      dispatch(chatActions.setTimeline(timeline))
-
-      if (oneShot) {
-        // Hydrate server-truth state from the SAME response — the old flow
-        // spent four extra serial round trips here (status, ask/approval
-        // pending, goal, todos). clearChat nulled tokenSnapshot, and no
-        // token_update arrives until the session's next LLM call — without
-        // this the context ring stays hidden after switching conversations.
-        dispatch(chatActions.setRunning(!!resp.running))
-        if (resp.pwd) dispatch(sessionActions.setProjectPath(resp.pwd))
-        dispatch(modelActions.setProvider(resp.provider || ''))
-        dispatch(modelActions.setModel(resp.model || ''))
-        dispatch(modelActions.setAgent(resp.agent || ''))
-        dispatch(modelActions.setMode(normalizeMode(resp.mode || '')))
-        if (resp.token) dispatch(chatActions.setTokenSnapshot(resp.token))
-        dispatch(chatActions.setGoal(resp.goal ?? null))
-        dispatch(chatActions.setTodos(resp.todos ?? []))
-      } else {
-        // Older server: seed isRunning from the task list (a resumed task may
-        // still be running), then fetch the rest individually — in parallel,
-        // and none of it gates the timeline repaint.
-        const state = getState() as RootState
-        const running = !!state.session.tasks.find((t) => t.uuid === resumedId)?.running
-        dispatch(chatActions.setRunning(running))
-        void dispatch(loadStatus())
-        void dispatch(loadGoal())
-        void dispatch(loadTodos())
-      }
-      // Pending approval/ask interactions only add interactive blocks — they
-      // never gate the repaint, so don't await them.
-      void dispatch(reconcilePendingInteractions())
+      dispatch(chatActions.setTimeline(replayTimeline(entries, running)))
+      dispatch(chatActions.setRunning(running))
     } finally {
-      dispatch(chatActions.setSessionLoading(false))
+      if (!background) dispatch(chatActions.setSessionLoading(false))
     }
   },
 )
@@ -1718,6 +2492,7 @@ export const loadSession = createAsyncThunk(
  * the first user message (backend only indexes then).
  */
 export const startNewChat = createAsyncThunk('session/startNew', async (_, { dispatch }) => {
+  await dispatch(cancelConversationLoad())
   dispatch(chatActions.clearChat())
   dispatch(sessionActions.setCurrentSession(''))
   dispatch(uiActions.setView('chat'))
@@ -1764,6 +2539,8 @@ export const store = configureStore({
   reducer: {
     chat: chatSlice.reducer,
     session: sessionSlice.reducer,
+    conversationLoad: conversationLoadSlice.reducer,
+    remoteConnection: remoteConnectionSlice.reducer,
     model: modelSlice.reducer,
     ui: uiSlice.reducer,
   },

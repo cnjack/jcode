@@ -9,9 +9,11 @@ import (
 // ---------------------------------------------------------------------------
 // Fatal errors (#16) — unrecoverable infrastructure failures.
 //
-// A Fatal error marks the executor behind the tools as permanently dead for
-// this run (container removed, SSH connection gone): every further tool call
-// is guaranteed to fail the same way. Error-folding middleware
+// A Fatal error marks an infrastructure failure that this run must not ask the
+// model to retry. Examples include a removed container, exhausted SSH reconnect
+// attempts, or an SSH command whose outcome became unknown after dispatch. A
+// transient SSH loss is repaired inside the executor and is not Fatal when a
+// safe operation can be replayed. Error-folding middleware
 // (internal/agent/middleware.go approvalMiddleware and the subagent
 // safeToolMiddleware in subagent.go) checks IsFatal BEFORE folding and
 // propagates the error to abort the run instead of letting the model burn

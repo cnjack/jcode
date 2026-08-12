@@ -15,6 +15,7 @@ export function selectShowSessionChrome(state: RootState): boolean {
   )
 
   return (
+    (state.conversationLoad?.phase ?? 'idle') !== 'idle' ||
     state.chat.sessionLoading ||
     state.chat.isRunning ||
     state.chat.timeline.length > 0 ||

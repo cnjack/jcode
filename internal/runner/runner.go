@@ -502,7 +502,7 @@ func runInner(
 			// so wrapping here fixes the display in the TUI, the web UI and ACP
 			// at once — and stops the next frontend from having to remember.
 			config.Logger().Printf("[runner] event error: %v", event.Err)
-			runErr := internalmodel.WrapFriendly(event.Err, "", "")
+			runErr := wrapRunError(event.Err, "", "")
 			if persistErr := drainDanglingToolResults(); persistErr != nil {
 				runErr = errors.Join(runErr, persistErr)
 			}
@@ -666,7 +666,7 @@ func runInner(
 					return finish(true, runErr)
 				}
 				config.Logger().Printf("[runner] assistant stream error: %v", streamErr)
-				runErr := internalmodel.WrapFriendly(streamErr, "", "")
+				runErr := wrapRunError(streamErr, "", "")
 				if persistErr := drainDanglingToolResults(); persistErr != nil {
 					runErr = errors.Join(runErr, persistErr)
 				}

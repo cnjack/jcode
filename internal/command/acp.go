@@ -694,7 +694,7 @@ func (a *acpAgent) buildAgentSession(
 	}
 	if rec != nil {
 		rec.SetAgent(agentRoleName)
-		rec.SetModel(modelName)
+		rec.SetProviderModel(providerName, modelName)
 	}
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
@@ -1112,7 +1112,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 	// ACPHandler.OnAgentDone. Tell the user what happened, in words they can act
 	// on, and end the turn with a reason that is not "success".
 	if turnErr := sess.h.TakeTurnError(); turnErr != nil {
-		friendly := internalmodel.FriendlyAPIError(turnErr, sess.providerName, sess.modelName)
+		friendly := runner.FormatRunError(turnErr, sess.providerName, sess.modelName)
 		config.Logger().Printf("[acp] turn failed: %v", turnErr)
 		sess.h.OnAgentText("\n" + friendly)
 		return acp.PromptResponse{StopReason: acp.StopReasonRefusal}, nil

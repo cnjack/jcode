@@ -50,7 +50,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Resolve (or lazily create) the engine for this task. Different tasks run
 	// concurrently; the per-task running flag only blocks double-running the SAME
 	// task.
-	eng, err := s.engineForChat(req.SessionID, modeStr)
+	eng, err := s.engineForChatContext(r.Context(), req.SessionID, modeStr)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -71,6 +71,27 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 // its engine; an unknown id lazily spins up a fresh engine for it (a new task or
 // the first message of a not-yet-live task), rooted at the active task's pwd.
 func (s *Server) engineForChat(taskID, modeStr string) (*Engine, error) {
+	return s.engineForChatContext(context.Background(), taskID, modeStr)
+}
+
+func (s *Server) engineForChatContext(ctx context.Context, taskID, modeStr string) (*Engine, error) {
+	if taskID != "" {
+		meta, err := session.FindSessionMeta(taskID)
+		if err != nil {
+			return nil, fmt.Errorf("load conversation metadata: %w", err)
+		}
+		if meta != nil {
+			result, err := s.ensureConversation(ctx, taskID, "", "")
+			if err != nil {
+				return nil, err
+			}
+			eng := s.resolveEngine(result.SessionID)
+			if eng == nil {
+				return nil, fmt.Errorf("activated task %s is unavailable", result.SessionID)
+			}
+			return eng, nil
+		}
+	}
 	if eng := s.resolveEngine(taskID); eng != nil {
 		return eng, nil
 	}
@@ -84,11 +105,37 @@ func (s *Server) engineForChat(taskID, modeStr string) (*Engine, error) {
 			return eng, nil
 		}
 	}
-	pwd := ""
-	if a := s.activeEngine(); a != nil {
-		pwd = a.pwd
+	project := engineProject(s.activeEngine())
+	if project == "" {
+		// Setup-focused tests and embedders may have a bootstrap engine without a
+		// workspace yet. This branch is only for a genuinely new, non-indexed task;
+		// persisted remote ids were resolved above and can never reach it.
+		if s.newEngine == nil {
+			return nil, fmt.Errorf("task creation is not supported")
+		}
+		eng, err := s.assembleLocalEngine(taskID, "", modeStr, s.newEngine)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.publishEngineCandidate(eng, nil); err != nil {
+			eng.teardown()
+			return nil, err
+		}
+		return eng, nil
 	}
-	return s.buildLocalEngine(taskID, pwd, modeStr)
+	target, err := parseConversationTarget(project)
+	if err != nil {
+		return nil, fmt.Errorf("resolve active conversation target: %w", err)
+	}
+	eng, err := s.assembleConversationEngine(ctx, taskID, target, modeStr)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.publishEngineCandidate(eng, nil); err != nil {
+		eng.teardown()
+		return nil, err
+	}
+	return eng, nil
 }
 
 // chatImage represents a base64-encoded image in a chat request.
@@ -170,14 +217,16 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	// (every message lands here) harmless.
 	s.stampCloudSync(eng.taskID, source, sessionID == "")
 
-	// Emit user_message event for external sources (e.g. WeChat) so web clients see it.
-	// Web-originated messages are already added by the frontend's sendMessage().
-	if source != "" {
-		eng.handler.Emit("user_message", map[string]string{
-			"content": message,
-			"source":  source,
-		})
+	// Every durable user turn is emitted so the Cloud event mirror cannot miss
+	// messages composed on Desktop. Desktop already renders its own optimistic
+	// message, so local_echo lets that frontend ignore only this echoed event;
+	// remote/channel messages carry their source and render normally. One call
+	// emits exactly once, including Cloud-originated turns.
+	userEvent := map[string]any{"content": message, "source": source}
+	if source == "" {
+		userEvent["local_echo"] = true
 	}
+	eng.handler.Emit("user_message", userEvent)
 
 	// Ensure a recorder exists (lazy creation on first message).
 	// If the client provided a session_id and the current recorder differs,

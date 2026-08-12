@@ -534,9 +534,12 @@ func relativizeLine(line, pwd string) string {
 // runRemote builds a command string and runs it over SSH via the Executor.
 func (g *grepTool) runRemote(ctx context.Context, input GrepInput, maxResults int) (string, error) {
 	cmd := g.buildRemoteCmd(input, maxResults)
-	stdout, stderr, err := g.env.Exec.Exec(ctx, cmd, "", 30*time.Second)
+	stdout, stderr, err := ExecReadOnly(ctx, g.env.Exec, cmd, "", 30*time.Second)
 
 	if err != nil {
+		if IsFatal(err) {
+			return "", err
+		}
 		// Exit code 1 = no matches (files_with_matches/count run rg bare;
 		// content mode pipes through head, whose exit code masks rg's — that
 		// case is handled by the empty-stdout check below).
@@ -545,7 +548,7 @@ func (g *grepTool) runRemote(ctx context.Context, input GrepInput, maxResults in
 		}
 		if stdout == "" {
 			if stderr != "" {
-				return "", fmt.Errorf("search error: %s", strings.TrimSpace(stderr))
+				return "", fmt.Errorf("search error: %s: %w", strings.TrimSpace(stderr), err)
 			}
 			return "", fmt.Errorf("search failed: %w", err)
 		}

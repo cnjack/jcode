@@ -90,6 +90,7 @@ type DockerExecutor struct {
 	name        string // display name without the leading slash
 	platform    string
 	startedByUs bool
+	closeOnce   sync.Once
 }
 
 // AcquireDockerContainer binds to a container by id or name. A1 semantics: a
@@ -180,10 +181,28 @@ func waitRunning(ctx context.Context, cli *client.Client, id string) error {
 }
 
 func (d *DockerExecutor) Close() error {
-	if d.startedByUs {
-		dockerReleaseRef(d.containerID, true)
-	}
+	d.closeOnce.Do(func() {
+		if d.startedByUs {
+			dockerReleaseRef(d.containerID, true)
+		}
+	})
 	return nil // never close the shared client
+}
+
+// Probe verifies both Docker daemon reachability and that the bound container
+// remains running. The short local deadline is applied even when a caller
+// accidentally supplies an unbounded context.
+func (d *DockerExecutor) Probe(ctx context.Context) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	info, err := d.cli.ContainerInspect(probeCtx, d.containerID)
+	if err != nil {
+		return wrapDockerRunErr("docker probe", err)
+	}
+	if info.State == nil || !info.State.Running {
+		return fmt.Errorf("docker probe: container %q is not running", d.name)
+	}
+	return nil
 }
 
 // ContainerID exposes the bound container id (used by the terminal backend).

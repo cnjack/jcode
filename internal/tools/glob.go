@@ -109,7 +109,7 @@ func (g *globTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	var err error
 
 	if g.env.IsRemote() {
-		stdout, stderr, err = g.env.Exec.Exec(ctx, cmd, "", 30*time.Second)
+		stdout, stderr, err = ExecReadOnly(ctx, g.env.Exec, cmd, "", 30*time.Second)
 	} else {
 		// Require ripgrep — same hard dependency as the grep tool.
 		if _, lookErr := exec.LookPath("rg"); lookErr != nil {
@@ -120,11 +120,14 @@ func (g *globTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	elapsed := time.Since(start)
 
 	if err != nil {
+		if IsFatal(err) {
+			return "", err
+		}
 		// The pipeline exit code is head's (0); a non-zero code means the cd
 		// failed (bad search path) or the shell itself failed.
 		if stdout == "" {
 			if stderr != "" {
-				return "", fmt.Errorf("glob error: %s", strings.TrimSpace(stderr))
+				return "", fmt.Errorf("glob error: %s: %w", strings.TrimSpace(stderr), err)
 			}
 			return "No files found.", nil
 		}

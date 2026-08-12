@@ -1085,7 +1085,7 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 	s.chatModel = newChatModel
 	// Attribute subsequent usage to the newly selected model.
 	if s.rec != nil {
-		s.rec.SetModel(newModelName)
+		s.rec.SetProviderModel(newProvName, newModelName)
 	}
 
 	// Rebuild system prompt and tools to reflect config changes (e.g., SSH aliases)
@@ -1169,7 +1169,7 @@ func (s *interactiveState) handleAddModel() {
 	}
 	s.chatModel = newChatModel
 	if s.rec != nil {
-		s.rec.SetModel(newModelName)
+		s.rec.SetProviderModel(newProvName, newModelName)
 	}
 	if newAg, agErr := s.createAgent(); agErr == nil {
 		s.ag = newAg
@@ -1188,7 +1188,8 @@ func (s *interactiveState) handleSSH(connMsg interface{}) {
 	switch msg := connMsg.(type) {
 	case tui.SSHConnectMsg:
 		HandleSSHConnect(s.ctx, s.env, msg.Addr, msg.Path, s.p, &s.systemPrompt,
-			&s.ag, s.chatModel, s.createAgent, s.skillLoader.Descriptions())
+			&s.ag, s.chatModel, s.createAgent, s.skillLoader.Descriptions(),
+			msg.AcceptHostKey, msg.HostKeyFingerprint)
 	case tui.SSHListDirReqMsg:
 		HandleSSHListDir(s.ctx, s.env, msg.Path, s.p)
 	case tui.SSHCancelMsg:

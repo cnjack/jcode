@@ -65,7 +65,10 @@ func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 		return "", fmt.Errorf("content too large (%d bytes, max %d)", len(input.Content), MaxWriteFileSize)
 	}
 
-	fi, _ := w.env.Exec.Stat(ctx, input.FilePath)
+	fi, err := w.env.Exec.Stat(ctx, input.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect file %s before writing: %w", input.FilePath, err)
+	}
 	isNew := fi == nil || !fi.Exists
 
 	var oldContent string
@@ -91,14 +94,16 @@ func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 		}
 
 		// Read existing content for backup and diff.
-		if existing, err := w.env.Exec.ReadFile(ctx, input.FilePath); err == nil {
-			oldContent = string(existing)
-			// Backup before overwriting.
-			if w.env.FileTracker != nil {
-				bp, bErr := w.env.FileTracker.CreateBackup(input.FilePath, existing)
-				if bErr == nil {
-					backupPath = bp
-				}
+		existing, err := w.env.Exec.ReadFile(ctx, input.FilePath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read existing file %s before writing: %w", input.FilePath, err)
+		}
+		oldContent = string(existing)
+		// Backup before overwriting.
+		if w.env.FileTracker != nil {
+			bp, bErr := w.env.FileTracker.CreateBackup(input.FilePath, existing)
+			if bErr == nil {
+				backupPath = bp
 			}
 		}
 	}

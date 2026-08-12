@@ -491,9 +491,14 @@ type WebSubagentProgressData struct {
 // Detail carries the full raw error text for a collapsible "details" view.
 // Stopped marks a user-initiated stop — the UI shows a calm notice, not an error.
 type WebDoneData struct {
-	Error   string `json:"error,omitempty"`
-	Detail  string `json:"detail,omitempty"`
-	Stopped bool   `json:"stopped,omitempty"`
+	Error     string `json:"error,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+	Stopped   bool   `json:"stopped,omitempty"`
+	Code      string `json:"code,omitempty"`
+	ErrorKind string `json:"error_kind,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Phase     string `json:"phase,omitempty"`
+	Retryable *bool  `json:"retryable,omitempty"`
 }
 
 // WebApprovalRequestData carries an approval request. ToolCallID (when known)
@@ -714,6 +719,31 @@ func (h *WebHandler) OnAgentDone(err error) {
 	// calm "stopped" notice, not a red error card.
 	if errors.Is(err, context.Canceled) {
 		h.emit("agent_done", WebDoneData{Stopped: true})
+		return
+	}
+	var remoteErr *tools.RemoteTransportError
+	if errors.As(err, &remoteErr) {
+		summary, detail := internalmodel.SummarizeRunError(err)
+		code := remoteErr.Code
+		if code == "" {
+			code = "remote_connection_failed"
+			if remoteErr.Kind != "" {
+				code = remoteErr.Kind + "_connection_failed"
+			}
+		}
+		retryable := remoteErr.Retryable
+		// A recovered transport does not make a dispatched mutation safe to run
+		// again. In agent_done, Retryable describes the interrupted operation,
+		// not whether a fresh SSH dial could succeed.
+		if remoteErr.Phase == tools.RemoteTransportOutcomeUnknown {
+			retryable = false
+		}
+		h.emit("agent_done", WebDoneData{
+			Error: summary, Detail: detail,
+			Code: code, ErrorKind: "remote_connection",
+			Kind: remoteErr.Kind, Phase: string(remoteErr.Phase),
+			Retryable: &retryable,
+		})
 		return
 	}
 	// Raw run errors (eino NodeRunError wrapping go-openai API errors) are too
