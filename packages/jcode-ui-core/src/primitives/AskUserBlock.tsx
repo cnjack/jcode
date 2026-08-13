@@ -100,8 +100,16 @@ export function AskUserBlock({ tool, className, renderPending, renderResolved }:
         other: { ...s.other, [key]: '' },
       }))
       setSubmitError(undefined)
+      // Single-select answers can advance immediately. The last question stays
+      // put so the user can still edit or hit Submit themselves.
+      if (!q.multi_select) {
+        const index = questions.findIndex((item) => keyOf(item) === key)
+        if (index >= 0 && index < questions.length - 1) {
+          setActiveIndex(index + 1)
+        }
+      }
     },
-    [isSubmitting, keyOf],
+    [isSubmitting, keyOf, questions, setActiveIndex],
   )
 
   const setOther = useCallback(

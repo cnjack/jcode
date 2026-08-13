@@ -77,7 +77,6 @@ export function Thread({
         ? items.filter((item) => !(
             item.kind === 'tool' &&
             item.data.name === 'ask_user' &&
-            !!item.data.askUserId &&
             item.data.status === 'running' &&
             !item.data.output
           ))

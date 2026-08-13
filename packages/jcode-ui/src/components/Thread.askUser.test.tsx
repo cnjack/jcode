@@ -61,4 +61,20 @@ describe('Thread docked Ask User behavior', () => {
     expect(receipt).toBeTruthy()
     expect(receipt?.closest('.jcode-standalone-tool')?.classList.contains('jcode-gutter')).toBe(true)
   })
+
+  it('hides an in-flight Ask User even before askUserId is attached', () => {
+    const items: ThreadItem[] = [
+      { kind: 'message', seq: 1, data: { id: 'm1', role: 'assistant', content: 'Need a choice.', timestamp: 1 } },
+      { kind: 'tool', seq: 2, data: askTool({ askUserId: undefined, askUserQuestions: undefined }) },
+    ]
+    render(
+      <RuntimeProvider runtime={createMockRuntime({ items, isRunning: true })}>
+        <Thread virtualize={false} hidePendingAskUser renderPending={() => null} />
+      </RuntimeProvider>,
+    )
+
+    expect(screen.getByText('Need a choice.')).toBeTruthy()
+    expect(screen.queryByText('Hidden pending question?')).toBeNull()
+    expect(document.querySelector('.jcode-ask-user')).toBeNull()
+  })
 })

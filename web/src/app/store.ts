@@ -594,6 +594,28 @@ const chatSlice = createSlice({
       // starts a fresh assistant message).
       streamingText = ''
       streamingMsgId = ''
+      // ask_user_request can arrive before the matching tool_call and already
+      // insert a pending row. Fold this event into that row so the dock and
+      // timeline do not each render their own card.
+      if (a.payload.name === 'ask_user') {
+        for (let i = s.timeline.length - 1; i >= 0; i--) {
+          const item = s.timeline[i]
+          if (item.kind !== 'tool' || item.data.name !== 'ask_user') continue
+          if (item.data.status !== 'running' || item.data.output) continue
+          if (item.data.toolCallID && a.payload.toolCallID && item.data.toolCallID !== a.payload.toolCallID) continue
+          item.data.toolCallID = a.payload.toolCallID ?? item.data.toolCallID
+          if (a.payload.args) item.data.args = a.payload.args
+          item.data.displayInfo = a.payload.displayInfo ?? item.data.displayInfo
+          item.data.batchId = a.payload.batchId ?? item.data.batchId
+          item.data.batchIndex = a.payload.batchIndex ?? item.data.batchIndex
+          item.data.batchSize = a.payload.batchSize ?? item.data.batchSize
+          item.data.startedAt = a.payload.startedAt ?? item.data.startedAt
+          item.data.surface = a.payload.surface ?? item.data.surface
+          item.data.phase = a.payload.phase ?? item.data.phase
+          item.data.operationID = a.payload.operationID ?? item.data.operationID
+          return
+        }
+      }
       const tc: ToolCall = {
         id: genId('tool'),
         name: a.payload.name,

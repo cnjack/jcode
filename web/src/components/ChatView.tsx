@@ -167,7 +167,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
       <div className="chat-content-layer min-h-0 flex-1">
         <Thread
           overscanBottom={28}
-          hidePendingAskUser={!!pendingAskUser}
+          hidePendingAskUser
           renderPending={pendingAskUser ? () => null : () => <PendingIndicator />}
         />
       </div>

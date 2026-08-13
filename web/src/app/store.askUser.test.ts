@@ -38,6 +38,32 @@ describe('formatAskUserOutput', () => {
   })
 })
 
+describe('addToolCall ask_user merge', () => {
+  it('folds a late tool_call into the pending ask_user_request row', () => {
+    store.dispatch(
+      chatActions.attachAskUser({
+        toolName: 'ask_user',
+        askUserId: 'ask-merge',
+        questions: [{ header: 'Place', question: 'Where?' }],
+      }),
+    )
+    store.dispatch(
+      chatActions.addToolCall({
+        name: 'ask_user',
+        args: JSON.stringify({ questions: [{ header: 'Place', question: 'Where?' }] }),
+        toolCallID: 'tc-merge',
+      }),
+    )
+
+    const tools = store.getState().chat.timeline.filter((item) => item.kind === 'tool')
+    expect(tools).toHaveLength(1)
+    if (tools[0]?.kind !== 'tool') return
+    expect(tools[0].data.askUserId).toBe('ask-merge')
+    expect(tools[0].data.toolCallID).toBe('tc-merge')
+    expect(tools[0].data.status).toBe('running')
+  })
+})
+
 describe('resolveAskUserItem', () => {
   it('marks the matching ask_user tool done and clears pending markers', () => {
     store.dispatch(
