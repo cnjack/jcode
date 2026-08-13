@@ -2,6 +2,8 @@ package model
 
 import (
 	"testing"
+
+	"github.com/cnjack/jcode/internal/config"
 )
 
 // TestLookupModel tests model lookup from the generated registry.
@@ -81,5 +83,90 @@ func TestHasProvider(t *testing.T) {
 	// Test with non-existent provider
 	if r.HasProvider("definitely-not-a-real-provider-123") {
 		t.Error("Expected HasProvider to return false for non-existent provider")
+	}
+}
+
+func TestMergeConfigProvidersInheritsGrokFamilyImageSupport(t *testing.T) {
+	registry := NewModelRegistryWithConfig(&config.Config{
+		Providers: map[string]*config.ProviderConfig{
+			"xai": {
+				CustomModels: []config.CustomModelConfig{{
+					ID: "grok-4.6", Name: "Grok 4.6", ToolCall: true, Managed: true,
+				}},
+			},
+		},
+	})
+	_, got, ok := registry.LookupModel("xai", "grok-4.6")
+	if !ok || got == nil {
+		t.Fatal("managed grok-4.6 was not merged")
+	}
+	if !got.Attachment || !got.SupportsImageInput() {
+		t.Fatalf("grok-4.6 should inherit grok-4.5 image support: %#v", got)
+	}
+	if !got.Reasoning || got.Limit == nil || got.Limit.Context <= 0 {
+		t.Fatalf("grok-4.6 should inherit grok-4.5 reasoning/context: %#v", got)
+	}
+}
+
+func TestRelatedRegistryModelDoesNotMatchImagineIDs(t *testing.T) {
+	provider := NewModelRegistry().GetProvider("xai")
+	if RelatedRegistryModel(provider, "grok-imagine-image") != nil {
+		t.Fatal("image-generation ids must not inherit chat-family metadata")
+	}
+	related := RelatedRegistryModel(provider, "grok-4.6")
+	if related == nil || related.ID != "grok-4.5" {
+		t.Fatalf("related grok-4.6 = %#v", related)
+	}
+}
+
+func TestRelatedRegistryModelIgnoresLiveCustomSiblings(t *testing.T) {
+	registry := NewModelRegistry()
+	provider := registry.GetProvider("xai")
+	if provider == nil {
+		t.Fatal("xai missing")
+	}
+	provider.Models["grok-4.7"] = &RegistryModel{
+		ID: "grok-4.7", Name: "Custom Grok 4.7", DefaultEnabled: true,
+	}
+	related := RelatedRegistryModel(provider, "grok-4.6")
+	if related == nil || related.ID != "grok-4.5" {
+		t.Fatalf("related grok-4.6 should stay on baked-in grok-4.5, got %#v", related)
+	}
+}
+
+func TestRelatedBakedInModelPicksClosestEnabledSibling(t *testing.T) {
+	models := map[string]*RegistryModel{
+		"grok-4.1": {ID: "grok-4.1", DefaultEnabled: true},
+		"grok-4.5": {ID: "grok-4.5", DefaultEnabled: true},
+		"grok-4.8": {ID: "grok-4.8", DefaultEnabled: false},
+	}
+	got := relatedBakedInModel(models, "grok-4.6")
+	if got == nil || got.ID != "grok-4.5" {
+		t.Fatalf("closest sibling for grok-4.6 = %#v", got)
+	}
+
+	models["grok-4.5-preview"] = &RegistryModel{ID: "grok-4.5-preview", DefaultEnabled: true}
+	got = relatedBakedInModel(models, "grok-4.5-new")
+	if got == nil || got.ID != "grok-4.5" {
+		t.Fatalf("tied versions should pick lexicographically first enabled id, got %#v", got)
+	}
+}
+
+func TestMergeConfigProvidersCopiesModalitiesWhenLiveAttachmentIsSet(t *testing.T) {
+	registry := NewModelRegistryWithConfig(&config.Config{
+		Providers: map[string]*config.ProviderConfig{
+			"xai": {
+				CustomModels: []config.CustomModelConfig{{
+					ID: "grok-4.6", Name: "Grok 4.6", ToolCall: true, Managed: true, Attachment: true,
+				}},
+			},
+		},
+	})
+	_, got, ok := registry.LookupModel("xai", "grok-4.6")
+	if !ok || got == nil {
+		t.Fatal("managed grok-4.6 was not merged")
+	}
+	if !got.Attachment || !got.SupportsImageInput() {
+		t.Fatalf("live attachment should still copy related modalities: %#v", got)
 	}
 }

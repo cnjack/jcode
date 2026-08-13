@@ -1,6 +1,10 @@
 package model
 
-import "testing"
+import (
+	"testing"
+
+	openai "github.com/sashabaranov/go-openai"
+)
 
 func TestTokenUsage_AddAndGetFull(t *testing.T) {
 	u := &TokenUsage{}
@@ -136,6 +140,9 @@ func TestTokenUsage_Reset(t *testing.T) {
 	u := &TokenUsage{}
 	u.Add(AddParams{Prompt: 100, Completion: 20, Total: 120, Cached: 80, Reasoning: 5})
 	u.AddByModel("m", 100, 20, 120)
+	if u.GetLastModel() != "m" {
+		t.Errorf("GetLastModel() = %q, want m", u.GetLastModel())
+	}
 	u.Reset()
 	if got := u.GetFull(); got.PromptTokens != 0 || got.CachedTokens != 0 || got.CallCount != 0 {
 		t.Errorf("after Reset GetFull() = %+v, want zero", got)
@@ -145,5 +152,35 @@ func TestTokenUsage_Reset(t *testing.T) {
 	}
 	if u.CacheObserved() {
 		t.Errorf("after Reset CacheObserved() should be false")
+	}
+	if u.GetLastModel() != "" {
+		t.Errorf("after Reset GetLastModel() = %q, want empty", u.GetLastModel())
+	}
+}
+
+func TestExtractUsage_ReadsAPITotalAndDetails(t *testing.T) {
+	got := extractUsage(openai.Usage{
+		PromptTokens:     19,
+		CompletionTokens: 10,
+		TotalTokens:      29,
+		PromptTokensDetails: &openai.PromptTokensDetails{
+			CachedTokens: 4,
+		},
+		CompletionTokensDetails: &openai.CompletionTokensDetails{
+			ReasoningTokens: 3,
+		},
+	})
+	if got.Prompt != 19 || got.Completion != 10 || got.Total != 29 || got.Cached != 4 || got.Reasoning != 3 {
+		t.Errorf("extractUsage() = %+v, want prompt/completion/total from API and cached/reasoning from details", got)
+	}
+	if !got.CacheDetailsPresent {
+		t.Error("CacheDetailsPresent = false, want true when prompt_tokens_details is present")
+	}
+}
+
+func TestExtractUsage_DerivesTotalWhenAPIOmitsIt(t *testing.T) {
+	got := extractUsage(openai.Usage{PromptTokens: 19, CompletionTokens: 10})
+	if got.Total != 29 {
+		t.Errorf("extractUsage() Total = %d, want 19+10 when API total_tokens is 0", got.Total)
 	}
 }

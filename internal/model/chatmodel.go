@@ -42,6 +42,7 @@ type TokenUsage struct {
 	lastCached     int64
 	lastReasoning  int64
 	lastCacheWrite int64
+	lastModel      string
 	// cacheSeen is set (sticky) once the provider returns a prompt_tokens_details
 	// object, so CacheObserved can report "caching supported" even on a 0-hit
 	// turn. Cleared by Reset (a session boundary), never by ResetContext.
@@ -212,6 +213,7 @@ func (t *TokenUsage) Reset() {
 	atomic.StoreInt64(&t.turnBaseCached, 0)
 	t.mu.Lock()
 	t.byModel = nil
+	t.lastModel = ""
 	t.mu.Unlock()
 }
 
@@ -269,7 +271,15 @@ func (t *TokenUsage) AddByModel(model string, prompt, completion, total int) {
 		t.byModel = make(map[string]int64)
 	}
 	t.byModel[model] += int64(total)
+	t.lastModel = model
 	t.mu.Unlock()
+}
+
+// GetLastModel returns the model name of the last recorded API call.
+func (t *TokenUsage) GetLastModel() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.lastModel
 }
 
 // GetByModel returns a snapshot of per-model token totals.

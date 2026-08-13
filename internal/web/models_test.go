@@ -188,6 +188,84 @@ func TestEnableManagedModelPersistsRuntimeMetadata(t *testing.T) {
 	}
 }
 
+func TestManagedModelConfigFromLiveUsesXAIImagePrice(t *testing.T) {
+	got := managedModelConfigFromLive(model.NewModelRegistry(), "xai", providerauth.Model{
+		ID: "grok-4.6", Name: "grok-4.6", Vendor: "xai",
+		Protocol: providerauth.ProtocolResponses, Kind: providerauth.ModelKindChat,
+		Attachment: true, Context: 500000,
+	})
+	if !got.Attachment || got.Context != 500000 || !got.Reasoning || !got.Managed {
+		t.Fatalf("live grok-4.6 metadata = %#v", got)
+	}
+	if got.Name != "grok-4.6" {
+		t.Fatalf("related sibling leaked display name: %#v", got)
+	}
+}
+
+func TestManagedModelConfigFromLiveKeepsExactRegistryName(t *testing.T) {
+	got := managedModelConfigFromLive(model.NewModelRegistry(), "xai", providerauth.Model{
+		ID: "grok-4.5", Name: "grok-4.5", Vendor: "xai",
+		Protocol: providerauth.ProtocolResponses, Kind: providerauth.ModelKindChat,
+	})
+	if got.Name != "Grok 4.5" {
+		t.Fatalf("exact grok-4.5 should keep registry name, got %#v", got)
+	}
+}
+
+func TestListModelsShowsImageSupportForPersistedGrok46(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &config.Config{
+		Model: "xai/grok-4.6",
+		Providers: map[string]*config.ProviderConfig{
+			"xai": {
+				Auth: &config.ProviderAuthBinding{Method: string(providerauth.MethodXAIOAuth), AccountID: "account-1"},
+				CustomModels: []config.CustomModelConfig{{
+					ID: "grok-4.6", Name: "Grok 4.6", ToolCall: true, Managed: true,
+				}},
+			},
+		},
+	}
+	s := &Server{cfg: cfg, registry: model.NewModelRegistryWithConfig(cfg)}
+	rec := httptest.NewRecorder()
+	s.handleListModels(rec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Providers []struct {
+			ID     string `json:"id"`
+			Models []struct {
+				ID              string   `json:"id"`
+				ImageSupport    bool     `json:"image_support"`
+				InputModalities []string `json:"input_modalities"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range response.Providers {
+		if provider.ID != "xai" {
+			continue
+		}
+		for _, item := range provider.Models {
+			if item.ID != "grok-4.6" {
+				continue
+			}
+			if !item.ImageSupport {
+				t.Fatalf("grok-4.6 image_support = false: %#v", item)
+			}
+			for _, modality := range item.InputModalities {
+				if modality == "image" {
+					return
+				}
+			}
+			t.Fatalf("grok-4.6 input_modalities missing image: %#v", item)
+		}
+	}
+	t.Fatal("xai/grok-4.6 missing from /api/models")
+}
+
 func TestEnsureManagedModelRefreshesProviderRouting(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	err := config.SaveConfig(&config.Config{

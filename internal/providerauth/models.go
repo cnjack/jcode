@@ -204,12 +204,15 @@ func parseManagedModel(method Method, value any, fallbackID string) (Model, bool
 		name = id
 	}
 	vendor := firstModelString(object, "vendor", "owned_by", "ownedBy", "provider", "owner")
+	kind := kindForManagedModel(method, id)
 	return Model{
-		ID:       id,
-		Name:     name,
-		Vendor:   vendor,
-		Protocol: protocolForManagedModel(method, vendor),
-		Kind:     kindForManagedModel(method, id),
+		ID:         id,
+		Name:       name,
+		Vendor:     vendor,
+		Protocol:   protocolForManagedModel(method, vendor),
+		Kind:       kind,
+		Attachment: managedModelAttachment(kind, object),
+		Context:    firstModelInt(object, "context_length", "context_window", "max_context_length"),
 	}, true
 }
 
@@ -220,6 +223,78 @@ func firstModelString(object map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstModelNumber(object map[string]any, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		switch value := object[key].(type) {
+		case json.Number:
+			parsed, err := value.Float64()
+			if err == nil {
+				return parsed, true
+			}
+		case float64:
+			return value, true
+		case int:
+			return float64(value), true
+		case int64:
+			return float64(value), true
+		}
+	}
+	return 0, false
+}
+
+func firstModelInt(object map[string]any, keys ...string) int {
+	value, ok := firstModelNumber(object, keys...)
+	if !ok || value <= 0 {
+		return 0
+	}
+	return int(value)
+}
+
+func managedModelAttachment(kind ModelKind, object map[string]any) bool {
+	if kind != ModelKindChat || object == nil {
+		return false
+	}
+	if price, ok := firstModelNumber(object, "prompt_image_token_price"); ok && price > 0 {
+		return true
+	}
+	if flag, ok := object["supports_image"].(bool); ok && flag {
+		return true
+	}
+	if flag, ok := object["vision"].(bool); ok && flag {
+		return true
+	}
+	return managedModelListsImageInput(object)
+}
+
+func managedModelListsImageInput(object map[string]any) bool {
+	for _, key := range []string{"input_modalities", "modalities"} {
+		switch value := object[key].(type) {
+		case []any:
+			if anyStringEquals(value, "image") {
+				return true
+			}
+		case map[string]any:
+			if anyStringEquals(value["input"], "image") || anyStringEquals(value["input_modalities"], "image") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func anyStringEquals(value any, target string) bool {
+	list, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range list {
+		if text, ok := item.(string); ok && strings.EqualFold(strings.TrimSpace(text), target) {
+			return true
+		}
+	}
+	return false
 }
 
 func protocolForManagedModel(method Method, vendor string) Protocol {

@@ -272,8 +272,162 @@ func (r *ModelRegistry) MergeConfigProviders(providers map[string]*config.Provid
 			if cm.Context > 0 {
 				rm.Limit = &ModelLimit{Context: cm.Context}
 			}
+			// Managed rows persist only what the live catalog last wrote. A newer
+			// Grok/Codex ID often lands before the static registry lists it, so
+			// omitted capabilities inherit from the closest baked-in sibling
+			// (grok-4.6 ← grok-4.5) instead of rendering as text-only.
+			if cm.Managed {
+				applyRelatedManagedModelDefaults(rm, RelatedRegistryModel(prov, cm.ID))
+			}
 			prov.Models[cm.ID] = rm
 		}
+	}
+}
+
+// RelatedRegistryModel returns a baked-in sibling that shares a versioned
+// family key with modelID. grok-4.6 matches grok-4.5; grok-imagine-image
+// does not. Used when a live managed catalog lists an ID the static
+// registry has not been updated to include yet.
+//
+// Candidates come from immutable generatedProviders, never from the live
+// provider.Models map, so an earlier custom row cannot pollute inheritance.
+func RelatedRegistryModel(provider *RegistryProvider, modelID string) *RegistryModel {
+	if provider == nil {
+		return nil
+	}
+	baked := generatedProviders[provider.ID]
+	if baked == nil {
+		return nil
+	}
+	return relatedBakedInModel(baked.Models, modelID)
+}
+
+func relatedBakedInModel(models map[string]*RegistryModel, modelID string) *RegistryModel {
+	key := managedModelFamilyKey(modelID)
+	if key == "" || models == nil {
+		return nil
+	}
+	targetParts := managedModelVersionParts(modelID)
+	var related *RegistryModel
+	var relatedDist int
+	for _, candidate := range models {
+		if candidate == nil || candidate.ID == modelID || managedModelFamilyKey(candidate.ID) != key {
+			continue
+		}
+		dist := managedModelVersionDistance(managedModelVersionParts(candidate.ID), targetParts)
+		if !preferRelatedModel(related, relatedDist, candidate, dist) {
+			continue
+		}
+		related = candidate
+		relatedDist = dist
+	}
+	return related
+}
+
+func preferRelatedModel(current *RegistryModel, currentDist int, candidate *RegistryModel, candidateDist int) bool {
+	if current == nil {
+		return true
+	}
+	if candidateDist != currentDist {
+		return candidateDist < currentDist
+	}
+	if candidate.DefaultEnabled != current.DefaultEnabled {
+		return candidate.DefaultEnabled
+	}
+	return candidate.ID < current.ID
+}
+
+func managedModelFamilyKey(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	for i := 0; i < len(id); i++ {
+		if id[i] != '-' || i+1 >= len(id) || id[i+1] < '0' || id[i+1] > '9' {
+			continue
+		}
+		end := i + 1
+		for end < len(id) && id[end] >= '0' && id[end] <= '9' {
+			end++
+		}
+		return id[:end]
+	}
+	return ""
+}
+
+func managedModelVersionParts(id string) []int {
+	id = strings.ToLower(strings.TrimSpace(id))
+	i := 0
+	for i < len(id) {
+		if id[i] == '-' && i+1 < len(id) && id[i+1] >= '0' && id[i+1] <= '9' {
+			i++
+			break
+		}
+		i++
+	}
+	var parts []int
+	for i < len(id) {
+		if id[i] < '0' || id[i] > '9' {
+			if id[i] == '.' || id[i] == '-' {
+				i++
+				continue
+			}
+			break
+		}
+		n := 0
+		for i < len(id) && id[i] >= '0' && id[i] <= '9' {
+			n = n*10 + int(id[i]-'0')
+			i++
+		}
+		parts = append(parts, n)
+	}
+	return parts
+}
+
+func managedModelVersionDistance(a, b []int) int {
+	n := len(a)
+	if len(b) > n {
+		n = len(b)
+	}
+	dist := 0
+	weights := [...]int{1_000_000, 1_000, 1}
+	for i := 0; i < n; i++ {
+		av, bv := 0, 0
+		if i < len(a) {
+			av = a[i]
+		}
+		if i < len(b) {
+			bv = b[i]
+		}
+		d := av - bv
+		if d < 0 {
+			d = -d
+		}
+		w := 1
+		if i < len(weights) {
+			w = weights[i]
+		}
+		dist += d * w
+	}
+	return dist
+}
+
+func applyRelatedManagedModelDefaults(dst *RegistryModel, related *RegistryModel) {
+	if dst == nil || related == nil {
+		return
+	}
+	if related.Attachment {
+		dst.Attachment = true
+		if dst.Modalities == nil && related.Modalities != nil {
+			dst.Modalities = deepCopyModel(related).Modalities
+		}
+	}
+	if !dst.Reasoning && related.Reasoning {
+		dst.Reasoning = true
+		if len(dst.ReasoningOptions) == 0 && len(related.ReasoningOptions) > 0 {
+			dst.ReasoningOptions = append([]ReasoningOption(nil), related.ReasoningOptions...)
+		}
+	}
+	if dst.Limit == nil && related.Limit != nil && related.Limit.Context > 0 {
+		limitCopy := *related.Limit
+		dst.Limit = &limitCopy
 	}
 }
 
