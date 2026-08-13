@@ -197,6 +197,19 @@ func TestManagedModelConfigFromLiveUsesXAIImagePrice(t *testing.T) {
 	if !got.Attachment || got.Context != 500000 || !got.Reasoning || !got.Managed {
 		t.Fatalf("live grok-4.6 metadata = %#v", got)
 	}
+	if got.Name != "grok-4.6" {
+		t.Fatalf("related sibling leaked display name: %#v", got)
+	}
+}
+
+func TestManagedModelConfigFromLiveKeepsExactRegistryName(t *testing.T) {
+	got := managedModelConfigFromLive(model.NewModelRegistry(), "xai", providerauth.Model{
+		ID: "grok-4.5", Name: "grok-4.5", Vendor: "xai",
+		Protocol: providerauth.ProtocolResponses, Kind: providerauth.ModelKindChat,
+	})
+	if got.Name != "Grok 4.5" {
+		t.Fatalf("exact grok-4.5 should keep registry name, got %#v", got)
+	}
 }
 
 func TestListModelsShowsImageSupportForPersistedGrok46(t *testing.T) {

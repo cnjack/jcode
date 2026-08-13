@@ -517,10 +517,16 @@ func managedModelConfigFromLive(
 	if metadata == nil {
 		return result
 	}
-	if result.Name == live.ID && metadata.Name != "" {
-		result.Name = metadata.Name
+	// Exact registry rows may supply a nicer display name. Related siblings
+	// only donate capabilities — grok-4.6 must not be labeled "Grok 4.5".
+	if metadata.ID == live.ID {
+		if result.Name == live.ID && metadata.Name != "" {
+			result.Name = metadata.Name
+		}
+		result.ToolCall = metadata.ToolCall
+	} else if metadata.ToolCall {
+		result.ToolCall = true
 	}
-	result.ToolCall = metadata.ToolCall
 	if metadata.Reasoning {
 		result.Reasoning = true
 	}
