@@ -818,7 +818,15 @@ func toOpenAIMessages(input []*schema.Message, vision bool) []openai.ChatComplet
 			continue
 		}
 		if msg.Role != schema.Tool {
-			msgs = append(msgs, toOpenAIMessage(msg, vision))
+			converted := toOpenAIMessage(msg, vision)
+			// An interrupted reasoning stream can leave a runtime-only assistant
+			// prefix with reasoning_content but no content or tool_calls. DeepSeek
+			// (and other strict OpenAI-compatible APIs) reject that shape. It is
+			// not a completed conversation turn, so omit it at the provider boundary.
+			if converted.Role != string(schema.Assistant) ||
+				converted.Content != "" || len(converted.MultiContent) > 0 || len(converted.ToolCalls) > 0 {
+				msgs = append(msgs, converted)
+			}
 			i++
 			continue
 		}
@@ -839,6 +847,12 @@ func toOpenAIMessages(input []*schema.Message, vision bool) []openai.ChatComplet
 				// synthetic user message below, so this is not an omission and must
 				// not carry the non-vision warning.
 				textResult.Content = collapsedInputText(toolMsg.UserInputMultiContent, false)
+			}
+			// go-openai omits an empty string because content has `omitempty`, but
+			// DeepSeek requires every tool message to carry content. Keep the model
+			// history structurally valid without changing the UI-visible tool result.
+			if textResult.Content == "" {
+				textResult.Content = "[Tool returned no output]"
 			}
 			if !attachVisuals || !hasInputImage(toolMsg) {
 				msgs = append(msgs, textResult)

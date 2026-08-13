@@ -83,6 +83,27 @@ func TestToOpenAIMessagesVisionDisabledKeepsTextOnly(t *testing.T) {
 	}
 }
 
+func TestToOpenAIMessagesDropsReasoningOnlyAssistant(t *testing.T) {
+	got := toOpenAIMessages([]*schema.Message{
+		schema.UserMessage("before stop"),
+		{Role: schema.Assistant, ReasoningContent: "unfinished private reasoning"},
+		schema.UserMessage("continue after stop"),
+	}, false)
+	if len(got) != 2 || got[0].Role != string(schema.User) || got[1].Role != string(schema.User) {
+		t.Fatalf("messages = %#v, want the invalid assistant prefix omitted", got)
+	}
+}
+
+func TestToOpenAIMessagesSuppliesContentForEmptyToolResult(t *testing.T) {
+	got := toOpenAIMessages([]*schema.Message{
+		schema.ToolMessage("", "call-empty", schema.WithToolName("empty_tool")),
+	}, false)
+	if len(got) != 1 || got[0].Role != string(schema.Tool) ||
+		got[0].ToolCallID != "call-empty" || got[0].Content == "" {
+		t.Fatalf("tool message = %#v, want required content and tool_call_id", got)
+	}
+}
+
 func TestToOpenAIMessagesKeepsCurrentImageAfterSystemReminder(t *testing.T) {
 	got := toOpenAIMessages([]*schema.Message{
 		multimodalToolMessage("PNG"),

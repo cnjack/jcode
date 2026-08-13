@@ -184,6 +184,12 @@ func TestRunFailedResponsesStreamDoesNotPersistOrphanOpaqueReasoning(t *testing.
 			if result.Err == nil {
 				t.Fatal("Run unexpectedly succeeded")
 			}
+			if got := len(result.Messages); got != btoi(test.wantAssistant) {
+				t.Fatalf("live assistant messages = %d, want %d", got, btoi(test.wantAssistant))
+			}
+			if test.wantAssistant && result.Messages[0].Content != test.content {
+				t.Fatalf("live assistant = %#v, want content %q", result.Messages[0], test.content)
+			}
 
 			entries, err := session.LoadSession(id)
 			if err != nil {
@@ -211,4 +217,11 @@ func TestRunFailedResponsesStreamDoesNotPersistOrphanOpaqueReasoning(t *testing.
 			}
 		})
 	}
+}
+
+func btoi(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }

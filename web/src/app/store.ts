@@ -771,20 +771,10 @@ const chatSlice = createSlice({
           item.data.awaitingApproval = undefined
         }
       }
-      if (a.payload?.stopped) {
-        // Manual stop — a calm muted notice, not an error card.
-        s.timeline.push({
-          kind: 'message',
-          data: {
-            id: genId('sys'),
-            role: 'system',
-            content: 'Stopped by user',
-            timestamp: Date.now(),
-            level: 'notice',
-          },
-          seq: nextSeq(),
-        })
-      } else if (a.payload?.error) {
+      // A manual stop (a.payload?.stopped) intentionally adds nothing to the
+      // timeline — the streaming indicator disappearing is enough feedback; a
+      // "Stopped by user" system card felt like noise.
+      if (a.payload?.error) {
         s.timeline.push({
           kind: 'message',
           data: {
