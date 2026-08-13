@@ -24,6 +24,7 @@ import type {
   TodoItem,
   QueuedMessage,
   AskUserQuestion,
+  AskUserAnswer,
 } from 'jcode-ui-core'
 import { api, isAPIError } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
@@ -457,6 +458,14 @@ function applyResolvedToolFields(tool: ToolCall, fields: ResolvedToolFields): vo
   // clears the awaiting-approval highlight.
   tool.denied = fields.denied || undefined
   tool.awaitingApproval = undefined
+  // A finished ask_user is no longer interactive — drop the pending markers so
+  // the docked card cannot reappear if a late tool_result races the optimistic
+  // resolve path.
+  if (tool.name === 'ask_user' || fields.name === 'ask_user') {
+    tool.askUserId = undefined
+    tool.askUserQuestions = undefined
+    delete (tool as ToolCall & { askUserTaskId?: string }).askUserTaskId
+  }
   if (fields.streams) tool.streams = fields.streams
   if (fields.meta) tool.meta = fields.meta
   // Merge the event-level duration into meta when meta lacks one (falling back
@@ -897,8 +906,36 @@ const chatSlice = createSlice({
         }
       }
     },
+    // Optimistically settle the docked ask_user card the moment /api/ask
+    // succeeds. Waiting for the later tool_result leaves the card stuck in
+    // "Submitting…" while the agent is already unblocked.
+    resolveAskUserItem(s, a: { payload: { id: string; answers: AskUserAnswer[] } }) {
+      for (let i = s.timeline.length - 1; i >= 0; i--) {
+        const item = s.timeline[i]
+        if (item.kind !== 'tool' || item.data.askUserId !== a.payload.id) continue
+        item.data.status = 'done'
+        item.data.output = formatAskUserOutput(a.payload.answers)
+        item.data.askUserId = undefined
+        item.data.askUserQuestions = undefined
+        delete (item.data as ToolCall & { askUserTaskId?: string }).askUserTaskId
+        return
+      }
+    },
   },
 })
+
+/** Mirror the ask_user tool's formatBatchResponse so optimistic receipts match
+ *  the eventual tool_result / session replay text. */
+export function formatAskUserOutput(answers: AskUserAnswer[]): string {
+  if (answers.length === 0) return 'The user did not provide any answers.'
+  if (answers.length === 1) {
+    const ans = answers[0]
+    const text = ans.answer || (ans.selected?.length ? ans.selected.join(', ') : '')
+    if (!text) return 'The user did not provide an answer.'
+    return `User's answer: ${text}`
+  }
+  return JSON.stringify({ answers })
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // session slice — sessions/tasks list, current session, project
@@ -1627,7 +1664,7 @@ export const resolveApprovalOption = createAsyncThunk(
 
 export const submitAskUser = createAsyncThunk(
   'askUser/submit',
-  async (payload: { id: string; answers: import('jcode-ui-core').AskUserAnswer[] }, { dispatch, getState }) => {
+  async (payload: { id: string; answers: AskUserAnswer[] }, { dispatch, getState }) => {
     const state = getState() as RootState
     let taskId: string | undefined
     for (const item of state.chat.timeline) {
@@ -1638,6 +1675,8 @@ export const submitAskUser = createAsyncThunk(
     }
     try {
       await api.askUser(payload.id, payload.answers, taskId)
+      // Hide the docked card immediately; the real tool_result may arrive later.
+      dispatch(chatActions.resolveAskUserItem({ id: payload.id, answers: payload.answers }))
     } catch (error) {
       // surface in timeline as a system message
       dispatch(chatActions.addMessage({ role: 'system', content: 'Failed to submit answer', level: 'error' }))
