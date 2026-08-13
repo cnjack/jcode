@@ -26,7 +26,18 @@ export function useAutoScroll<T extends HTMLElement>(threshold = 80) {
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const el = ref.current
     if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior })
+    // A scroll container carrying CSS `scroll-behavior: smooth` (the Thread's
+    // `scroll-smooth` class) turns `behavior: 'auto'` into an *animated* scroll.
+    // Mid-animation scroll events flip `isAtBottomRef` false before the target
+    // lands, which then suppresses the re-measure follow-up — conversation
+    // switches strand partway up. Assigning `scrollTop` directly is always
+    // instant and unaffected by the CSS, which is what 'auto' is documented to
+    // mean here. Only an explicit 'smooth' animates.
+    if (behavior === 'smooth') {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    } else {
+      el.scrollTop = el.scrollHeight
+    }
     isAtBottomRef.current = true
   }, [])
 

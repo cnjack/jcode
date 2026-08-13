@@ -643,15 +643,16 @@ func runInner(
 				// A failed stream may contain only a prefix of tool-call arguments.
 				// Preserve text already shown to the user, but never persist or
 				// expose incomplete calls as executable conversation history.
-				if messageText.Len() > 0 || reasoningText.Len() > 0 || len(messageExtra) > 0 {
+				// A reasoning-only prefix is not a valid assistant turn for
+				// OpenAI-compatible chat APIs (DeepSeek requires content or
+				// tool_calls). It also was never shown by the handler, so retaining
+				// it would only poison the next request after a user stop.
+				if messageText.Len() > 0 {
 					partial := &schema.Message{
 						Role: schema.Assistant, Content: messageText.String(),
 						ReasoningContent: reasoningText.String(), Extra: messageExtra,
 					}
-					// Encrypted reasoning without visible output is not a complete
-					// assistant turn. Keep the live partial for diagnostics, but do
-					// not leave an orphan continuation item in the session journal.
-					if rec != nil && messageText.Len() > 0 {
+					if rec != nil {
 						rec.RecordAssistantMessage(partial)
 					}
 					result.Messages = append(result.Messages, partial)

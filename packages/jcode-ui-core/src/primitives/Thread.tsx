@@ -11,7 +11,7 @@
  * `virtualize={false}` for short/replay timelines where DOM simplicity matters.
  */
 
-import { Fragment, useMemo } from 'react'
+import { Fragment, useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useRuntimeState } from '../runtime/context.js'
@@ -159,7 +159,30 @@ function VirtualizedThread({
   autoScroll,
   containerRef,
 }: VirtualizedThreadProps): ReactNode {
-  const parentRef = autoScroll.ref
+  const { ref: parentRef, getIsAtBottom, onScroll, scrollToBottom } = autoScroll
+  // Geometry alone cannot identify user intent while virtual rows are being
+  // measured: as the estimated total grows, the browser emits scroll events
+  // with a large temporary bottom gap. Keep the initial bottom lock until an
+  // actual upward user gesture releases it. Reaching the bottom manually arms
+  // the lock again for later streaming/measurement updates.
+  const followMeasurementsRef = useRef(true)
+  const userScrollDirectionRef = useRef<-1 | 0 | 1>(0)
+  const handleScroll = useCallback(() => {
+    onScroll()
+    // Do not re-arm during the first few pixels of an upward gesture: those
+    // events are still inside the bottom threshold. Only an explicit downward
+    // gesture that actually reaches the bottom restores measurement following.
+    if (userScrollDirectionRef.current > 0 && getIsAtBottom()) {
+      followMeasurementsRef.current = true
+    }
+  }, [getIsAtBottom, onScroll])
+  const releaseBottomLock = useCallback(() => {
+    userScrollDirectionRef.current = -1
+    followMeasurementsRef.current = false
+  }, [])
+  const rearmAtBottom = useCallback(() => {
+    if (getIsAtBottom()) followMeasurementsRef.current = true
+  }, [getIsAtBottom])
   // count includes the trailing pending row + overscan spacer when present.
   const trailingCount = (isRunning && renderPending ? 1 : 0) + (overscanBottom > 0 ? 1 : 0)
   const count = items.length + trailingCount
@@ -169,6 +192,16 @@ function VirtualizedThread({
     estimateSize: () => estimateSize,
     overscan: 8,
   })
+
+  // Pin to the true bottom once rows re-measure. On a freshly mounted thread
+  // (e.g. switching conversations) getTotalSize() starts at the row ESTIMATE and
+  // only converges after ResizeObserver measurements land — scrolling to the
+  // estimate would strand the view partway up. A layout effect closes each
+  // measurement gap before paint while the bottom lock remains armed.
+  const totalSize = rowVirtualizer.getTotalSize()
+  useLayoutEffect(() => {
+    if (followMeasurementsRef.current) scrollToBottom('auto')
+  }, [totalSize, scrollToBottom])
 
   return (
     // Wrapper: the scroll element MUST resolve to a concrete pixel height for the
@@ -193,7 +226,38 @@ function VirtualizedThread({
         className={className}
         data-jcode-ui=""
         role={role}
-        onScroll={autoScroll.onScroll}
+        onScroll={handleScroll}
+        onWheel={(event) => {
+          if (event.deltaY < 0) {
+            releaseBottomLock()
+          } else if (event.deltaY > 0) {
+            userScrollDirectionRef.current = 1
+          }
+        }}
+        onTouchMove={releaseBottomLock}
+        onTouchEnd={rearmAtBottom}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
+            releaseBottomLock()
+          } else if (
+            event.key === 'ArrowDown' ||
+            event.key === 'PageDown' ||
+            event.key === 'End'
+          ) {
+            userScrollDirectionRef.current = 1
+          }
+        }}
+        onPointerDown={(event) => {
+          // A scrollbar-thumb drag does not emit wheel/touch events. Detect a
+          // pointer in the classic scrollbar gutter without treating ordinary
+          // clicks inside message content as scroll intent.
+          const el = event.currentTarget
+          const scrollbarWidth = el.offsetWidth - el.clientWidth
+          if (scrollbarWidth <= 0) return
+          const rect = el.getBoundingClientRect()
+          if (event.clientX >= rect.right - scrollbarWidth) releaseBottomLock()
+        }}
+        onPointerUp={rearmAtBottom}
         style={
           {
             overflowY: 'auto',
