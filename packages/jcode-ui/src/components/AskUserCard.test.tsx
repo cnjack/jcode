@@ -69,7 +69,6 @@ describe('AskUserCard', () => {
     expect(screen.queryByText('(Recommended)')).toBeNull()
 
     fireEvent.click(screen.getByText('Home').closest('button')!)
-    fireEvent.click(primary(container))
     expect(screen.getByText('When should we start?')).toBeTruthy()
 
     const custom = screen.getByRole('textbox') as HTMLInputElement
@@ -116,15 +115,42 @@ describe('AskUserCard', () => {
   })
 
   it('scopes digit shortcuts to the visible question and ignores focused inputs', () => {
-    const { container } = renderCard(pendingTool(QUESTIONS.slice(0, 2)))
+    renderCard(pendingTool(QUESTIONS.slice(0, 2)))
     fireEvent.keyDown(window, { key: '2' })
-    expect(screen.getByText('Studio').closest('button')?.getAttribute('aria-pressed')).toBe('true')
-    fireEvent.click(primary(container))
+    expect(screen.getByText('When should we start?')).toBeTruthy()
 
     const custom = screen.getByRole('textbox')
     fireEvent.change(custom, { target: { value: 'Afternoon' } })
     fireEvent.keyDown(custom, { key: '1' })
     expect((custom as HTMLInputElement).value).toBe('Afternoon')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous question' }))
+    expect(screen.getByText('Studio').closest('button')?.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('auto-advances after a single-select choice but stays on the last question', () => {
+    const { container, runtime } = renderCard(pendingTool(QUESTIONS.slice(0, 2)))
+
+    fireEvent.click(screen.getByText('Studio').closest('button')!)
+    expect(screen.getByText('When should we start?')).toBeTruthy()
+    expect(runtime.calls).toEqual([])
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Tonight' } })
+    expect(screen.getByText('When should we start?')).toBeTruthy()
+    expect(primary(container).textContent).toContain('Submit')
+    expect(runtime.calls).toEqual([])
+  })
+
+  it('does not auto-advance multi-select questions', () => {
+    const { container } = renderCard()
+    fireEvent.click(screen.getByText('Home').closest('button')!)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Tonight' } })
+    fireEvent.click(primary(container))
+
+    expect(screen.getByText('What should we include?')).toBeTruthy()
+    fireEvent.click(screen.getByText('Tests').closest('button')!)
+    expect(screen.getByText('What should we include?')).toBeTruthy()
+    expect(screen.getByText('Tests').closest('button')?.getAttribute('aria-pressed')).toBe('true')
   })
 
   it('locks duplicate actions while submitting', () => {
