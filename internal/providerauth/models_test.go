@@ -1,7 +1,9 @@
 package providerauth
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"reflect"
@@ -64,6 +66,52 @@ func TestManagedModelParsersCoverProviderShapes(t *testing.T) {
 				t.Fatalf("models = %#v, want %#v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestParseManagedModelsReadsXAIImagePriceAndContext(t *testing.T) {
+	t.Parallel()
+	models := parseManagedModels(MethodXAIOAuth, map[string]any{"data": []any{
+		map[string]any{
+			"id": "grok-4.6", "owned_by": "xai",
+			"prompt_image_token_price": float64(20000),
+			"context_length":           float64(500000),
+		},
+		map[string]any{
+			"id":                       "grok-imagine-image-quality",
+			"prompt_image_token_price": float64(20000),
+		},
+	}})
+	if len(models) != 2 {
+		t.Fatalf("models = %#v", models)
+	}
+	if models[0].ID != "grok-4.6" || !models[0].Attachment || models[0].Context != 500000 ||
+		models[0].Kind != ModelKindChat {
+		t.Fatalf("chat model = %#v", models[0])
+	}
+	if models[1].ID != "grok-imagine-image-quality" || models[1].Attachment || models[1].Kind != ModelKindImage {
+		t.Fatalf("image model should not inherit chat vision: %#v", models[1])
+	}
+}
+
+func TestParseManagedModelsReadsXAIImagePriceFromJSONNumbers(t *testing.T) {
+	t.Parallel()
+	decoder := json.NewDecoder(bytes.NewReader([]byte(`{
+		"data":[{
+			"id":"grok-4.6",
+			"owned_by":"xai",
+			"prompt_image_token_price":20000,
+			"context_length":500000
+		}]
+	}`)))
+	decoder.UseNumber()
+	var payload any
+	if err := decoder.Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	models := parseManagedModels(MethodXAIOAuth, payload)
+	if len(models) != 1 || !models[0].Attachment || models[0].Context != 500000 {
+		t.Fatalf("json-number catalog = %#v", models)
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	langfuseacl "github.com/cloudwego/eino-ext/libs/acl/langfuse"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+
+	internalmodel "github.com/cnjack/jcode/internal/model"
 )
 
 type captureLangfuse struct {
@@ -45,6 +47,35 @@ func (c *captureLangfuse) CreateEvent(*langfuseacl.EventEventBody) (string, erro
 }
 
 func (c *captureLangfuse) Flush() {}
+
+func TestLangfuseUsageMapsCachedAndReasoning(t *testing.T) {
+	if got := langfuseUsage(nil); got != nil {
+		t.Fatalf("langfuseUsage(nil) = %#v, want nil", got)
+	}
+	if got := langfuseUsage(&internalmodel.TokenUsageDetail{}); got != nil {
+		t.Fatalf("langfuseUsage(zero) = %#v, want nil", got)
+	}
+
+	got := langfuseUsage(&internalmodel.TokenUsageDetail{
+		PromptTokens:     19,
+		CompletionTokens: 10,
+		TotalTokens:      29,
+		CachedTokens:     4,
+		ReasoningTokens:  3,
+	})
+	if got == nil {
+		t.Fatal("langfuseUsage returned nil")
+	}
+	if got.PromptTokens != 19 || got.CompletionTokens != 10 || got.TotalTokens != 29 {
+		t.Fatalf("usage totals = %+v", got)
+	}
+	if got.PromptTokensDetails == nil || got.PromptTokensDetails.CachedTokens != 4 {
+		t.Fatalf("cached details = %#v", got.PromptTokensDetails)
+	}
+	if got.CompletionTokensDetails == nil || got.CompletionTokensDetails.ReasoningTokens != 3 {
+		t.Fatalf("reasoning details = %#v", got.CompletionTokensDetails)
+	}
+}
 
 func TestWithNewTraceCapturesLatestPlainUserInput(t *testing.T) {
 	client := &captureLangfuse{}

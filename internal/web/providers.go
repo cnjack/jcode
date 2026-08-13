@@ -508,6 +508,7 @@ func managedModelConfigFromLive(
 	result := config.CustomModelConfig{
 		ID: live.ID, Name: live.Name, ToolCall: true, Managed: true,
 		Protocol: string(live.Protocol), Vendor: live.Vendor,
+		Attachment: live.Attachment, Context: live.Context,
 	}
 	if result.Name == "" {
 		result.Name = live.ID
@@ -520,9 +521,13 @@ func managedModelConfigFromLive(
 		result.Name = metadata.Name
 	}
 	result.ToolCall = metadata.ToolCall
-	result.Reasoning = metadata.Reasoning
-	result.Attachment = metadata.Attachment
-	if metadata.Limit != nil {
+	if metadata.Reasoning {
+		result.Reasoning = true
+	}
+	if metadata.Attachment {
+		result.Attachment = true
+	}
+	if result.Context == 0 && metadata.Limit != nil {
 		result.Context = metadata.Limit.Context
 	}
 	for _, option := range metadata.ReasoningOptions {
@@ -543,6 +548,7 @@ func findManagedModelMetadata(
 	if registry == nil {
 		return nil
 	}
+	var related *model.RegistryModel
 	for _, candidate := range []string{providerID, strings.ToLower(strings.TrimSpace(vendor))} {
 		if candidate == "" {
 			continue
@@ -551,6 +557,9 @@ func findManagedModelMetadata(
 			if metadata := provider.Models[modelID]; metadata != nil {
 				return metadata
 			}
+			if related == nil {
+				related = model.RelatedRegistryModel(provider, modelID)
+			}
 		}
 	}
 	for _, provider := range registry.ListProviders() {
@@ -558,7 +567,7 @@ func findManagedModelMetadata(
 			return metadata
 		}
 	}
-	return nil
+	return related
 }
 
 // maskSecret hides a secret for display: first 4 and last 4 chars for longer

@@ -95,6 +95,13 @@ type Model struct {
 	Vendor   string    `json:"vendor,omitempty"`
 	Protocol Protocol  `json:"protocol"`
 	Kind     ModelKind `json:"kind"`
+	// Attachment is true when the live catalog advertises image input, e.g.
+	// xAI's prompt_image_token_price. Chat UIs use this when the static
+	// registry has not yet listed the model.
+	Attachment bool `json:"attachment,omitempty"`
+	// Context is the provider-declared context window when the catalog
+	// includes one (xAI context_length). Zero means unknown.
+	Context int `json:"context,omitempty"`
 }
 
 // ModelKind separates inference catalogs that share /models but require

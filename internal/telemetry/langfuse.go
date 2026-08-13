@@ -2,7 +2,6 @@ package telemetry
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -279,34 +278,44 @@ func (mw *langfuseMiddleware) AfterModelRewriteState(ctx context.Context, state 
 	}
 
 	// Read per-call token usage from the context-local TokenUsage tracker.
+	// Langfuse bills and charts from usageDetails + model; cached/reasoning
+	// belong in the nested details objects, not string metadata.
 	var usage *langfuseacl.Usage
-	var metadata map[string]string
+	var modelName string
 	if tracker := internalmodel.TokenTrackerFromContext(ctx); tracker != nil {
-		if d := tracker.GetLastDetail(); d != nil && d.TotalTokens > 0 {
-			usage = &langfuseacl.Usage{
-				PromptTokens:     d.PromptTokens,
-				CompletionTokens: d.CompletionTokens,
-				TotalTokens:      d.TotalTokens,
-			}
-			metadata = map[string]string{
-				"cached_tokens":    fmt.Sprintf("%d", d.CachedTokens),
-				"reasoning_tokens": fmt.Sprintf("%d", d.ReasoningTokens),
-			}
-		}
+		usage = langfuseUsage(tracker.GetLastDetail())
+		modelName = tracker.GetLastModel()
 	}
 
 	_ = t.client.EndGeneration(&langfuseacl.GenerationEventBody{
 		BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-			BaseEventBody: langfuseacl.BaseEventBody{
-				ID:       genID,
-				MetaData: metadata,
-			},
+			BaseEventBody: langfuseacl.BaseEventBody{ID: genID},
 		},
 		OutMessage: outMsg,
 		EndTime:    time.Now(),
+		Model:      modelName,
 		Usage:      usage,
 	})
 	return ctx, state, nil
+}
+
+// langfuseUsage maps one API call onto Langfuse's OpenAI-shaped usageDetails,
+// including cached_tokens / reasoning_tokens so the host can cost them.
+func langfuseUsage(d *internalmodel.TokenUsageDetail) *langfuseacl.Usage {
+	if d == nil || (d.TotalTokens <= 0 && d.PromptTokens <= 0 && d.CompletionTokens <= 0) {
+		return nil
+	}
+	return &langfuseacl.Usage{
+		PromptTokens:     d.PromptTokens,
+		CompletionTokens: d.CompletionTokens,
+		TotalTokens:      d.TotalTokens,
+		PromptTokensDetails: &langfuseacl.PromptTokensDetails{
+			CachedTokens: d.CachedTokens,
+		},
+		CompletionTokensDetails: &langfuseacl.CompletionTokensDetails{
+			ReasoningTokens: d.ReasoningTokens,
+		},
+	}
 }
 
 // WrapInvokableToolCall wraps a tool's execution in a Langfuse span and exposes
