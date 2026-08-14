@@ -1,0 +1,29 @@
+{
+  "id": "martian-grafana-90939",
+  "source": "withmartian/code-review-benchmark",
+  "source_commit": "fbc5425c5eec52932aa1303708873d341968fa1c",
+  "source_file": "offline/golden_comments/grafana.json",
+  "source_license": "MIT",
+  "gold_set_complete": true,
+  "profile": "core",
+  "repo_url": "https://github.com/grafana/grafana.git",
+  "pull_request": "https://github.com/grafana/grafana/pull/90939",
+  "title": "fix data race in GetWebAssets",
+  "description": "Small fix to a data race when accessing shared global state holding web assets.",
+  "base": "3ce1a5b0caab215346a51629b0344b90d67e9478",
+  "head": "b1613e320acff00623e6efc59f00ee68c7684a97",
+  "gold_findings": [
+    {
+      "id": "g1",
+      "severity": "Medium",
+      "category": "concurrency",
+      "comment": "The GetWebAssets function implements an incomplete double-checked locking pattern for caching web assets. The function first checks if the cache is populated using a read lock (RLock), and if the cache is empty, it acquires a write lock to populate it. However, it fails to re-check whether the cache was populated by another goroutine while waiting to acquire the write lock."
+    },
+    {
+      "id": "g2",
+      "severity": "High",
+      "category": "bug",
+      "comment": "In addition to the missing double-check, the function has a critical flaw in its error handling: it unconditionally assigns the fetch result to the cache (line 69: entryPointAssetsCache = result) regardless of whether the fetch succeeded or failed. When an error occurs during asset fetching, result is nil, and this nil value overwrites any previously valid cache entry."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "martian-calcom-14943",
+  "source": "withmartian/code-review-benchmark",
+  "source_commit": "fbc5425c5eec52932aa1303708873d341968fa1c",
+  "source_file": "offline/golden_comments/cal_dot_com.json",
+  "source_license": "MIT",
+  "gold_set_complete": true,
+  "profile": "core",
+  "repo_url": "https://github.com/calcom/cal.com.git",
+  "pull_request": "https://github.com/calcom/cal.com/pull/14943",
+  "title": "fix: add retryCount to workflowReminder",
+  "description": "When SMS sending fails, the existing cron job keeps scheduling it until the target date. This change adds a retry count and deletes the workflow reminder after scheduling has failed twice.",
+  "base": "917c7b0764f4c6bfdca95db2c5f73dbfdbe11757",
+  "head": "c790227e0cda780e6fea9bb03af27948d9e286b9",
+  "gold_findings": [
+    {
+      "id": "g1",
+      "severity": "High",
+      "category": "concurrency",
+      "comment": "Using retryCount: reminder.retryCount + 1 reads a possibly stale value and can lose increments under concurrency; consider an atomic increment via Prisma (increment: 1) to avoid race conditions (also applies to the similar update in the catch block)."
+    },
+    {
+      "id": "g2",
+      "severity": "High",
+      "category": "bug",
+      "comment": "The deletion logic in scheduleSMSReminders.ts incorrectly deletes non-SMS workflow reminders (e.g., Email, WhatsApp) that have retryCount > 1. This occurs because the retryCount condition within the OR clause for deletion lacks a method: WorkflowMethods.SMS filter, causing it to apply to all reminder types instead of only SMS reminders, which is the intended scope of this function."
+    }
+  ]
+}

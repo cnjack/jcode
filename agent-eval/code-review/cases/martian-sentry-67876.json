@@ -1,0 +1,35 @@
+{
+  "id": "martian-sentry-67876",
+  "source": "withmartian/code-review-benchmark",
+  "source_commit": "fbc5425c5eec52932aa1303708873d341968fa1c",
+  "source_file": "offline/golden_comments/sentry.json",
+  "source_license": "MIT",
+  "gold_set_complete": true,
+  "profile": "core",
+  "repo_url": "https://github.com/getsentry/sentry.git",
+  "pull_request": "https://github.com/getsentry/sentry/pull/67876",
+  "title": "fix(security): validate GitHub user during integration installation",
+  "description": "Add GitHub OAuth2 authorization to the integration installation pipeline. The pipeline fails on a mismatch between the authenticated GitHub user and installer, a state/signature mismatch, or failure to exchange the authorization code for an access token.",
+  "base": "344aa102e7818606e29426ebe69d5a680d8727c6",
+  "head": "bb75657fc8f13923c1d7983f422290908a1e7310",
+  "gold_findings": [
+    {
+      "id": "g1",
+      "severity": "Medium",
+      "category": "bug",
+      "comment": "Null reference if github_authenticated_user state is missing"
+    },
+    {
+      "id": "g2",
+      "severity": "Medium",
+      "category": "security",
+      "comment": "OAuth state uses pipeline.signature (static) instead of a per-request random value"
+    },
+    {
+      "id": "g3",
+      "severity": "High",
+      "category": "bug",
+      "comment": "The code attempts to access integration.metadata[sender][login] without checking for the existence of the sender key. This causes a KeyError for integrations where the sender metadata was not set during creation"
+    }
+  ]
+}

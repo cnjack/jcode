@@ -1,0 +1,42 @@
+{
+  "schema_version": "jcode-ocr-delegation-probe/v1",
+  "date": "2026-08-13",
+  "opencodereview": {
+    "repository": "https://github.com/alibaba/open-code-review",
+    "commit": "5fafe8297293c0f07db82d0f09f93bca0368766d",
+    "mode": "delegate",
+    "llm_called": false
+  },
+  "input": {
+    "case": "martian-grafana-90939",
+    "from": "3ce1a5b0caab215346a51629b0344b90d67e9478",
+    "to": "b1613e320acff00623e6efc59f00ee68c7684a97"
+  },
+  "preview": {
+    "mode": "range",
+    "merge_base": "cca9dee702ac4338ddc38aa56257273b8143e32e",
+    "total_files": 1,
+    "reviewable_count": 1,
+    "excluded_count": 0,
+    "total_insertions": 13,
+    "total_deletions": 3,
+    "reviewable_files": [
+      {
+        "path": "pkg/api/webassets/webassets.go",
+        "status": "modified",
+        "insertions": 13,
+        "deletions": 3
+      }
+    ]
+  },
+  "resolved_rules": [
+    {
+      "source": "system",
+      "pattern": "**/*.go",
+      "files": ["pkg/api/webassets/webassets.go"],
+      "rule_chars": 10843,
+      "rule_sha256": "b6958ae9894a8bbe6d09d9241956ca24673848472d0bdf0a968b2ee9ab308fa5"
+    }
+  ],
+  "conclusion": "OpenCodeReview delegation can supply deterministic file selection, merge-base resolution, and language rules without owning the reviewer model. It is viable as a short-term adapter into jcode, while native manifest, budget, and checkpoint primitives remain the preferred product architecture."
+}

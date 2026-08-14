@@ -1,0 +1,140 @@
+{
+  "schema_version": "jcode-review-experiment/v2",
+  "date": "2026-08-13",
+  "benchmark": {
+    "source": "withmartian/code-review-benchmark",
+    "source_commit": "fbc5425c5eec52932aa1303708873d341968fa1c",
+    "profile": "core",
+    "cases": 3,
+    "gold_findings": 7,
+    "reviewer_gold_blind": true,
+    "semantic_judge_runs_after_review": true
+  },
+  "models": {
+    "reviewer": "zhipuai-coding-plan/glm-5.2",
+    "judge": "tencent-tokenhub/kimi-k3"
+  },
+  "workflow": {
+    "discovery_lanes_per_unit": ["context", "adversarial_risk"],
+    "verifier": "no_tool_reasoner",
+    "changed_line_anchors_required": true,
+    "incomplete_or_unverified_review_may_report_clean": false,
+    "checkpoint_resume_supported_by_harness": true
+  },
+  "runs": [
+    {
+      "case": "martian-grafana-90939",
+      "role": "development_case_after_workflow_freeze",
+      "artifact": "runs/industry-core/martian-grafana-90939/20260813-220134",
+      "changed_files": 1,
+      "eligible_changed_lines": 13,
+      "manifest_line_coverage": 1.0,
+      "delivery_complete": true,
+      "candidates": 0,
+      "published_findings": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 2,
+      "precision": 0.0,
+      "recall": 0.0,
+      "reviewer_tokens": 17450,
+      "judge_tokens": 0,
+      "reviewer_elapsed_seconds": 168.563,
+      "judge_elapsed_seconds": 0.786
+    },
+    {
+      "case": "martian-calcom-14943",
+      "role": "frozen_workflow_evaluation",
+      "artifact": "runs/industry-core/martian-calcom-14943/20260813-221344",
+      "changed_files": 3,
+      "eligible_changed_lines": 38,
+      "manifest_line_coverage": 1.0,
+      "delivery_complete": true,
+      "candidates": 4,
+      "published_findings": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 1,
+      "precision": 1.0,
+      "recall": 0.5,
+      "reviewer_tokens": 47387,
+      "judge_tokens": 1598,
+      "reviewer_elapsed_seconds": 716.006,
+      "judge_elapsed_seconds": 7.459,
+      "matched_gold": ["non_atomic_retry_count_increment"]
+    },
+    {
+      "case": "martian-sentry-67876",
+      "role": "frozen_workflow_evaluation_with_checkpoint_resume",
+      "artifact": "runs/industry-core/martian-sentry-67876/20260813-222616",
+      "changed_files": 3,
+      "eligible_changed_lines": 247,
+      "manifest_line_coverage": 1.0,
+      "delivery_complete": true,
+      "candidates": 7,
+      "published_findings": 3,
+      "tp": 1,
+      "fp": 2,
+      "fn": 2,
+      "precision": 0.3333333333,
+      "recall": 0.3333333333,
+      "reviewer_tokens": 140411,
+      "judge_tokens": 5900,
+      "reviewer_elapsed_seconds": 750.69,
+      "judge_elapsed_seconds": 47.416,
+      "matched_gold": ["missing_sender_metadata_keyerror"],
+      "checkpoint": {
+        "discovery_tokens_before_budget_skip": 125326,
+        "unverified_candidates": 7,
+        "resume_verifier_tokens": 15085,
+        "discovery_repeated": false
+      }
+    }
+  ],
+  "aggregate": {
+    "changed_files": 7,
+    "eligible_changed_lines": 298,
+    "manifest_line_coverage": 1.0,
+    "true_positives": 2,
+    "false_positives": 2,
+    "false_negatives": 5,
+    "precision": 0.5,
+    "recall": 0.2857142857,
+    "f1": 0.3636363636,
+    "f2": 0.3125,
+    "severity_weighted_recall": 0.3333333333,
+    "signal_to_noise": 1.0,
+    "reviewer_tokens": 205248,
+    "judge_tokens": 7498,
+    "total_evaluation_tokens": 212746,
+    "reviewer_tokens_per_covered_changed_line": 688.7516778523,
+    "reviewer_tokens_per_1k_covered_changed_lines": 688751.677852349
+  },
+  "development_probes": [
+    {
+      "model": "github-copilot/gpt-5.6-terra",
+      "status": "unscored_provider_failure",
+      "reason": "Copilot structured-output adapter failed while concatenating message extras; both lanes were marked failed."
+    },
+    {
+      "model": "kimi-for-coding/kimi-for-coding",
+      "status": "unscored_quota_failure",
+      "reason": "Provider returned HTTP 403 usage limit; both lanes were marked failed."
+    },
+    {
+      "model": "alibaba-token-plan-cn/qwen3.8-max",
+      "status": "completed_development_probe",
+      "reviewer_tokens": 34262,
+      "reviewer_elapsed_seconds": 333.101,
+      "candidate_findings": 1,
+      "published_findings": 0,
+      "note": "The risk lane identified the missing cache re-check, but the verifier rejected it as redundant initialization and the run missed both gold issues."
+    }
+  ],
+  "limitations": [
+    "This is a three-PR progressive smoke benchmark, not a statistically meaningful tool ranking.",
+    "The checkouts were sparse to the changed subsystems, so repository-wide caller context was not fully available.",
+    "The reviewer was blind to gold comments, but case selection and workflow development were not a held-out research protocol.",
+    "Unmatched findings are counted as false positives under the source benchmark even when they may be real issues missing from the gold set."
+  ]
+}
