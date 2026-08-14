@@ -1275,8 +1275,15 @@ func startWebServer(runtime webServerRuntime) error {
 			return
 		}
 		config.Logger().Printf("[wechat] inbound message from %s: %s", from, text)
-		if !srv.SubmitMessage(text, "wechat") {
-			_ = runtime.wechatClient.SendText(channel.BusyMessage())
+		accepted, submitErr := srv.SubmitMessage(text, "wechat")
+		if submitErr != nil {
+			if sendErr := runtime.wechatClient.SendText(channel.DoneMessage("", submitErr)); sendErr != nil {
+				config.Logger().Printf("[wechat] failed to send submission error: %v", sendErr)
+			}
+		} else if !accepted {
+			if sendErr := runtime.wechatClient.SendText(channel.BusyMessage()); sendErr != nil {
+				config.Logger().Printf("[wechat] failed to send busy response: %v", sendErr)
+			}
 		}
 	})
 	defer func() {

@@ -149,17 +149,22 @@ type chatImage struct {
 }
 
 // SubmitMessage submits a message for agent processing from an external source
-// (e.g. WeChat inbound message). Returns false if the agent is busy.
-func (s *Server) SubmitMessage(message, source string) bool {
+// (e.g. WeChat inbound message). accepted is false only when no active engine is
+// available or the targeted engine is already busy; agent recovery failures are
+// returned separately so channel callers can surface the real error.
+func (s *Server) SubmitMessage(message, source string) (accepted bool, err error) {
 	eng := s.activeEngine()
 	if eng == nil {
-		return false
+		return false, nil
 	}
 	if !eng.running.CompareAndSwap(false, true) {
-		return false
+		return false, nil
 	}
-	_, err := s.submitMessage(eng, message, eng.curMode(), source, "", nil)
-	return err == nil
+	_, err = s.submitMessage(eng, message, eng.curMode(), source, "", nil)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // submitMessage is the shared implementation for starting an agent run.
@@ -249,31 +254,52 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	eng.toolOverrideMu.Lock()
 	eng.emu.Lock()
 	if eng.recorder == nil {
-		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
-		if rec != nil {
-			rec.SetAgent(eng.agentRole)
+		rec, err := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
+		if err != nil {
+			eng.emu.Unlock()
+			eng.toolOverrideMu.Unlock()
+			eng.running.Store(false)
+			return "", fmt.Errorf("create session recorder: %w", err)
 		}
-		if rec != nil && sessionID != "" {
+		if rec == nil {
+			eng.emu.Unlock()
+			eng.toolOverrideMu.Unlock()
+			eng.running.Store(false)
+			return "", fmt.Errorf("create session recorder: returned nil recorder")
+		}
+		rec.SetAgent(eng.agentRole)
+		if sessionID != "" {
 			rec.SetUUID(sessionID)
 		}
-		if rec != nil && eng.recorderInit != nil {
+		if eng.recorderInit != nil {
 			eng.recorderInit(rec)
 		}
 		eng.recorder = rec
 		// sessionID == "" means the recorder just minted a new UUID.
-		stampNew = rec != nil && sessionID == ""
+		stampNew = sessionID == ""
 	} else if sessionID != "" && eng.recorder.UUID() != sessionID {
 		// Client is continuing a session that doesn't match the current recorder.
-		// Resume the client's session to keep all messages together.
-		eng.recorder.Close()
-		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
-		if rec != nil {
-			rec.SetAgent(eng.agentRole)
-			rec.SetUUID(sessionID)
+		// Build the replacement before closing the current recorder so a creation
+		// failure cannot discard the live session.
+		rec, err := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
+		if err != nil {
+			eng.emu.Unlock()
+			eng.toolOverrideMu.Unlock()
+			eng.running.Store(false)
+			return "", fmt.Errorf("create recorder for session %s: %w", sessionID, err)
 		}
-		if rec != nil && eng.recorderInit != nil {
+		if rec == nil {
+			eng.emu.Unlock()
+			eng.toolOverrideMu.Unlock()
+			eng.running.Store(false)
+			return "", fmt.Errorf("create recorder for session %s: returned nil recorder", sessionID)
+		}
+		rec.SetAgent(eng.agentRole)
+		rec.SetUUID(sessionID)
+		if eng.recorderInit != nil {
 			eng.recorderInit(rec)
 		}
+		eng.recorder.Close()
 		eng.recorder = rec
 	}
 	recorder := eng.recorder

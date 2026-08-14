@@ -79,8 +79,9 @@ func TestRunWebServerManagedReauthKeepsControlPlaneAvailable(t *testing.T) {
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	requireHealthOK(t, baseURL, errCh)
+	client := &http.Client{Timeout: 10 * time.Second}
 
-	statusResp, err := http.Get(baseURL + "/api/provider-auth/xai_oauth") //nolint:gosec // loopback test server
+	statusResp, err := client.Get(baseURL + "/api/provider-auth/xai_oauth") //nolint:gosec // loopback test server
 	if err != nil {
 		t.Fatalf("get provider auth status: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestRunWebServerManagedReauthKeepsControlPlaneAvailable(t *testing.T) {
 	// request should retry authentication and return the same actionable error,
 	// not get stuck behind a false "already processing" conflict.
 	for attempt := 1; attempt <= 2; attempt++ {
-		chatResp, err := http.Post( //nolint:gosec // loopback test server
+		chatResp, err := client.Post( //nolint:gosec // loopback test server
 			baseURL+"/api/chat", "application/json", strings.NewReader(`{"message":"hello"}`),
 		)
 		if err != nil {

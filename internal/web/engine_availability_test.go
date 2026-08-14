@@ -42,3 +42,26 @@ func TestEnsureAgentAvailableRetriesAfterProviderRecovery(t *testing.T) {
 		t.Fatalf("create agent attempts = %d, want 2", attempts)
 	}
 }
+
+func TestSubmitMessageReturnsLazyRecoveryError(t *testing.T) {
+	wantErr := errors.New("provider needs reauthentication")
+	eng := newEngine(&EngineConfig{
+		ProviderName: "xai",
+		ModelName:    "grok-4.6",
+		CreateAgent: func(_, _ string) (*adk.ChatModelAgent, error) {
+			return nil, wantErr
+		},
+	})
+	s := &Server{Engine: eng}
+
+	accepted, err := s.SubmitMessage("hello", "wechat")
+	if accepted {
+		t.Fatal("SubmitMessage accepted message despite recovery failure")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("SubmitMessage error = %v, want %v", err, wantErr)
+	}
+	if eng.running.Load() {
+		t.Fatal("SubmitMessage left engine running after recovery failure")
+	}
+}
