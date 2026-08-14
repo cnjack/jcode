@@ -61,7 +61,12 @@ func (s *Server) handleSetGoal(w http.ResponseWriter, r *http.Request) {
 		// will pick the goal up after the current run finishes. Targets the active
 		// task.
 		if eng.running.CompareAndSwap(false, true) {
-			s.submitMessage(eng, tools.GoalKickoffPrompt(objective), eng.curMode(), req.Source, req.TaskID, nil)
+			if _, err := s.submitMessage(
+				eng, tools.GoalKickoffPrompt(objective), eng.curMode(), req.Source, req.TaskID, nil,
+			); err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+				return
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, g)

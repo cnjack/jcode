@@ -62,7 +62,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := s.submitMessage(eng, req.Message, modeStr, req.Source, req.SessionID, req.Images)
+	sessionID, err := s.submitMessage(eng, req.Message, modeStr, req.Source, req.SessionID, req.Images)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing", "session_id": sessionID})
 }
 
@@ -154,8 +158,8 @@ func (s *Server) SubmitMessage(message, source string) bool {
 	if !eng.running.CompareAndSwap(false, true) {
 		return false
 	}
-	s.submitMessage(eng, message, eng.curMode(), source, "", nil)
-	return true
+	_, err := s.submitMessage(eng, message, eng.curMode(), source, "", nil)
+	return err == nil
 }
 
 // submitMessage is the shared implementation for starting an agent run.
@@ -165,8 +169,15 @@ func (s *Server) SubmitMessage(message, source string) bool {
 // correct session instead of creating a new one.
 // images is an optional list of base64-encoded images to include in the message.
 // The caller must have already set eng.running to true (via CompareAndSwap).
-// Returns the session_id of the recorder used.
-func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID string, images []chatImage) string {
+// Returns the session_id of the recorder used. If a degraded Engine is
+// still unavailable, agent construction is retried before any history or
+// recorder mutation and the caller's running claim is released.
+func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID string, images []chatImage) (string, error) {
+	if err := eng.ensureAgentAvailable(); err != nil {
+		eng.running.Store(false)
+		return "", err
+	}
+
 	// Slash command rewrite: if the original message starts with "/", check for
 	// skill slash commands and rewrite to load_skill instruction (same pattern as
 	// ACP/TUI). This must happen BEFORE the plan-mode prefix is applied, otherwise
@@ -381,7 +392,7 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 		}
 	}()
 
-	return recorder.UUID()
+	return recorder.UUID(), nil
 }
 
 // --- Stop handler ---

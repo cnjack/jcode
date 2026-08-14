@@ -260,6 +260,46 @@ func (e *Engine) modelSnapshot() (provider, model, modeStr string) {
 	return e.providerName, e.modelName, e.mode
 }
 
+// ensureAgentAvailable lazily repairs an Engine whose selected model could not
+// be constructed when the task engine was built. This keeps the control plane
+// reachable for account reauthentication and provider/model changes without
+// ever executing on a silent fallback. Rebuilds are serialized with the normal
+// model/mode paths so a successful recovery cannot overwrite a concurrent user
+// selection.
+func (e *Engine) ensureAgentAvailable() error {
+	e.emu.Lock()
+	if e.agent != nil {
+		e.emu.Unlock()
+		return nil
+	}
+	e.emu.Unlock()
+
+	if e.createAgent == nil {
+		return fmt.Errorf("selected model agent is unavailable")
+	}
+
+	e.rebuildMu.Lock()
+	defer e.rebuildMu.Unlock()
+
+	e.emu.Lock()
+	if e.agent != nil {
+		e.emu.Unlock()
+		return nil
+	}
+	provider, modelName := e.providerName, e.modelName
+	e.emu.Unlock()
+
+	ag, err := e.createAgent(provider, modelName)
+	if err != nil {
+		return fmt.Errorf("create agent for selected model %s/%s: %w", provider, modelName, err)
+	}
+	if ag == nil {
+		return fmt.Errorf("create agent for selected model %s/%s returned nil", provider, modelName)
+	}
+	e.applyModelSwitch(ag, provider, modelName)
+	return nil
+}
+
 // agentBuildSnapshot captures the inputs and revision for an asynchronous
 // agent rebuild. Call installAgentIfRevision with the returned revision: a
 // concurrent model/mode/skill change must win instead of being overwritten by

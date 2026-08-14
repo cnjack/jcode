@@ -121,7 +121,10 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 		s.deleteEngine(sid)
 		return sid, fmt.Errorf("engine busy")
 	}
-	_ = s.submitMessage(eng, a.Prompt, mode, "automation", sid, nil)
+	if _, err := s.submitMessage(eng, a.Prompt, mode, "automation", sid, nil); err != nil {
+		s.deleteEngine(sid)
+		return sid, err
+	}
 	s.stampAutomationMeta(sid, a, kind)
 
 	var runErr error
