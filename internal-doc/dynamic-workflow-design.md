@@ -100,7 +100,7 @@ internal/flow/
 
 **async 桥（关键正确性）**：
 - `loop := eventloop.NewEventLoop()`；`loop.Start()` 常驻（`run(true)`：jobCount 从 1 起，直到 `Stop()`；用 `Run()` 会在在途 goroutine `RunOnLoop` 前提前退出——已核 eventloop.go run()）。
-- `agent(prompt,opts)`（在 loop goroutine 执行）：`p,resolve,reject := vm.NewPromise()`；`go func(){ 取 sema(16) → runSubagent → loop.RunOnLoop(func(vm){ resolve/reject(marshal) }) }()`；`return vm.ToValue(p)` 立即返回 → loop 空出来跑其它 thunk → 真并行。**resolve/reject 与任何 goja.Value 只在 loop goroutine 碰。**
+- `agent(prompt,opts)`（在 loop goroutine 执行）：`p,resolve,reject := vm.NewPromise()`；`go func(){ 取 sema(16) → runSubagent → loop.RunOnLoop(func(vm){ resolve/reject(marshal) }) }()`；`return vm.ToValue(p)` 立即返回 → loop 空出来跑其它 thunk → 真并行。`opts.maxIterations` 可把单个 agent 的模型/工具循环限制在 1..40；0/省略时仍使用硬上限 40，不能通过 workflow 提高。`agentType:"reasoner"` 不注入任何工具，适合上下文已经由上游冻结的判定/汇总步骤，避免 verifier 再次无界探索。**resolve/reject 与任何 goja.Value 只在 loop goroutine 碰。**
 - 顶层：源码转换成 `globalThis.__flowMain = async () => { <src(把 export 去掉)> }; __flowMain().then(v=>__flowResolve(v), e=>__flowReject(e));`（top-level `return` 因包在 async 里而合法）。`__flowResolve/__flowReject`（loop 上执行）`Export` 结果 → 送 Go `done` chan。主 goroutine `select{done / ctx.Done→loop.Terminate}`。
 - 取消/超时：watchdog goroutine 到点 `vm.Interrupt("timeout")`；ctx 取消 → `loop.Terminate()`（清 timers + 拒后续 RunOnLoop）。
 

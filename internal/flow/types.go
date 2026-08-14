@@ -51,13 +51,16 @@ type Workflow struct {
 // AgentSpec describes a single agent() call from the script. Prompt is the first
 // positional argument; the rest come from the opts object (mapped by json tag).
 type AgentSpec struct {
-	Prompt    string      `json:"-"`
-	Label     string      `json:"label"`
-	Phase     string      `json:"phase"`
-	Model     string      `json:"model"`     // "provider/model" override; "" = session default
-	AgentType string      `json:"agentType"` // explore|general|coordinator; "" = explore
-	Schema    interface{} `json:"schema"`    // JSON Schema (as a JS object) → structured output
-	Isolation string      `json:"isolation"` // "worktree" (recognised; isolation is a later phase)
+	Prompt    string `json:"-"`
+	Label     string `json:"label"`
+	Phase     string `json:"phase"`
+	Model     string `json:"model"`     // "provider/model" override; "" = session default
+	AgentType string `json:"agentType"` // explore|reasoner|general|coordinator; "" = explore
+	// MaxIterations bounds this agent's model/tool loop. Zero uses the engine
+	// default; callers may lower but never raise the hard safety cap.
+	MaxIterations int         `json:"maxIterations"`
+	Schema        interface{} `json:"schema"`    // JSON Schema (as a JS object) → structured output
+	Isolation     string      `json:"isolation"` // "worktree" (recognised; isolation is a later phase)
 }
 
 // AgentResult is what a single agent() call returns. When Schema was set and the

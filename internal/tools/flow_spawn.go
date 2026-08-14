@@ -25,8 +25,9 @@ import (
 // dependency runs one way: tools → flow → config.
 
 const (
-	flowAgentMaxIter = 40
-	flowStructRetry  = 2 // extra attempts to coax schema-valid JSON
+	flowAgentMaxIter      = 40
+	flowAgentTypeReasoner = "reasoner"
+	flowStructRetry       = 2 // extra attempts to coax schema-valid JSON
 )
 
 // FlowSpawnDeps carry what NewFlowSpawn needs to build and run a subagent. Env and
@@ -51,17 +52,17 @@ func NewFlowSpawn(deps FlowSpawnDeps) flow.SpawnFunc {
 		if roleName == "" {
 			roleName = AgentTypeExplore
 		}
-		profile := roleName
-		instructions := ""
+		profile, instructions, roleModel, err := resolveFlowAgentProfile(roleName, deps.AgentRoles)
+		if err != nil {
+			return flow.AgentResult{}, err
+		}
 		modelRef := spec.Model
-		if role, ok := deps.AgentRoles[roleName]; ok {
-			profile = AgentTypeGeneral
-			instructions = role.Instructions
-			if role.Model != "" {
-				modelRef = role.Model
-			}
-		} else if profile != AgentTypeExplore && profile != AgentTypeGeneral && profile != AgentTypeCoordinator {
-			return flow.AgentResult{}, fmt.Errorf("unknown agent type %q", roleName)
+		if roleModel != "" {
+			modelRef = roleModel
+		}
+		maxIterations, err := resolveFlowAgentMaxIterations(spec.MaxIterations)
+		if err != nil {
+			return flow.AgentResult{}, err
 		}
 		cm, err := deps.ModelFactory.GetModel(ctx, modelRef)
 		if err != nil {
@@ -102,7 +103,7 @@ func NewFlowSpawn(deps FlowSpawnDeps) flow.SpawnFunc {
 				Instruction:   instruction,
 				Model:         cm,
 				ToolsConfig:   adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: agentTools}},
-				MaxIterations: flowAgentMaxIter,
+				MaxIterations: maxIterations,
 				Handlers:      flowAgentHandlers(),
 				ModelRetryConfig: &adk.ModelRetryConfig{
 					MaxRetries:  3,
@@ -140,9 +141,37 @@ func NewFlowSpawn(deps FlowSpawnDeps) flow.SpawnFunc {
 	}
 }
 
-// flowTools mirrors the subagent tool set: explore = read-only; general/coordinator
-// also get edit/write/todo.
+func resolveFlowAgentProfile(roleName string, roles map[string]config.AgentRoleConfig) (profile, instructions, model string, err error) {
+	// reasoner is a reserved built-in capability: a same-named custom role
+	// must not silently turn a verifier that promises no tools into a writer.
+	if roleName == flowAgentTypeReasoner {
+		return flowAgentTypeReasoner, "", "", nil
+	}
+	if role, ok := roles[roleName]; ok {
+		return AgentTypeGeneral, role.Instructions, role.Model, nil
+	}
+	if roleName == AgentTypeExplore || roleName == AgentTypeGeneral || roleName == AgentTypeCoordinator {
+		return roleName, "", "", nil
+	}
+	return "", "", "", fmt.Errorf("unknown agent type %q", roleName)
+}
+
+func resolveFlowAgentMaxIterations(requested int) (int, error) {
+	if requested == 0 {
+		return flowAgentMaxIter, nil
+	}
+	if requested < 1 || requested > flowAgentMaxIter {
+		return 0, fmt.Errorf("flow agent maxIterations must be between 1 and %d (got %d)", flowAgentMaxIter, requested)
+	}
+	return requested, nil
+}
+
+// flowTools mirrors the subagent tool set: reasoner = no tools, explore =
+// read-only; general/coordinator also get edit/write/todo.
 func flowTools(env *Env, agentType string) []tool.BaseTool {
+	if agentType == flowAgentTypeReasoner {
+		return []tool.BaseTool{}
+	}
 	ts := []tool.BaseTool{
 		env.NewReadTool(),
 		env.NewGrepTool(),
@@ -296,6 +325,8 @@ Date: %s
 
 `, pwd, platform, time.Now().Format("2006-01-02"))
 	switch agentType {
+	case flowAgentTypeReasoner:
+		return base + `Reason only from the context in your prompt. You have no tools and must not request repository access. Return the requested answer directly and concisely.`
 	case "general":
 		return base + `Complete the specific task in your prompt. You may edit and write files. Keep your scope narrow — only do what was asked. Report what you did concisely.`
 	case "coordinator":

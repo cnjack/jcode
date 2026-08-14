@@ -32,8 +32,10 @@ const workflowToolAPIDoc = `The script is plain JavaScript with top-level await.
 
 Then orchestrate with these injected primitives (all agents run through jcode's normal tools/permissions):
   - agent(prompt, opts?) -> Promise : spawn ONE subagent; returns its final text, or a
-        validated object when opts.schema (a JSON Schema) is set. opts: {label, phase,
-        model:"provider/model", agentType:"explore"|"general"|"coordinator", schema}.
+        JSON-parsed object when opts.schema (a JSON Schema) is set; v1 callers must still
+        validate schema constraints. opts: {label, phase,
+        model:"provider/model", agentType:"explore"|"reasoner"|"general"|"coordinator",
+        maxIterations:1..40, schema}.
   - parallel(thunks) -> Promise : run an array of () => agent(...) concurrently, BARRIER
         (waits for all); a throwing thunk resolves to null, so .filter(Boolean).
   - pipeline(items, ...stages) -> Promise : run each item through the stages, NO barrier

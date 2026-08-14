@@ -264,6 +264,22 @@ return r.score;
 	}
 }
 
+func TestAgentPassesMaxIterations(t *testing.T) {
+	f := &fakeSpawn{perCall: func(spec AgentSpec) (AgentResult, error) {
+		if spec.MaxIterations != 5 {
+			t.Errorf("max iterations = %d, want 5", spec.MaxIterations)
+		}
+		return AgentResult{Text: "done"}, nil
+	}}
+	src := `
+export const meta = { name: "bounded", description: "d" };
+return await agent("review", { maxIterations: 5 });
+`
+	if _, err := runScript(t, src, f.fn, NopSink{}, RunOptions{}); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+}
+
 func TestDeterminismGuards(t *testing.T) {
 	for _, expr := range []string{"Date.now()", "Math.random()", "new Date()"} {
 		f := &fakeSpawn{}
