@@ -121,6 +121,12 @@ func (h *NotifyingHandler) OnToolProgress(ev ToolProgressEvent) {
 	}
 }
 
+func (h *NotifyingHandler) OnModelRetry(ev ModelRetryEvent) {
+	if retry, ok := h.inner.(ModelRetryHandler); ok {
+		retry.OnModelRetry(ev)
+	}
+}
+
 func (h *NotifyingHandler) OnTodoUpdate() {
 	h.inner.OnTodoUpdate()
 }

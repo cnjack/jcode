@@ -1089,6 +1089,12 @@ export default {
     remoteHost: 'the remote host',
     transport: { ssh: 'SSH', docker: 'Docker' },
     attempt: 'Attempt {attempt}/{max}',
+    inline: {
+      waiting: 'Waiting to retry {attempt}/{max}',
+      waitingWithDelay: 'Retrying in about {seconds}s {attempt}/{max}',
+      reconnecting: 'Reconnecting {attempt}/{max}',
+      ready: 'Reconnected',
+    },
     waiting: {
       title: '{transport} connection interrupted',
       detail: 'Waiting before reconnecting to {host}.',
@@ -1120,6 +1126,13 @@ export default {
     acknowledge: 'I understand',
     details: 'Technical details',
     dismiss: 'Dismiss connection status',
+  },
+
+  modelRetry: {
+    label: 'Model retry status',
+    waiting: 'Model rate limited. Retrying {attempt}/{max}',
+    waitingWithDelay: 'Model rate limited. Retrying in about {seconds}s {attempt}/{max}',
+    ready: 'Model recovered',
   },
 
   wizard: {

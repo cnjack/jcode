@@ -20,6 +20,24 @@ afterEach(() => {
 })
 
 describe('WSClient remote connection routing', () => {
+  it('merges and preserves a background task id for model retry status', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const onModelRetryStatus = vi.fn()
+    const client = new WSClient({ activeTaskId: () => 'task-active', onModelRetryStatus })
+    client.connect()
+
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({
+      type: 'model_retry_status',
+      task_id: 'task-background',
+      data: { status: 'waiting', attempt: 1, max_attempts: 5, retry_in_ms: 500 },
+    }) })
+
+    expect(onModelRetryStatus).toHaveBeenCalledWith({
+      task_id: 'task-background', status: 'waiting', attempt: 1, max_attempts: 5, retry_in_ms: 500,
+    })
+    client.disconnect()
+  })
+
   it('merges the envelope task id into an active-task status', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket)
     const onRemoteConnectionStatus = vi.fn()

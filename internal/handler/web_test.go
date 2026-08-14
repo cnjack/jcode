@@ -101,6 +101,30 @@ func TestWebHandler_AgentDoneCarriesRemoteErrorCode(t *testing.T) {
 	}
 }
 
+func TestWebHandlerModelRetryCarriesBackoffStatus(t *testing.T) {
+	h := NewWebHandler()
+	h.OnModelRetry(ModelRetryEvent{
+		Status: ModelRetryWaiting, Attempt: 2, MaxAttempts: 5, RetryIn: 1500 * time.Millisecond,
+	})
+
+	select {
+	case event := <-h.Events():
+		if event.Event != "model_retry_status" {
+			t.Fatalf("event = %q", event.Event)
+		}
+		data, ok := event.Data.(WebModelRetryData)
+		if !ok {
+			t.Fatalf("data = %T, want WebModelRetryData", event.Data)
+		}
+		if data.Status != ModelRetryWaiting || data.Attempt != 2 ||
+			data.MaxAttempts != 5 || data.RetryInMS != 1500 {
+			t.Fatalf("model retry data = %+v", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for model_retry_status")
+	}
+}
+
 func TestWebHandlerBillableApprovalRequiresOpaqueOneTimeOption(t *testing.T) {
 	h := NewWebHandler()
 	issuedOptions := []ApprovalOption{

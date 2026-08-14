@@ -39,9 +39,11 @@ func TestEventDurabilityClassification(t *testing.T) {
 	}
 }
 
-func TestRemoteConnectionStatusIsLocalOnly(t *testing.T) {
-	if !localOnlyEvents["remote_connection_status"] {
-		t.Fatal("remote_connection_status must be dropped before Cloud event routing")
+func TestOperationalStatusEventsAreLocalOnly(t *testing.T) {
+	for _, event := range []string{"remote_connection_status", "model_retry_status"} {
+		if !localOnlyEvents[event] {
+			t.Fatalf("%s must be dropped before Cloud event routing", event)
+		}
 	}
 }
 

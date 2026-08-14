@@ -493,6 +493,18 @@ export interface RemoteConnectionStatusData {
   retryable?: boolean
 }
 
+/** Task-scoped model rate-limit retry status. The WebSocket envelope task id is
+ * merged into the payload before it reaches Redux. */
+export type ModelRetryStatus = 'waiting' | 'ready'
+
+export interface ModelRetryStatusData {
+  task_id?: string
+  status: ModelRetryStatus
+  attempt: number
+  max_attempts: number
+  retry_in_ms?: number
+}
+
 export interface AgentDoneData {
   error?: string
   detail?: string

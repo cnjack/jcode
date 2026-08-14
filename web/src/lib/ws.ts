@@ -80,6 +80,7 @@ export interface WSHandlers {
   onSubagentProgress?: (data: import('./types').SubagentProgressData) => void
   onUserMessage?: (data: { content: string; source: string; local_echo?: boolean }) => void
   onRemoteConnectionStatus?: (data: import('./types').RemoteConnectionStatusData) => void
+  onModelRetryStatus?: (data: import('./types').ModelRetryStatusData) => void
   onTaskStatus?: (taskId: string, running: boolean, project?: string, updatedAt?: string) => void
   onArtifactUpserted?: (data: {
     task_id: string
@@ -117,8 +118,14 @@ const TASK_ID_DATA_TYPES = new Set([
   'agent_done',
   'artifact_upserted',
   'remote_connection_status',
+  'model_retry_status',
 ])
-const BACKGROUND_EVENT_TYPES = new Set(['agent_done', 'artifact_upserted', 'remote_connection_status'])
+const BACKGROUND_EVENT_TYPES = new Set([
+  'agent_done',
+  'artifact_upserted',
+  'remote_connection_status',
+  'model_retry_status',
+])
 const PENDING_FOREGROUND_EVENT_TYPES = new Set([
   'agent_start',
   'agent_text',
@@ -140,6 +147,7 @@ const PENDING_FOREGROUND_EVENT_TYPES = new Set([
   'subagent_progress',
   'user_message',
   'remote_connection_status',
+  'model_retry_status',
 ])
 
 export class WSClient {
@@ -318,6 +326,7 @@ export function dispatchWSHandler(handlers: WSHandlers, type: string, data: unkn
     case 'subagent_progress': handlers.onSubagentProgress?.(d); break
     case 'user_message': handlers.onUserMessage?.(d); break
     case 'remote_connection_status': handlers.onRemoteConnectionStatus?.(d); break
+    case 'model_retry_status': handlers.onModelRetryStatus?.(d); break
     case 'task_status': handlers.onTaskStatus?.(d?.task_id, !!d?.running, d?.project, d?.updated_at); break
     case 'artifact_upserted': handlers.onArtifactUpserted?.(d); break
   }

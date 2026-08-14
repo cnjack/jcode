@@ -970,6 +970,12 @@ export default {
     remoteHost: '遠端主機',
     transport: { ssh: 'SSH', docker: 'Docker' },
     attempt: '第 {attempt}/{max} 次',
+    inline: {
+      waiting: '等待重新連線 {attempt}/{max}',
+      waitingWithDelay: '約 {seconds} 秒後重試 {attempt}/{max}',
+      reconnecting: '正在重新連線 {attempt}/{max}',
+      ready: '已重新連線',
+    },
     waiting: {
       title: '{transport} 連線暫時中斷',
       detail: '正在等待重新連線 {host}。',
@@ -1001,6 +1007,13 @@ export default {
     acknowledge: '我知道了',
     details: '技術詳細資訊',
     dismiss: '關閉連線狀態',
+  },
+
+  modelRetry: {
+    label: '模型重試狀態',
+    waiting: '模型達到速率限制，正在重試 {attempt}/{max}',
+    waitingWithDelay: '模型達到速率限制，約 {seconds} 秒後重試 {attempt}/{max}',
+    ready: '模型已恢復',
   },
 
   wizard: {

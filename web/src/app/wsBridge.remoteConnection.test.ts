@@ -23,6 +23,20 @@ function baseState(status: 'waiting' | 'failed'): RootState {
 }
 
 describe('remote connection WebSocket bridge', () => {
+  it('dispatches task-scoped model retry status into its dedicated slice', () => {
+    const dispatch = vi.fn()
+    const handlers = createWSHandlers(() => baseState('waiting'), dispatch as unknown as AppDispatch)
+
+    handlers.onModelRetryStatus?.({
+      task_id: 'task-1', status: 'waiting', attempt: 1, max_attempts: 5, retry_in_ms: 750,
+    })
+
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'modelRetry/statusReceived',
+      payload: expect.objectContaining({ task_id: 'task-1', status: 'waiting' }),
+    }))
+  })
+
   it('dispatches task-scoped status into the dedicated slice', () => {
     const dispatch = vi.fn()
     const handlers = createWSHandlers(() => baseState('waiting'), dispatch as unknown as AppDispatch)
@@ -44,6 +58,7 @@ describe('remote connection WebSocket bridge', () => {
     handlers.onAgentDone?.({ task_id: 'task-1', stopped: true })
 
     expect(dispatch).toHaveBeenCalledWith({ type: 'remoteConnection/clearTransient', payload: 'task-1' })
+    expect(dispatch).toHaveBeenCalledWith({ type: 'modelRetry/clearWaiting', payload: 'task-1' })
   })
 
   it('does not suppress an unstructured model error just because a failed notice remains', () => {
