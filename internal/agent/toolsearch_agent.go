@@ -33,6 +33,7 @@ func NewAgentWithToolPlan(
 	approvalFunc ApprovalFunc,
 	middlewares []adk.ChatModelAgentMiddleware,
 	handlers []adk.ChatModelAgentMiddleware,
+	options ...AgentOption,
 ) (*adk.ChatModelAgent, error) {
 	direct, deferred, disclosureGroups, err := executableToolsFromPlan(ctx, plan)
 	if err != nil {
@@ -44,6 +45,7 @@ func NewAgentWithToolPlan(
 	return newAgent(
 		ctx, chatmodel, direct, deferred, disclosureGroups,
 		instruction, approvalFunc, middlewares, handlers,
+		options...,
 	)
 }
 

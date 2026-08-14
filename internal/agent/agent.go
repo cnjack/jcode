@@ -14,7 +14,35 @@ import (
 	"github.com/cnjack/jcode/internal/toolpolicy"
 )
 
-const maxIterations = 1000
+const defaultMaxIterations = 1000
+
+type agentOptions struct {
+	maxIterations int
+}
+
+// AgentOption configures one ChatModelAgent without changing the defaults used by
+// existing transports.
+type AgentOption func(*agentOptions)
+
+// WithMaxIterations bounds the model/tool loop for the constructed agent.
+// Non-positive values retain the default for backward compatibility.
+func WithMaxIterations(limit int) AgentOption {
+	return func(options *agentOptions) {
+		if limit > 0 {
+			options.maxIterations = limit
+		}
+	}
+}
+
+func resolveAgentOptions(options ...AgentOption) agentOptions {
+	resolved := agentOptions{maxIterations: defaultMaxIterations}
+	for _, apply := range options {
+		if apply != nil {
+			apply(&resolved)
+		}
+	}
+	return resolved
+}
 
 type ApprovalFunc func(ctx context.Context, toolName, toolArgs string) (bool, error)
 
@@ -47,10 +75,12 @@ func NewAgent(
 	approvalFunc ApprovalFunc,
 	middlewares []adk.ChatModelAgentMiddleware,
 	handlers []adk.ChatModelAgentMiddleware,
+	options ...AgentOption,
 ) (*adk.ChatModelAgent, error) {
 	return newAgent(
 		ctx, chatmodel, tools, nil, toolDisclosureGroups{},
 		instruction, approvalFunc, middlewares, handlers,
+		options...,
 	)
 }
 
@@ -64,7 +94,9 @@ func newAgent(
 	approvalFunc ApprovalFunc,
 	middlewares []adk.ChatModelAgentMiddleware,
 	handlers []adk.ChatModelAgentMiddleware,
+	options ...AgentOption,
 ) (*adk.ChatModelAgent, error) {
+	resolvedOptions := resolveAgentOptions(options...)
 	// Handler order is outermost → innermost: tracing middlewares first, then the
 	// tool-search middleware, then the caller's state-rewriting handlers, and
 	// finally the hook + approval + safe-tool-error stack. Tool search must inspect
@@ -138,7 +170,7 @@ func newAgent(
 				Tools: append([]tool.BaseTool(nil), directTools...),
 			},
 		},
-		MaxIterations: maxIterations,
+		MaxIterations: resolvedOptions.maxIterations,
 		Handlers:      enhanced,
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries:  5,

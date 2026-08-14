@@ -824,6 +824,7 @@ func (a *acpAgent) buildAgentSession(
 			return agent.NewAgent(
 				agentCtx, chatModel, staticTools, sysPrompt,
 				approvalState.RequestApproval, nil, handlers,
+				agent.WithMaxIterations(cfg.MaxIterations),
 			)
 		}
 		toolMode := agent.ToolModeNormal
@@ -839,6 +840,7 @@ func (a *acpAgent) buildAgentSession(
 		return agent.NewAgentWithToolPlan(
 			agentCtx, chatModel, toolPlan, sysPrompt,
 			approvalState.RequestApproval, nil, handlers,
+			agent.WithMaxIterations(cfg.MaxIterations),
 		)
 	}
 	newSessionAgent := func(
