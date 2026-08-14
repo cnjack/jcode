@@ -315,6 +315,22 @@ func TestSmartBackoff_WithoutRetryError(t *testing.T) {
 	}
 }
 
+func TestSmartBackoffWithMaxRetriesPublishesConfiguredBound(t *testing.T) {
+	var got RetryBackoffEvent
+	observer := NewRetryObserver(func(event RetryBackoffEvent) { got = event })
+	ctx := WithRetryObserver(context.Background(), observer)
+	err := &openai.APIError{HTTPStatusCode: 429, Message: "rate limited"}
+	if !IsRetryable(ctx, err) {
+		t.Fatal("429 error was not classified as retryable")
+	}
+
+	_ = SmartBackoffWithMaxRetries(3)(ctx, 1)
+
+	if got.Attempt != 1 || got.MaxAttempts != 3 || got.Delay <= 0 {
+		t.Fatalf("retry event = %+v, want attempt 1 with max 3 and positive delay", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Category String
 // ---------------------------------------------------------------------------

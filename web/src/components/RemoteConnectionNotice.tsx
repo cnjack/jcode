@@ -50,7 +50,7 @@ export function RemoteConnectionNotice() {
 
   // A connection outage is the more fundamental blocker. Keep model retry
   // state alive underneath it so the right status appears if transport recovers.
-  if (!notice && modelRetry) {
+  if (modelRetry && (!notice || notice.status === 'ready')) {
     const Icon = modelRetry.status === 'ready' ? CheckCircleIcon : ClockIcon
     return (
       <section
@@ -62,7 +62,7 @@ export function RemoteConnectionNotice() {
         aria-label={t('modelRetry.label')}
       >
         <span key={modelRetry.revision} className="remote-connection-notice__inline-content">
-          <Icon className="remote-connection-notice__inline-icon" aria-hidden="true" />
+          <Icon className="h-4 w-4 remote-connection-notice__inline-icon" aria-hidden="true" />
           <span className="remote-connection-notice__inline-copy">{modelRetryCopy(modelRetry, t)}</span>
         </span>
       </section>
@@ -89,7 +89,7 @@ export function RemoteConnectionNotice() {
         aria-label={t('remoteConnection.label')}
       >
         <span key={notice.revision} className="remote-connection-notice__inline-content">
-          <Icon className="remote-connection-notice__inline-icon" aria-hidden="true" />
+          <Icon className="h-4 w-4 remote-connection-notice__inline-icon" aria-hidden="true" />
           <span className="remote-connection-notice__inline-copy">{inlineNoticeCopy(notice, t)}</span>
         </span>
       </section>

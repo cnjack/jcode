@@ -174,8 +174,8 @@ func newAgent(
 		Handlers:      enhanced,
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries:  internalmodel.DefaultMaxRetries,
-			IsRetryAble: internalmodel.IsRetryable,
-			BackoffFunc: internalmodel.SmartBackoff,
+			ShouldRetry: internalmodel.ShouldRetryModelCall,
+			BackoffFunc: internalmodel.SmartBackoffWithMaxRetries(internalmodel.DefaultMaxRetries),
 		},
 	})
 }

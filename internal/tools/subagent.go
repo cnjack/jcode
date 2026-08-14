@@ -327,8 +327,8 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 			Handlers:      middlewares,
 			ModelRetryConfig: &adk.ModelRetryConfig{
 				MaxRetries:  3,
-				IsRetryAble: internalmodel.IsRetryable,
-				BackoffFunc: internalmodel.SmartBackoff,
+				ShouldRetry: internalmodel.ShouldRetryModelCall,
+				BackoffFunc: internalmodel.SmartBackoffWithMaxRetries(3),
 			},
 		})
 		if err != nil {

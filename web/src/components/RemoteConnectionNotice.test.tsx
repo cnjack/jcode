@@ -44,8 +44,25 @@ describe('RemoteConnectionNotice', () => {
 
     const status = screen.getByRole('status', { name: 'Model retry status' })
     expect(status.className).toContain('remote-connection-notice--inline')
+    expect(status.querySelector('svg')?.classList.contains('h-4')).toBe(true)
+    expect(status.querySelector('svg')?.classList.contains('w-4')).toBe(true)
     expect(screen.getByText('Model rate limited. Retrying in about 2s 1/5')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('shows an active model retry instead of a stale connection recovery notice', () => {
+    store.dispatch(remoteConnectionActions.statusReceived({
+      task_id: 'task-active', kind: 'ssh', status: 'ready', attempt: 2, max_attempts: 8,
+    }))
+    store.dispatch(modelRetryActions.statusReceived({
+      task_id: 'task-active', status: 'waiting', attempt: 1, max_attempts: 5, retry_in_ms: 1_000,
+    }))
+
+    renderNotice()
+
+    expect(screen.getByRole('status', { name: 'Model retry status' })).toBeTruthy()
+    expect(screen.getByText('Model rate limited. Retrying in about 1s 1/5')).toBeTruthy()
+    expect(screen.queryByText('Reconnected')).toBeNull()
   })
 
   it('announces a bounded backoff with attempt and delay without replacing the conversation', () => {

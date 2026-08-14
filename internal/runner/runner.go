@@ -124,7 +124,7 @@ func Run(
 	modelRetryObserver := internalmodel.NewRetryObserver(func(event internalmodel.RetryBackoffEvent) {
 		handler.EmitModelRetry(h, handler.ModelRetryEvent{
 			Status: handler.ModelRetryWaiting, Attempt: event.Attempt,
-			MaxAttempts: internalmodel.DefaultMaxRetries, RetryIn: event.Delay,
+			MaxAttempts: event.MaxAttempts, RetryIn: event.Delay,
 		})
 	})
 	ctx = internalmodel.WithRetryObserver(ctx, modelRetryObserver)
@@ -655,8 +655,17 @@ func runInner(
 			if streamErr != nil {
 				var willRetry *adk.WillRetryError
 				if errors.As(streamErr, &willRetry) {
-					config.Logger().Printf("[runner] model stream will retry: %v", streamErr)
-					continue
+					if messageText.Len() == 0 && reasoningText.Len() == 0 && len(pending) == 0 && len(messageExtra) == 0 {
+						config.Logger().Printf("[runner] model stream will retry: %v", streamErr)
+						continue
+					}
+					// Shared retry configs reject mid-stream retries, but keep this
+					// boundary defensive for custom agents: never append a fresh
+					// attempt after text already emitted to append-only handlers.
+					config.Logger().Printf("[runner] refusing model retry after partial stream: %v", streamErr)
+					if underlying := errors.Unwrap(streamErr); underlying != nil {
+						streamErr = underlying
+					}
 				}
 				// A failed stream may contain only a prefix of tool-call arguments.
 				// Preserve text already shown to the user, but never persist or
@@ -813,11 +822,15 @@ func runInner(
 
 func resolveModelRetry(ctx context.Context, h handler.AgentEventHandler) {
 	observer := internalmodel.RetryObserverFromContext(ctx)
-	if observer == nil || !observer.Resolve() {
+	if observer == nil {
+		return
+	}
+	resolved, maxAttempts := observer.Resolve()
+	if !resolved {
 		return
 	}
 	handler.EmitModelRetry(h, handler.ModelRetryEvent{
-		Status: handler.ModelRetryReady, MaxAttempts: internalmodel.DefaultMaxRetries,
+		Status: handler.ModelRetryReady, MaxAttempts: maxAttempts,
 	})
 }
 
