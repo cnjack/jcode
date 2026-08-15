@@ -163,7 +163,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	for _, imageModel := range providertools.ImageModels(cfg) {
 		imageModelsByProvider[imageModel.Provider] = append(imageModelsByProvider[imageModel.Provider], imageModel)
 	}
-	seenProviders := make(map[string]bool, len(configuredProviders))
+	providerIndexes := make(map[string]int, len(configuredProviders))
 	for _, rp := range registry.ListProviders() {
 		pc, configured := configuredProviders[rp.ID]
 		if !configured {
@@ -176,7 +176,6 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		if len(models) == 0 && len(imageModelsByProvider[rp.ID]) == 0 {
 			continue
 		}
-		seenProviders[rp.ID] = true
 		pi := providerInfo{
 			ID: rp.ID, Name: rp.Name, Kind: rp.ID, Source: "desktop", Custom: rp.Custom,
 		}
@@ -226,6 +225,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
+		providerIndexes[rp.ID] = len(result)
 		result = append(result, pi)
 	}
 	// An image-only custom provider may have no chat models and therefore no
@@ -233,7 +233,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	// visible without teaching the chat registry to route those models.
 	for providerID, pc := range configuredProviders {
 		imageModels := imageModelsByProvider[providerID]
-		if seenProviders[providerID] || pc == nil || len(imageModels) == 0 {
+		if _, seen := providerIndexes[providerID]; seen || pc == nil || len(imageModels) == 0 {
 			continue
 		}
 		name := pc.Name
@@ -251,7 +251,50 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 				ImageResolutions:       append([]string(nil), imageModel.Resolutions...),
 			})
 		}
+		providerIndexes[providerID] = len(result)
 		result = append(result, pi)
+	}
+	// Older clients recorded live models discovered from an API-key custom
+	// provider only in model_state.json. Those explicit refs are valid runtime
+	// routes (the provider supplies the endpoint and credentials), but they do not
+	// exist in the config-backed registry and would therefore disappear from the
+	// picker after a refresh. Project them as conservative text/tool models. New
+	// enables are also persisted into CustomModels by handleToggleModelEnabled;
+	// this fallback keeps existing installations working without a migration that
+	// mutates config during a GET.
+	for _, ref := range modelState.EnabledModels {
+		pc, configured := configuredProviders[ref.Provider]
+		if !configured || pc == nil || ref.Provider == "" || ref.Model == "" ||
+			!modelState.IsModelEnabled(ref, false) || !providerIsCustom(registry, ref.Provider) {
+			continue
+		}
+		providerIndex, exists := providerIndexes[ref.Provider]
+		if !exists {
+			name := pc.Name
+			if name == "" {
+				name = ref.Provider
+			}
+			providerIndex = len(result)
+			providerIndexes[ref.Provider] = providerIndex
+			result = append(result, providerInfo{
+				ID: ref.Provider, Name: name, Kind: ref.Provider, Source: "desktop", Custom: true,
+			})
+		}
+		alreadyListed := false
+		for _, candidate := range result[providerIndex].Models {
+			if candidate.ID == ref.Model {
+				alreadyListed = true
+				break
+			}
+		}
+		if alreadyListed {
+			continue
+		}
+		result[providerIndex].Models = append(result[providerIndex].Models, modelInfo{
+			ID: ref.Model, Name: ref.Model, ToolCall: true, Enabled: true,
+			InputModalities: []string{"text"}, OutputModalities: []string{"text"},
+			CapabilityAvailability: "unsupported",
+		})
 	}
 	imageProvider, imageModel := splitModelReference(cfg.ImageModel)
 
@@ -691,12 +734,20 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 		return
 	}
 	managedConfigChanged := false
+	customConfigChanged := false
 	if req.Enabled {
 		var err error
 		managedConfigChanged, err = s.ensureManagedModelConfigured(r.Context(), req.Provider, req.Model)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
+		}
+		if !managedConfigChanged {
+			customConfigChanged, err = s.ensureCustomModelConfigured(req.Provider, req.Model)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save custom model"})
+				return
+			}
 		}
 	}
 
@@ -709,9 +760,9 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
 		return
 	}
-	if managedConfigChanged {
-		if err := s.rebuildProviderDependents(req.Provider, "enable managed model"); err != nil {
-			writeSavedButNotApplied(w, "managed provider model")
+	if managedConfigChanged || customConfigChanged {
+		if err := s.rebuildProviderDependents(req.Provider, "enable discovered model"); err != nil {
+			writeSavedButNotApplied(w, "provider model")
 			return
 		}
 	}
@@ -720,6 +771,59 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled": req.Enabled,
 	})
+}
+
+// ensureCustomModelConfigured persists a model selected from a custom
+// API-key provider's live /models catalog. Visibility state alone cannot teach
+// the config-backed registry about a previously unknown model, so without this
+// row the switch appears to save but the chat picker has nothing to render.
+func (s *Server) ensureCustomModelConfigured(providerID, modelID string) (bool, error) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return false, err
+	}
+	provider := cfg.GetProviders()[providerID]
+	if provider == nil || provider.Auth != nil || strings.TrimSpace(provider.BaseURL) == "" ||
+		!providerIsCustom(model.NewModelRegistryWithConfig(cfg), providerID) {
+		return false, nil
+	}
+	for _, existing := range provider.CustomModels {
+		if existing.ID == modelID {
+			return false, nil
+		}
+	}
+
+	configChanged := false
+	s.cfgMu.Lock()
+	configLocked := true
+	defer func() {
+		if configLocked {
+			s.cfgMu.Unlock()
+		}
+	}()
+	latest, err := config.MutateConfig(func(current *config.Config) error {
+		pc := current.GetProviders()[providerID]
+		if pc == nil || pc.Auth != nil || strings.TrimSpace(pc.BaseURL) == "" {
+			return errors.New("custom provider configuration changed while enabling model")
+		}
+		for _, existing := range pc.CustomModels {
+			if existing.ID == modelID {
+				return nil
+			}
+		}
+		pc.CustomModels = append(pc.CustomModels, config.CustomModelConfig{
+			ID: modelID, Name: modelID, ToolCall: true,
+		})
+		configChanged = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	s.publishConfigSnapshotLocked(latest)
+	s.cfgMu.Unlock()
+	configLocked = false
+	return configChanged, nil
 }
 
 func (s *Server) ensureManagedModelConfigured(

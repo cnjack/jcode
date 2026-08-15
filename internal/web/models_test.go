@@ -99,6 +99,51 @@ func TestProviderCatalogUsesPersistedModelVisibility(t *testing.T) {
 	}
 }
 
+func TestCustomProviderCatalogUsesPersistedLiveModelVisibility(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": []map[string]string{{"id": "Qwen3.8-27B-MLX-8bit"}},
+		})
+	}))
+	defer live.Close()
+
+	const providerID = "Local"
+	if err := config.SaveConfig(&config.Config{Providers: map[string]*config.ProviderConfig{
+		providerID: {APIKey: "test", BaseURL: live.URL + "/v1", Name: providerID},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveModelState(&config.ModelState{EnabledModels: []config.ModelRef{{
+		Provider: providerID, Model: "Qwen3.8-27B-MLX-8bit",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{registry: model.NewModelRegistry()}
+	req := httptest.NewRequest(http.MethodGet, "/api/providers/Local/models", nil)
+	req.SetPathValue("id", providerID)
+	rec := httptest.NewRecorder()
+	s.handleProviderCatalog(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("catalog: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+	var got []struct {
+		ID    string `json:"id"`
+		Added bool   `json:"added"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "Qwen3.8-27B-MLX-8bit" || !got[0].Added {
+		t.Fatalf("live custom catalog lost persisted visibility: %#v", got)
+	}
+}
+
 func TestManagedProviderCatalogUsesLiveAccountModels(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	err := config.SaveConfig(&config.Config{
@@ -185,6 +230,49 @@ func TestEnableManagedModelPersistsRuntimeMetadata(t *testing.T) {
 	}
 	if !state.IsModelEnabled(config.ModelRef{Provider: "github-copilot", Model: "gpt-5.6"}, false) {
 		t.Fatal("enabled managed model was not persisted in model state")
+	}
+}
+
+func TestEnableCustomProviderLiveModelPersistsRuntimeMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &config.Config{Providers: map[string]*config.ProviderConfig{
+		"Local": {APIKey: "test", BaseURL: "http://127.0.0.1:1234/v1", Name: "Local"},
+	}}
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg:        &config.Config{},
+		registry:   model.NewModelRegistry(),
+		needsSetup: true,
+	}
+	recorder := httptest.NewRecorder()
+	s.handleToggleModelEnabled(recorder, httptest.NewRequest(
+		http.MethodPost, "/api/model-state/enabled",
+		strings.NewReader(`{"provider":"Local","model":"Qwen3.8-27B-MLX-8bit","enabled":true}`),
+	))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("enable model: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	loaded, err := config.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := loaded.Providers["Local"].CustomModels
+	if len(models) != 1 || models[0].ID != "Qwen3.8-27B-MLX-8bit" ||
+		models[0].Name != "Qwen3.8-27B-MLX-8bit" || !models[0].ToolCall || models[0].Managed {
+		t.Fatalf("stored custom live model = %#v", models)
+	}
+	if _, _, ok := s.registry.LookupModel("Local", "Qwen3.8-27B-MLX-8bit"); !ok {
+		t.Fatal("live registry was not rebuilt with enabled custom model")
+	}
+	state, err := config.LoadModelState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.IsModelEnabled(config.ModelRef{Provider: "Local", Model: "Qwen3.8-27B-MLX-8bit"}, false) {
+		t.Fatal("enabled custom model was not persisted in model state")
 	}
 }
 
@@ -384,6 +472,59 @@ func TestListModelsExposesModalitiesAndExplicitImageCatalog(t *testing.T) {
 	if len(image.Sizes) != 1 || image.Sizes[0] != "1024x1024" {
 		t.Fatalf("image sizes = %v", image.Sizes)
 	}
+}
+
+func TestListModelsProjectsPersistedCustomLiveModel(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const (
+		providerID = "Local"
+		modelID    = "Qwen3.8-27B-MLX-8bit"
+	)
+	if err := config.SaveModelState(&config.ModelState{EnabledModels: []config.ModelRef{{
+		Provider: providerID, Model: modelID,
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Providers: map[string]*config.ProviderConfig{
+		providerID: {APIKey: "test", BaseURL: "http://127.0.0.1:1234/v1", Name: providerID},
+	}}
+	s := &Server{cfg: cfg}
+	rec := httptest.NewRecorder()
+	s.handleListModels(rec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Providers []struct {
+			ID     string `json:"id"`
+			Custom bool   `json:"custom"`
+			Models []struct {
+				ID               string   `json:"id"`
+				Enabled          bool     `json:"enabled"`
+				ToolCall         bool     `json:"tool_call"`
+				InputModalities  []string `json:"input_modalities"`
+				OutputModalities []string `json:"output_modalities"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range response.Providers {
+		if provider.ID != providerID {
+			continue
+		}
+		if !provider.Custom || len(provider.Models) != 1 {
+			t.Fatalf("projected custom provider = %#v", provider)
+		}
+		got := provider.Models[0]
+		if got.ID != modelID || !got.Enabled || !got.ToolCall ||
+			!hasModality(got.InputModalities, "text") || !hasModality(got.OutputModalities, "text") {
+			t.Fatalf("projected live model = %#v", got)
+		}
+		return
+	}
+	t.Fatalf("custom provider missing from /api/models: %s", rec.Body.String())
 }
 
 func TestListModelsExposesManagedXAIImageRole(t *testing.T) {
