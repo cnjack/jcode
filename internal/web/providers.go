@@ -483,7 +483,12 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 				if c := customSet[id]; c != nil {
 					result = append(result, customEntry(id))
 				} else {
-					result = append(result, catalogEntry{ID: id, Added: configured[id]})
+					result = append(result, catalogEntry{
+						ID: id,
+						Added: modelState.IsModelEnabled(
+							config.ModelRef{Provider: providerID, Model: id}, configured[id],
+						),
+					})
 				}
 			}
 			writeJSON(w, http.StatusOK, result)
