@@ -1080,14 +1080,16 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			var err error
 			ag, err = createAgent(providerName, modelName)
 			if err != nil {
-				if _, isCloud := cloud.ParseCloudProviderRef(providerName); !isCloud {
-					return nil, fmt.Errorf("error creating agent: %w", err)
-				}
-				// Keep the Desktop control plane usable when a previously
-				// selected Cloud model is temporarily unavailable. We never
-				// silently execute on a local model; the empty agent blocks
-				// sends until the user reconnects or explicitly selects one.
-				config.Logger().Printf("[cloud] selected model unavailable at startup: %v", err)
+				// Model availability must not gate the Desktop control plane. In
+				// particular, managed accounts that require reauthentication need
+				// the settings UI served by this same process in order to recover.
+				// Keep the selected provider/model and let the Engine lazily retry
+				// agent creation before the next send; it never falls back to a
+				// different model silently.
+				config.Logger().Printf(
+					"[web] selected model %s/%s unavailable while building task engine; control plane remains available: %v",
+					providerName, modelName, err,
+				)
 			}
 		}
 
@@ -1273,8 +1275,15 @@ func startWebServer(runtime webServerRuntime) error {
 			return
 		}
 		config.Logger().Printf("[wechat] inbound message from %s: %s", from, text)
-		if !srv.SubmitMessage(text, "wechat") {
-			_ = runtime.wechatClient.SendText(channel.BusyMessage())
+		accepted, submitErr := srv.SubmitMessage(text, "wechat")
+		if submitErr != nil {
+			if sendErr := runtime.wechatClient.SendText(channel.DoneMessage("", submitErr)); sendErr != nil {
+				config.Logger().Printf("[wechat] failed to send submission error: %v", sendErr)
+			}
+		} else if !accepted {
+			if sendErr := runtime.wechatClient.SendText(channel.BusyMessage()); sendErr != nil {
+				config.Logger().Printf("[wechat] failed to send busy response: %v", sendErr)
+			}
 		}
 	})
 	defer func() {
