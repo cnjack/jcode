@@ -106,8 +106,8 @@ func NewFlowSpawn(deps FlowSpawnDeps) flow.SpawnFunc {
 				Handlers:      flowAgentHandlers(),
 				ModelRetryConfig: &adk.ModelRetryConfig{
 					MaxRetries:  3,
-					IsRetryAble: internalmodel.IsRetryable,
-					BackoffFunc: internalmodel.SmartBackoff,
+					ShouldRetry: internalmodel.ShouldRetryModelCall,
+					BackoffFunc: internalmodel.SmartBackoffWithMaxRetries(3),
 				},
 			})
 			if aerr != nil {

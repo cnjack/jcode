@@ -9,11 +9,17 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/cloudwego/eino/adk"
 	"github.com/cnjack/jcode/internal/config"
 	openai "github.com/sashabaranov/go-openai"
 )
+
+// DefaultMaxRetries is shared by the agent retry configuration and retry-status
+// observers so every transport reports the same bounded attempt count.
+const DefaultMaxRetries = 5
 
 // ---------------------------------------------------------------------------
 // Error Classification
@@ -285,21 +291,39 @@ const (
 	jitterFraction = 0.25            // 0-25% random jitter
 )
 
-// IsRetryable returns true if the error should be retried. It is designed to
-// be used as ModelRetryConfig.IsRetryAble in the Eino framework.
+// IsRetryable returns true if the error is safe to retry. The shared Eino
+// decision callback uses it after inspecting whether a stream emitted output.
 //
 // Context overflow errors are NOT retryable — they need compaction.
 // Auth errors are NOT retryable — they need user action.
 // Quota errors are NOT retryable — a spent balance does not refill on a backoff
 // timer, so retrying only delays telling the user the one thing they can act on.
-func IsRetryable(_ context.Context, err error) bool {
+func IsRetryable(ctx context.Context, err error) bool {
 	cat := ClassifyError(err)
 	switch cat {
 	case ErrCategoryTransient, ErrCategoryRateLimit:
+		if observer := RetryObserverFromContext(ctx); observer != nil {
+			observer.record(err)
+		}
 		return true
 	default:
 		return false
 	}
+}
+
+// ShouldRetryModelCall applies the shared retry classification with one
+// important streaming guard: once a model has emitted any output, accepting a
+// framework retry would append a second attempt after an already-visible prefix
+// on append-only transports. Preserve that partial attempt and surface its
+// error instead; retries remain enabled for failures that happen before output.
+func ShouldRetryModelCall(ctx context.Context, retryCtx *adk.RetryContext) *adk.RetryDecision {
+	if retryCtx == nil || !IsRetryable(ctx, retryCtx.Err) {
+		return &adk.RetryDecision{}
+	}
+	if retryCtx.OutputMessage != nil {
+		return &adk.RetryDecision{}
+	}
+	return &adk.RetryDecision{Retry: true}
 }
 
 // SmartBackoff returns a delay for the given retry attempt, respecting
@@ -311,21 +335,45 @@ func IsRetryable(_ context.Context, err error) bool {
 //  2. Otherwise fall back to exponential backoff: 500ms × 2^(attempt-1),
 //     capped at 32s, plus 0-25% random jitter.
 func SmartBackoff(ctx context.Context, attempt int) time.Duration {
+	return smartBackoff(ctx, attempt, DefaultMaxRetries)
+}
+
+// SmartBackoffWithMaxRetries binds the configured retry ceiling to emitted
+// status events. Subagents use a lower ceiling than the top-level agent, so the
+// UI denominator must travel with the callback that actually performs backoff.
+func SmartBackoffWithMaxRetries(maxRetries int) func(context.Context, int) time.Duration {
+	return func(ctx context.Context, attempt int) time.Duration {
+		return smartBackoff(ctx, attempt, maxRetries)
+	}
+}
+
+func smartBackoff(ctx context.Context, attempt, maxRetries int) time.Duration {
+	observer := RetryObserverFromContext(ctx)
 	// Try to extract Retry-After from the most recent error via context.
 	// Eino does not pass the error to BackoffFunc, so we rely on the
-	// context wrapper set by our middleware (see retryErrorKey below).
-	if retryErr := retryErrorFromCtx(ctx); retryErr != nil {
+	// context observer populated by IsRetryable. WithRetryError remains supported
+	// for direct callers and older integrations.
+	retryErr := retryErrorFromCtx(ctx)
+	if retryErr == nil && observer != nil {
+		retryErr = observer.lastError()
+	}
+	delay := time.Duration(0)
+	if retryErr != nil {
 		if serverDelay := ParseRetryAfter(retryErr); serverDelay > 0 {
-			delay := serverDelay
+			delay = serverDelay
 			if delay > maxRetryAfter {
 				delay = maxRetryAfter
 			}
 			config.Logger().Printf("[retry] attempt %d: using server Retry-After %v (capped from %v)", attempt, delay, serverDelay)
-			return delay
 		}
 	}
-
-	return exponentialBackoff(attempt)
+	if delay == 0 {
+		delay = exponentialBackoff(attempt)
+	}
+	if observer != nil && retryErr != nil && ClassifyError(retryErr) == ErrCategoryRateLimit {
+		observer.publish(RetryBackoffEvent{Attempt: attempt, MaxAttempts: maxRetries, Delay: delay})
+	}
+	return delay
 }
 
 // exponentialBackoff calculates delay: baseDelay × 2^(attempt-1) + jitter,
@@ -348,6 +396,116 @@ func exponentialBackoff(attempt int) time.Duration {
 type retryErrorKeyType struct{}
 
 var retryErrorKey retryErrorKeyType
+
+type retryObserverKeyType struct{}
+
+var retryObserverKey retryObserverKeyType
+
+// RetryBackoffEvent is emitted immediately before Eino waits and retries a
+// rate-limited model call. Attempt is 1-based and Delay is the actual backoff
+// selected after applying Retry-After and caps.
+type RetryBackoffEvent struct {
+	Attempt     int
+	MaxAttempts int
+	Delay       time.Duration
+}
+
+// RetryObserver keeps retry observability outside the retry decision itself.
+// It is safe for the model callback and runner event loop to use concurrently.
+type RetryObserver struct {
+	mu      sync.Mutex
+	lastErr error
+	active  bool
+	max     int
+	notify  func(RetryBackoffEvent)
+}
+
+// NewRetryObserver creates a retry observer with an optional event callback.
+func NewRetryObserver(notify func(RetryBackoffEvent)) *RetryObserver {
+	return &RetryObserver{notify: notify}
+}
+
+// WithRetryObserver attaches retry observability to a model request context.
+func WithRetryObserver(ctx context.Context, observer *RetryObserver) context.Context {
+	if observer == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, retryObserverKey, observer)
+}
+
+// RetryObserverFromContext returns the observer attached to ctx, if any.
+func RetryObserverFromContext(ctx context.Context) *RetryObserver {
+	if ctx == nil {
+		return nil
+	}
+	observer, _ := ctx.Value(retryObserverKey).(*RetryObserver)
+	return observer
+}
+
+func (o *RetryObserver) record(err error) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	o.lastErr = err
+	o.mu.Unlock()
+}
+
+func (o *RetryObserver) lastError() error {
+	if o == nil {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.lastErr
+}
+
+func (o *RetryObserver) publish(event RetryBackoffEvent) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	o.active = true
+	o.max = event.MaxAttempts
+	notify := o.notify
+	o.mu.Unlock()
+	if notify != nil {
+		notify(event)
+	}
+}
+
+// Resolve clears the active marker after the first successful model output.
+// It returns the retry ceiling exactly once per cycle so callers can emit a
+// correctly bounded recovery transition without duplicate events.
+func (o *RetryObserver) Resolve() (resolved bool, maxAttempts int) {
+	if o == nil {
+		return false, 0
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.active {
+		return false, 0
+	}
+	o.active = false
+	return true, o.max
+}
+
+// Clear drops an in-flight marker when the turn stops or exhausts retries.
+func (o *RetryObserver) Clear() bool {
+	return o.clearActive()
+}
+
+func (o *RetryObserver) clearActive() bool {
+	if o == nil {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	wasActive := o.active
+	o.active = false
+	o.lastErr = nil
+	return wasActive
+}
 
 // WithRetryError stores an error in context for BackoffFunc to inspect.
 func WithRetryError(ctx context.Context, err error) context.Context {

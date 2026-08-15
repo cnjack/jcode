@@ -59,6 +59,7 @@ var eventDurability = map[string]bool{
 // can include host/error diagnostics that Cloud neither needs nor should store.
 var localOnlyEvents = map[string]bool{
 	"remote_connection_status": true,
+	"model_retry_status":       true,
 }
 
 // isDurableEvent reports whether a WS event type is uploaded as a durable

@@ -147,6 +147,36 @@ func EmitToolProgress(h AgentEventHandler, event ToolProgressEvent) {
 	}
 }
 
+// ModelRetryStatus is the task-local lifecycle of an observable model retry.
+type ModelRetryStatus string
+
+const (
+	ModelRetryWaiting ModelRetryStatus = "waiting"
+	ModelRetryReady   ModelRetryStatus = "ready"
+)
+
+// ModelRetryEvent reports task-local model retry progress without changing the
+// core AgentEventHandler contract used by custom transports.
+type ModelRetryEvent struct {
+	Status      ModelRetryStatus
+	Attempt     int
+	MaxAttempts int
+	RetryIn     time.Duration
+}
+
+// ModelRetryHandler is an optional transport extension for model retry status.
+type ModelRetryHandler interface {
+	OnModelRetry(ModelRetryEvent)
+}
+
+// EmitModelRetry reports a model retry to handlers that support the optional
+// status extension.
+func EmitModelRetry(h AgentEventHandler, event ModelRetryEvent) {
+	if retry, ok := h.(ModelRetryHandler); ok {
+		retry.OnModelRetry(event)
+	}
+}
+
 // TokenUsage carries token usage info to the UI surfaces.
 //
 // TotalTokens is the LAST call's total — i.e. current context-window

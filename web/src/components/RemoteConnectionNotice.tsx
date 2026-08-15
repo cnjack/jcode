@@ -3,17 +3,22 @@ import {
   CheckCircleIcon,
   ClockIcon,
   ExclamationTriangleIcon,
+  SignalIcon,
+  SignalSlashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { remoteConnectionActions, retryRemoteConnection } from '../app/store'
+import { modelRetryActions, remoteConnectionActions, retryRemoteConnection } from '../app/store'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import type { RemoteConnectionNotice as RemoteConnectionNoticeState } from '../app/store'
+import type {
+  ModelRetryNotice,
+  RemoteConnectionNotice as RemoteConnectionNoticeState,
+} from '../app/store'
 
 const READY_VISIBLE_MS = 4_000
 
-/** A task-scoped operational notice for transparent SSH/Docker recovery.
+/** A task-scoped operational notice for SSH/Docker and model retry recovery.
  * It deliberately lives beside the composer instead of replacing the thread:
  * saved history stays readable and transport failures never masquerade as a
  * model/agent error in the transcript. */
@@ -23,6 +28,7 @@ export function RemoteConnectionNotice() {
   const taskId = useAppSelector((s) => s.session.currentSessionId)
   const taskRunning = useAppSelector((s) => s.chat.isRunning)
   const notice = useAppSelector((s) => taskId ? s.remoteConnection.byTaskId[taskId] : undefined)
+  const modelRetry = useAppSelector((s) => taskId ? s.modelRetry.byTaskId[taskId] : undefined)
 
   useEffect(() => {
     if (!notice || notice.status !== 'ready') return
@@ -32,22 +38,67 @@ export function RemoteConnectionNotice() {
     return () => window.clearTimeout(timer)
   }, [dispatch, notice])
 
+  useEffect(() => {
+    if (!modelRetry || modelRetry.status !== 'ready') return
+    const timer = window.setTimeout(() => {
+      dispatch(modelRetryActions.clear({ taskId: modelRetry.task_id, revision: modelRetry.revision }))
+    }, READY_VISIBLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [dispatch, modelRetry])
+
+  if (!notice && !modelRetry) return null
+
+  // A connection outage is the more fundamental blocker. Keep model retry
+  // state alive underneath it so the right status appears if transport recovers.
+  if (modelRetry && (!notice || notice.status === 'ready')) {
+    const Icon = modelRetry.status === 'ready' ? CheckCircleIcon : ClockIcon
+    return (
+      <section
+        className="remote-connection-notice remote-connection-notice--inline"
+        data-status={modelRetry.status}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-label={t('modelRetry.label')}
+      >
+        <span key={modelRetry.revision} className="remote-connection-notice__inline-content">
+          <Icon className="h-4 w-4 remote-connection-notice__inline-icon" aria-hidden="true" />
+          <span className="remote-connection-notice__inline-copy">{modelRetryCopy(modelRetry, t)}</span>
+        </span>
+      </section>
+    )
+  }
+
   if (!notice) return null
 
+  const inline = notice.status === 'waiting' || notice.status === 'reconnecting' || notice.status === 'ready'
+  if (inline) {
+    const Icon = notice.status === 'ready'
+      ? CheckCircleIcon
+      : notice.kind === 'ssh'
+        ? notice.status === 'waiting' ? SignalSlashIcon : SignalIcon
+        : notice.status === 'waiting' ? ClockIcon : ArrowPathIcon
+
+    return (
+      <section
+        className="remote-connection-notice remote-connection-notice--inline"
+        data-status={notice.status}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-label={t('remoteConnection.label')}
+      >
+        <span key={notice.revision} className="remote-connection-notice__inline-content">
+          <Icon className="h-4 w-4 remote-connection-notice__inline-icon" aria-hidden="true" />
+          <span className="remote-connection-notice__inline-copy">{inlineNoticeCopy(notice, t)}</span>
+        </span>
+      </section>
+    )
+  }
+
   const copy = noticeCopy(notice, t)
-  const showProgress = notice.status === 'waiting' || notice.status === 'reconnecting'
   const showAttempt = notice.attempt > 0 && notice.max_attempts > 0
   const outcomeUnknown = notice.code === 'remote_outcome_unknown'
-  const progress = showAttempt
-    ? Math.min(100, Math.max(8, (notice.attempt / notice.max_attempts) * 100))
-    : 8
-  const Icon = notice.status === 'ready'
-    ? CheckCircleIcon
-    : notice.status === 'waiting'
-      ? ClockIcon
-      : notice.status === 'reconnecting'
-        ? ArrowPathIcon
-        : ExclamationTriangleIcon
 
   return (
     <section
@@ -58,15 +109,8 @@ export function RemoteConnectionNotice() {
       aria-atomic="true"
       aria-label={t('remoteConnection.label')}
     >
-      {showProgress && (
-        <div className="remote-connection-notice__track" aria-hidden="true">
-          <span style={{ width: `${progress}%` }} />
-        </div>
-      )}
       <span className="remote-connection-notice__icon" aria-hidden="true">
-        <Icon
-          className={`h-4 w-4${notice.status === 'reconnecting' ? ' animate-spin motion-reduce:animate-none' : ''}`}
-        />
+        <ExclamationTriangleIcon className="h-4 w-4" />
       </span>
       <div className="remote-connection-notice__copy">
         <div className="remote-connection-notice__heading">
@@ -85,7 +129,7 @@ export function RemoteConnectionNotice() {
           </details>
         )}
       </div>
-      {(notice.status === 'ready' || notice.status === 'failed' || notice.status === 'action_required') && (
+      {(notice.status === 'failed' || notice.status === 'action_required') && (
         <div className="remote-connection-notice__actions">
           {(notice.status === 'action_required' || (notice.status === 'failed' && notice.retryable !== false)) && (
             <button
@@ -127,31 +171,39 @@ export function RemoteConnectionNotice() {
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 
+function inlineNoticeCopy(notice: RemoteConnectionNoticeState, t: Translate): string {
+  const options = {
+    attempt: notice.attempt,
+    max: notice.max_attempts,
+    seconds: Math.max(1, Math.ceil((notice.retry_in_ms || 0) / 1_000)),
+  }
+  if (notice.status === 'waiting') {
+    return notice.retry_in_ms
+      ? t('remoteConnection.inline.waitingWithDelay', options)
+      : t('remoteConnection.inline.waiting', options)
+  }
+  if (notice.status === 'reconnecting') {
+    return t('remoteConnection.inline.reconnecting', options)
+  }
+  return t('remoteConnection.inline.ready')
+}
+
+function modelRetryCopy(notice: ModelRetryNotice, t: Translate): string {
+  if (notice.status === 'ready') return t('modelRetry.ready')
+  const options = {
+    attempt: notice.attempt,
+    max: notice.max_attempts,
+    seconds: Math.max(1, Math.ceil((notice.retry_in_ms || 0) / 1_000)),
+  }
+  return notice.retry_in_ms
+    ? t('modelRetry.waitingWithDelay', options)
+    : t('modelRetry.waiting', options)
+}
+
 function noticeCopy(notice: RemoteConnectionNoticeState, t: Translate): { title: string; detail: string } {
   const detailOptions = {
     host: notice.host || t('remoteConnection.remoteHost'),
     transport: t(`remoteConnection.transport.${notice.kind}`),
-    seconds: Math.max(1, Math.ceil((notice.retry_in_ms || 0) / 1_000)),
-  }
-  if (notice.status === 'waiting') {
-    return {
-      title: t('remoteConnection.waiting.title', detailOptions),
-      detail: notice.retry_in_ms
-        ? t('remoteConnection.waiting.withDelay', detailOptions)
-        : t('remoteConnection.waiting.detail', detailOptions),
-    }
-  }
-  if (notice.status === 'reconnecting') {
-    return {
-      title: t('remoteConnection.reconnecting.title', detailOptions),
-      detail: t('remoteConnection.reconnecting.detail', detailOptions),
-    }
-  }
-  if (notice.status === 'ready') {
-    return {
-      title: t('remoteConnection.ready.title', detailOptions),
-      detail: t('remoteConnection.ready.detail', detailOptions),
-    }
   }
   if (notice.status === 'action_required') {
     const codeKey = actionRequiredKey(notice.code)

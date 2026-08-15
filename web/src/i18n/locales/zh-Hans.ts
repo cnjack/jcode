@@ -1066,6 +1066,12 @@ export default {
     remoteHost: '远程主机',
     transport: { ssh: 'SSH', docker: 'Docker' },
     attempt: '第 {attempt}/{max} 次',
+    inline: {
+      waiting: '等待重新连接 {attempt}/{max}',
+      waitingWithDelay: '约 {seconds} 秒后重试 {attempt}/{max}',
+      reconnecting: '正在重新连接 {attempt}/{max}',
+      ready: '已重新连接',
+    },
     waiting: {
       title: '{transport} 连接暂时中断',
       detail: '正在等待重新连接 {host}。',
@@ -1097,6 +1103,13 @@ export default {
     acknowledge: '我知道了',
     details: '技术详情',
     dismiss: '关闭连接状态',
+  },
+
+  modelRetry: {
+    label: '模型重试状态',
+    waiting: '模型限流，正在重试 {attempt}/{max}',
+    waitingWithDelay: '模型限流，约 {seconds} 秒后重试 {attempt}/{max}',
+    ready: '模型已恢复',
   },
 
   wizard: {

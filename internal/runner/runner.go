@@ -121,6 +121,14 @@ func Run(
 			h.OnTokenUpdate(buildTokenUsage(tokenUsage, ctxLimit))
 		})
 	}
+	modelRetryObserver := internalmodel.NewRetryObserver(func(event internalmodel.RetryBackoffEvent) {
+		handler.EmitModelRetry(h, handler.ModelRetryEvent{
+			Status: handler.ModelRetryWaiting, Attempt: event.Attempt,
+			MaxAttempts: event.MaxAttempts, RetryIn: event.Delay,
+		})
+	})
+	ctx = internalmodel.WithRetryObserver(ctx, modelRetryObserver)
+	defer modelRetryObserver.Clear()
 	h.OnAgentStart()
 
 	// Continuations need the exact structured output of the previous lap, but
@@ -482,6 +490,11 @@ func runInner(
 		}
 		eventCount++
 		if event.Err != nil {
+			var willRetry *adk.WillRetryError
+			if errors.As(event.Err, &willRetry) {
+				config.Logger().Printf("[runner] model call will retry: %v", event.Err)
+				continue
+			}
 			// If the run was canceled, the stream error is just fallout from the
 			// cancellation (e.g. "[NodeRunError] context canceled"), not a real
 			// failure — report a clean stop instead of surfacing the noise.
@@ -640,6 +653,20 @@ func runInner(
 				messageExtra = mergeAssistantExtra(messageExtra, chunk.Extra)
 			}
 			if streamErr != nil {
+				var willRetry *adk.WillRetryError
+				if errors.As(streamErr, &willRetry) {
+					if messageText.Len() == 0 && reasoningText.Len() == 0 && len(pending) == 0 && len(messageExtra) == 0 {
+						config.Logger().Printf("[runner] model stream will retry: %v", streamErr)
+						continue
+					}
+					// Shared retry configs reject mid-stream retries, but keep this
+					// boundary defensive for custom agents: never append a fresh
+					// attempt after text already emitted to append-only handlers.
+					config.Logger().Printf("[runner] refusing model retry after partial stream: %v", streamErr)
+					if underlying := errors.Unwrap(streamErr); underlying != nil {
+						streamErr = underlying
+					}
+				}
 				// A failed stream may contain only a prefix of tool-call arguments.
 				// Preserve text already shown to the user, but never persist or
 				// expose incomplete calls as executable conversation history.
@@ -674,6 +701,7 @@ func runInner(
 				h.OnAgentDone(runErr)
 				return finish(true, runErr)
 			}
+			resolveModelRetry(ctx, h)
 			// Notify and record accumulated tool calls in index order.
 			// All tool calls from this assistant message form one batch.
 			indices := make([]int, 0, len(pending))
@@ -734,6 +762,7 @@ func runInner(
 				}
 			}
 		} else if mo.Message != nil {
+			resolveModelRetry(ctx, h)
 			if mo.Message.Content != "" || mo.Message.ReasoningContent != "" || len(mo.Message.ToolCalls) > 0 || len(mo.Message.Extra) > 0 {
 				var toolCalls []schema.ToolCall
 				if len(mo.Message.ToolCalls) > 0 {
@@ -789,6 +818,20 @@ func runInner(
 		return finish(true, persistErr)
 	}
 	return finish(false, nil)
+}
+
+func resolveModelRetry(ctx context.Context, h handler.AgentEventHandler) {
+	observer := internalmodel.RetryObserverFromContext(ctx)
+	if observer == nil {
+		return
+	}
+	resolved, maxAttempts := observer.Resolve()
+	if !resolved {
+		return
+	}
+	handler.EmitModelRetry(h, handler.ModelRetryEvent{
+		Status: handler.ModelRetryReady, MaxAttempts: maxAttempts,
+	})
 }
 
 func mergeAssistantExtra(dst, src map[string]any) map[string]any {

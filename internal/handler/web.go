@@ -27,6 +27,13 @@ type WebTextData struct {
 	Text string `json:"text"`
 }
 
+type WebModelRetryData struct {
+	Status      ModelRetryStatus `json:"status"`
+	Attempt     int              `json:"attempt"`
+	MaxAttempts int              `json:"max_attempts"`
+	RetryInMS   int64            `json:"retry_in_ms,omitempty"`
+}
+
 // WebToolCallData carries tool invocation info. The batch fields group tool
 // calls issued by the same assistant message (batch_size > 1 → concurrent
 // batch); started_at is unix milliseconds.
@@ -679,6 +686,13 @@ func (h *WebHandler) OnToolProgress(ev ToolProgressEvent) {
 		Name: ev.Name, ToolCallID: ev.ToolCallID, Surface: ev.Surface,
 		Phase: ev.Phase, OperationID: ev.OperationID, ErrorCode: ev.ErrorCode,
 		Provider: ev.Provider, Model: ev.Model, Artifacts: ev.Artifacts,
+	})
+}
+
+func (h *WebHandler) OnModelRetry(ev ModelRetryEvent) {
+	h.emit("model_retry_status", WebModelRetryData{
+		Status: ev.Status, Attempt: ev.Attempt, MaxAttempts: ev.MaxAttempts,
+		RetryInMS: ev.RetryIn.Milliseconds(),
 	})
 }
 

@@ -65,8 +65,8 @@ func (e *Engine) reviewWithTools(ctx context.Context, req Request, cm einomodel.
 		MaxIterations: reviewMaxIterations,
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries:  3,
-			IsRetryAble: internalmodel.IsRetryable,
-			BackoffFunc: internalmodel.SmartBackoff,
+			ShouldRetry: internalmodel.ShouldRetryModelCall,
+			BackoffFunc: internalmodel.SmartBackoffWithMaxRetries(3),
 		},
 	})
 	if err != nil {

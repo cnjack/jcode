@@ -80,6 +80,7 @@ export interface WSHandlers {
   onSubagentProgress?: (data: import('./types').SubagentProgressData) => void
   onUserMessage?: (data: { content: string; source: string; local_echo?: boolean }) => void
   onRemoteConnectionStatus?: (data: import('./types').RemoteConnectionStatusData) => void
+  onModelRetryStatus?: (data: import('./types').ModelRetryStatusData) => void
   onTaskStatus?: (taskId: string, running: boolean, project?: string, updatedAt?: string) => void
   onArtifactUpserted?: (data: {
     task_id: string
@@ -89,8 +90,8 @@ export interface WSHandlers {
   }) => void
   /** Fired when the socket opens/closes so the UI can show online/offline. */
   onConnectionChange?: (connected: boolean) => void
-  /** Returns the task currently shown in the foreground. Events tagged with a
-   *  DIFFERENT task id are dropped so they don't pollute the active view. */
+  /** Returns the task currently shown in the foreground. Foreground-only events
+   * tagged with any other task — including while no task is active — are dropped. */
   activeTaskId?: () => string | undefined
   /** Existing conversation whose history snapshot is ready but has not yet
    * become foreground. Its task-scoped events are buffered by the bridge. */
@@ -117,8 +118,14 @@ const TASK_ID_DATA_TYPES = new Set([
   'agent_done',
   'artifact_upserted',
   'remote_connection_status',
+  'model_retry_status',
 ])
-const BACKGROUND_EVENT_TYPES = new Set(['agent_done', 'artifact_upserted', 'remote_connection_status'])
+const BACKGROUND_EVENT_TYPES = new Set([
+  'agent_done',
+  'artifact_upserted',
+  'remote_connection_status',
+  'model_retry_status',
+])
 const PENDING_FOREGROUND_EVENT_TYPES = new Set([
   'agent_start',
   'agent_text',
@@ -140,6 +147,7 @@ const PENDING_FOREGROUND_EVENT_TYPES = new Set([
   'subagent_progress',
   'user_message',
   'remote_connection_status',
+  'model_retry_status',
 ])
 
 export class WSClient {
@@ -193,6 +201,7 @@ export class WSClient {
       if (this.gen !== gen || this.ws !== ws) return
       try {
         const msg: WSMessage = JSON.parse(event.data)
+        const taskRoutingEnabled = this.handlers.activeTaskId !== undefined
         const active = this.handlers.activeTaskId?.()
         let data = msg.data
         if (msg.task_id && TASK_ID_DATA_TYPES.has(msg.type)) {
@@ -208,10 +217,14 @@ export class WSClient {
           this.handlers.onPendingTaskEvent?.({ type: msg.type, taskId: msg.task_id, data })
           return
         }
-        // Events tagged with a different task id are dropped so they don't
-        // pollute the active view — EXCEPT agent_done, which the bridge needs
-        // for every session to drain that session's type-ahead queue.
-        if (msg.task_id && active && msg.task_id !== active && !BACKGROUND_EVENT_TYPES.has(msg.type)) return
+        // Foreground mutations must match the active task. This also covers the
+        // short new-chat window where currentSessionId is empty: a running
+        // background task must not repopulate the freshly cleared timeline.
+        // Background metadata still passes so queues/status/sidebar can settle.
+        if (
+          taskRoutingEnabled && msg.task_id && msg.task_id !== active &&
+          !BACKGROUND_EVENT_TYPES.has(msg.type)
+        ) return
         dispatchWSHandler(this.handlers, msg.type, data)
       } catch {
         // parse error — drop
@@ -318,6 +331,7 @@ export function dispatchWSHandler(handlers: WSHandlers, type: string, data: unkn
     case 'subagent_progress': handlers.onSubagentProgress?.(d); break
     case 'user_message': handlers.onUserMessage?.(d); break
     case 'remote_connection_status': handlers.onRemoteConnectionStatus?.(d); break
+    case 'model_retry_status': handlers.onModelRetryStatus?.(d); break
     case 'task_status': handlers.onTaskStatus?.(d?.task_id, !!d?.running, d?.project, d?.updated_at); break
     case 'artifact_upserted': handlers.onArtifactUpserted?.(d); break
   }

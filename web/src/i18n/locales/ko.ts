@@ -975,6 +975,12 @@ export default {
     remoteHost: '원격 호스트',
     transport: { ssh: 'SSH', docker: 'Docker' },
     attempt: '{attempt}/{max}번째 시도',
+    inline: {
+      waiting: '다시 연결 대기 중 {attempt}/{max}',
+      waitingWithDelay: '약 {seconds}초 후 재시도 {attempt}/{max}',
+      reconnecting: '다시 연결 중 {attempt}/{max}',
+      ready: '다시 연결됨',
+    },
     waiting: {
       title: '{transport} 연결이 일시적으로 끊겼습니다',
       detail: '{host}에 다시 연결하기 위해 기다리는 중입니다.',
@@ -1006,6 +1012,13 @@ export default {
     acknowledge: '확인했습니다',
     details: '기술 세부 정보',
     dismiss: '연결 상태 닫기',
+  },
+
+  modelRetry: {
+    label: '모델 재시도 상태',
+    waiting: '모델 요청이 제한되었습니다. 재시도 중 {attempt}/{max}',
+    waitingWithDelay: '모델 요청이 제한되었습니다. 약 {seconds}초 후 재시도 {attempt}/{max}',
+    ready: '모델이 복구되었습니다',
   },
 
   wizard: {

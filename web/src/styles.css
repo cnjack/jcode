@@ -1207,9 +1207,9 @@ html.is-tauri-macos .titlebar-drag {
   color: var(--color-muted-foreground);
 }
 
-/* ─── Task-scoped remote recovery ───
-   A quiet operational layer above the composer. It deliberately does not use
-   chat error styling: an SSH transport interruption is not a model failure. */
+/* ─── Task-scoped operational recovery ───
+   A quiet layer above the composer for bounded SSH/Docker and model retries.
+   Transient recovery stays outside the permanent chat transcript. */
 .remote-connection-notice {
   position: relative;
   display: grid;
@@ -1239,17 +1239,60 @@ html.is-tauri-macos .titlebar-drag {
   border-color: var(--color-error-fg);
   background: var(--color-error-bg);
 }
-.remote-connection-notice__track {
-  position: absolute;
-  inset: 0 0 auto;
-  height: 2px;
-  background: var(--color-border);
+.remote-connection-notice--inline {
+  display: flex;
+  min-height: 1.5rem;
+  align-items: center;
+  margin-bottom: 0.45rem;
+  padding: 0.125rem 0.5rem;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-muted-foreground);
 }
-.remote-connection-notice__track > span {
-  display: block;
-  height: 100%;
-  background: var(--color-warning-fg);
-  transition: width var(--duration-normal);
+.remote-connection-notice--inline[data-status='waiting'],
+.remote-connection-notice--inline[data-status='reconnecting'] {
+  border-color: transparent;
+  background: transparent;
+}
+.remote-connection-notice--inline[data-status='ready'] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-success-fg);
+}
+.remote-connection-notice__inline-content {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  animation: remote-connection-status-in var(--duration-fast) ease-out;
+}
+.remote-connection-notice__inline-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+.remote-connection-notice__inline-copy {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes remote-connection-status-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .remote-connection-notice__icon {
   display: inline-flex;
@@ -1367,9 +1410,10 @@ html.is-tauri-macos .titlebar-drag {
   outline-offset: -2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .remote-connection-notice__track > span,
+  .remote-connection-notice__inline-content,
   .remote-connection-notice__retry,
   .remote-connection-notice__dismiss {
+    animation: none;
     transition: none;
   }
 }

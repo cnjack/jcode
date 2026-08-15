@@ -28,7 +28,7 @@ import type {
 } from 'jcode-ui-core'
 import { api, isAPIError } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
-import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef, type RemoteConnectRequest, type RemoteHostKeyErrorPayload, type RemoteHostKeyErrorCode, type RemoteConnectionStatusData, type SessionActivationResponse } from '../lib/types'
+import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef, type RemoteConnectRequest, type RemoteHostKeyErrorPayload, type RemoteHostKeyErrorCode, type RemoteConnectionStatusData, type ModelRetryStatusData, type SessionActivationResponse } from '../lib/types'
 import { parseRemoteLabel } from '../lib/remote'
 import { i18n, setLocale, SUPPORTED_LOCALES } from '../i18n'
 import { hydrateTheme } from '../lib/useTheme'
@@ -1272,6 +1272,58 @@ const remoteConnectionSlice = createSlice({
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
+// model retry slice — task-scoped rate-limit backoff notices
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ModelRetryNotice extends Omit<ModelRetryStatusData, 'status'> {
+  task_id: string
+  status: 'waiting' | 'ready'
+  /** Guards the recovery timer against a newer retry cycle for this task. */
+  revision: number
+}
+
+interface ModelRetryState {
+  byTaskId: Record<string, ModelRetryNotice>
+}
+
+const initialModelRetry: ModelRetryState = { byTaskId: {} }
+
+const modelRetrySlice = createSlice({
+  name: 'modelRetry',
+  initialState: initialModelRetry,
+  reducers: {
+    statusReceived(s, a: { payload: ModelRetryStatusData }) {
+      const taskId = a.payload.task_id
+      if (!taskId) return
+      const previous = s.byTaskId[taskId]
+      s.byTaskId[taskId] = {
+        ...a.payload,
+        task_id: taskId,
+        status: a.payload.status === 'ready' ? 'ready' : 'waiting',
+        attempt: Math.max(0, a.payload.attempt || 0),
+        max_attempts: Math.max(0, a.payload.max_attempts || 0),
+        retry_in_ms: a.payload.retry_in_ms === undefined
+          ? undefined
+          : Math.max(0, a.payload.retry_in_ms),
+        revision: (previous?.revision || 0) + 1,
+      }
+    },
+    clearWaiting(s, a: { payload: string }) {
+      if (s.byTaskId[a.payload]?.status === 'waiting') delete s.byTaskId[a.payload]
+    },
+    clear(s, a: { payload: { taskId: string; revision?: number } }) {
+      const current = s.byTaskId[a.payload.taskId]
+      if (!current) return
+      if (a.payload.revision !== undefined && current.revision !== a.payload.revision) return
+      delete s.byTaskId[a.payload.taskId]
+    },
+    reset(s) {
+      s.byTaskId = {}
+    },
+  },
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
 // model slice — provider/model/mode/favorites
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1493,6 +1545,7 @@ export const chatActions = chatSlice.actions
 export const sessionActions = sessionSlice.actions
 export const conversationLoadActions = conversationLoadSlice.actions
 export const remoteConnectionActions = remoteConnectionSlice.actions
+export const modelRetryActions = modelRetrySlice.actions
 export const modelActions = modelSlice.actions
 export const uiActions = uiSlice.actions
 
@@ -2592,6 +2645,7 @@ export const store = configureStore({
     session: sessionSlice.reducer,
     conversationLoad: conversationLoadSlice.reducer,
     remoteConnection: remoteConnectionSlice.reducer,
+    modelRetry: modelRetrySlice.reducer,
     model: modelSlice.reducer,
     ui: uiSlice.reducer,
   },

@@ -13,6 +13,7 @@ import {
   chatActions,
   sessionActions,
   remoteConnectionActions,
+  modelRetryActions,
   modelActions,
   sendMessage,
   loadTasks,
@@ -76,6 +77,7 @@ export function createWSHandlers(
   const applyAgentDoneBackgroundEffects = (taskId: string | undefined, background: boolean) => {
     // These effects belong to the completed task even when its foreground
     // transcript is still pending or the user later cancels navigation.
+    if (taskId) dispatch(modelRetryActions.clearWaiting(taskId))
     void dispatch(loadTasks() as never)
     void dispatch(loadSessions() as never)
     const queued = taskId ? getState().chat.queuedBySession[taskId] : undefined
@@ -315,6 +317,9 @@ export function createWSHandlers(
     },
     onRemoteConnectionStatus: (d) => {
       dispatch(remoteConnectionActions.statusReceived(d))
+    },
+    onModelRetryStatus: (d) => {
+      dispatch(modelRetryActions.statusReceived(d))
     },
     onTaskStatus: (taskId, running, project, updatedAt) => {
       dispatch(sessionActions.setTaskRunning({ taskId, running }))

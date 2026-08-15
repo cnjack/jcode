@@ -976,6 +976,12 @@ export default {
     remoteHost: 'リモートホスト',
     transport: { ssh: 'SSH', docker: 'Docker' },
     attempt: '{attempt}/{max} 回目',
+    inline: {
+      waiting: '再接続を待機中 {attempt}/{max}',
+      waitingWithDelay: '約 {seconds} 秒後に再試行 {attempt}/{max}',
+      reconnecting: '再接続中 {attempt}/{max}',
+      ready: '再接続しました',
+    },
     waiting: {
       title: '{transport} 接続が一時的に切れました',
       detail: '{host} への再接続を待機しています。',
@@ -1007,6 +1013,13 @@ export default {
     acknowledge: '確認しました',
     details: '技術的な詳細',
     dismiss: '接続状態を閉じる',
+  },
+
+  modelRetry: {
+    label: 'モデル再試行ステータス',
+    waiting: 'モデルがレート制限中です。再試行しています {attempt}/{max}',
+    waitingWithDelay: 'モデルがレート制限中です。約 {seconds} 秒後に再試行 {attempt}/{max}',
+    ready: 'モデルが復旧しました',
   },
 
   wizard: {

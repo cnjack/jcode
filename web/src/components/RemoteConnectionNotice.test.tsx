@@ -6,6 +6,7 @@ import { i18n } from '../i18n'
 import {
   conversationLoadActions,
   cancelConversationLoad,
+  modelRetryActions,
   remoteConnectionActions,
   sessionActions,
   store,
@@ -15,6 +16,7 @@ import { RemoteConnectionNotice } from './RemoteConnectionNotice'
 beforeEach(async () => {
   await i18n.changeLanguage('en')
   store.dispatch(conversationLoadActions.reset())
+  store.dispatch(modelRetryActions.reset())
   store.dispatch(remoteConnectionActions.reset())
   store.dispatch(sessionActions.setCurrentSession('task-active'))
   store.dispatch(sessionActions.setProjectPath('ssh://dev@example.com/workspace'))
@@ -24,6 +26,7 @@ afterEach(() => {
   cleanup()
   vi.useRealTimers()
   vi.restoreAllMocks()
+  store.dispatch(modelRetryActions.reset())
   store.dispatch(remoteConnectionActions.reset())
 })
 
@@ -32,6 +35,36 @@ function renderNotice() {
 }
 
 describe('RemoteConnectionNotice', () => {
+  it('shows model rate-limit backoff in the same quiet inline status position', () => {
+    store.dispatch(modelRetryActions.statusReceived({
+      task_id: 'task-active', status: 'waiting', attempt: 1, max_attempts: 5, retry_in_ms: 1_250,
+    }))
+
+    renderNotice()
+
+    const status = screen.getByRole('status', { name: 'Model retry status' })
+    expect(status.className).toContain('remote-connection-notice--inline')
+    expect(status.querySelector('svg')?.classList.contains('h-4')).toBe(true)
+    expect(status.querySelector('svg')?.classList.contains('w-4')).toBe(true)
+    expect(screen.getByText('Model rate limited. Retrying in about 2s 1/5')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('shows an active model retry instead of a stale connection recovery notice', () => {
+    store.dispatch(remoteConnectionActions.statusReceived({
+      task_id: 'task-active', kind: 'ssh', status: 'ready', attempt: 2, max_attempts: 8,
+    }))
+    store.dispatch(modelRetryActions.statusReceived({
+      task_id: 'task-active', status: 'waiting', attempt: 1, max_attempts: 5, retry_in_ms: 1_000,
+    }))
+
+    renderNotice()
+
+    expect(screen.getByRole('status', { name: 'Model retry status' })).toBeTruthy()
+    expect(screen.getByText('Model rate limited. Retrying in about 1s 1/5')).toBeTruthy()
+    expect(screen.queryByText('Reconnected')).toBeNull()
+  })
+
   it('announces a bounded backoff with attempt and delay without replacing the conversation', () => {
     store.dispatch(remoteConnectionActions.statusReceived({
       task_id: 'task-active',
@@ -46,8 +79,9 @@ describe('RemoteConnectionNotice', () => {
     renderNotice()
 
     expect(screen.getByRole('status', { name: 'Remote connection status' })).toBeTruthy()
-    expect(screen.getByText('Attempt 2/8')).toBeTruthy()
-    expect(screen.getByText('Retrying dev@example.com in about 3s.')).toBeTruthy()
+    expect(screen.getByText('Retrying in about 3s 2/8')).toBeTruthy()
+    expect(document.querySelector('.remote-connection-notice__track')).toBeNull()
+    expect(screen.getByRole('status').className).toContain('remote-connection-notice--inline')
   })
 
   it('does not expose a background task status in the foreground conversation', () => {
@@ -62,6 +96,25 @@ describe('RemoteConnectionNotice', () => {
     renderNotice()
 
     expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('renders an active SSH reconnect as a quiet inline status', () => {
+    store.dispatch(remoteConnectionActions.statusReceived({
+      task_id: 'task-active',
+      kind: 'ssh',
+      status: 'reconnecting',
+      attempt: 1,
+      max_attempts: 8,
+      host: 'dev@example.com',
+    }))
+
+    renderNotice()
+
+    const status = screen.getByRole('status', { name: 'Remote connection status' })
+    expect(status.className).toContain('remote-connection-notice--inline')
+    expect(screen.getByText('Reconnecting 1/8')).toBeTruthy()
+    expect(screen.queryByText(/dev@example\.com/)).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
   })
 
   it('does not let an old recovered timer clear a newer status revision', () => {
@@ -113,7 +166,7 @@ describe('RemoteConnectionNotice', () => {
 
     await waitFor(() => expect(activate).toHaveBeenCalledTimes(1))
     expect(activate.mock.calls[0][0]).toMatchObject({ session_id: 'task-active', focus: false })
-    await waitFor(() => expect(screen.getByText('SSH connection restored')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Reconnected')).toBeTruthy())
   })
 
   it('clears a manual retry notice when the user switches tasks before focus', async () => {

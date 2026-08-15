@@ -24,6 +24,50 @@ afterEach(() => {
 })
 
 describe('WSClient artifact routing', () => {
+  it('keeps legacy all-task delivery when no active-task resolver is configured', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const onToolCall = vi.fn()
+    const client = new WSClient({ onToolCall })
+    client.connect()
+
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({
+      type: 'tool_call',
+      task_id: 'task-running',
+      data: { name: 'execute', args: '{}', tool_call_id: 'call-legacy' },
+    }) })
+
+    expect(onToolCall).toHaveBeenCalledTimes(1)
+    client.disconnect()
+  })
+
+  it('does not leak a running task tool event into the new-chat gap', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const onToolCall = vi.fn()
+    const onAgentDone = vi.fn()
+    const client = new WSClient({
+      activeTaskId: () => undefined,
+      onToolCall,
+      onAgentDone,
+    })
+    client.connect()
+
+    const socket = FakeWebSocket.instances[0]
+    socket.onmessage?.({ data: JSON.stringify({
+      type: 'tool_call',
+      task_id: 'task-running-over-ssh',
+      data: { name: 'execute', args: '{}', tool_call_id: 'call-background' },
+    }) })
+    socket.onmessage?.({ data: JSON.stringify({
+      type: 'agent_done',
+      task_id: 'task-running-over-ssh',
+      data: {},
+    }) })
+
+    expect(onToolCall).not.toHaveBeenCalled()
+    expect(onAgentDone).toHaveBeenCalledWith({ task_id: 'task-running-over-ssh' })
+    client.disconnect()
+  })
+
   it('delivers background artifact metadata with its task id', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket)
     const onArtifactUpserted = vi.fn()
