@@ -527,6 +527,78 @@ func TestListModelsProjectsPersistedCustomLiveModel(t *testing.T) {
 	t.Fatalf("custom provider missing from /api/models: %s", rec.Body.String())
 }
 
+func TestProviderUpdateDoesNotProjectRemovedCustomModel(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const (
+		providerID = "Local"
+		removedID  = "removed-model"
+		survivorID = "survivor-model"
+	)
+	cfg := &config.Config{
+		Model: providerID + "/" + survivorID,
+		Providers: map[string]*config.ProviderConfig{
+			providerID: {
+				APIKey: "test", BaseURL: "http://127.0.0.1:1234/v1", Name: providerID,
+				CustomModels: []config.CustomModelConfig{
+					{ID: removedID, ToolCall: true},
+					{ID: survivorID, ToolCall: true},
+				},
+			},
+		},
+	}
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveModelState(&config.ModelState{EnabledModels: []config.ModelRef{{
+		Provider: providerID, Model: removedID,
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{cfg: cfg, registry: model.NewModelRegistryWithConfig(cfg), needsSetup: true}
+	updateReq := httptest.NewRequest(
+		http.MethodPut, "/api/providers/Local",
+		strings.NewReader(`{"custom_models":[{"id":"survivor-model"}]}`),
+	)
+	updateReq.SetPathValue("id", providerID)
+	updateRec := httptest.NewRecorder()
+	s.handleUpdateProvider(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("provider update: status=%d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	modelsRec := httptest.NewRecorder()
+	s.handleListModels(modelsRec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	if modelsRec.Code != http.StatusOK {
+		t.Fatalf("list models: status=%d body=%s", modelsRec.Code, modelsRec.Body.String())
+	}
+	var response struct {
+		Providers []struct {
+			ID     string `json:"id"`
+			Models []struct {
+				ID string `json:"id"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(modelsRec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	foundSurvivor := false
+	for _, provider := range response.Providers {
+		if provider.ID != providerID {
+			continue
+		}
+		for _, candidate := range provider.Models {
+			if candidate.ID == removedID {
+				t.Fatalf("removed custom model was projected again: %s", modelsRec.Body.String())
+			}
+			foundSurvivor = foundSurvivor || candidate.ID == survivorID
+		}
+	}
+	if !foundSurvivor {
+		t.Fatalf("surviving custom model missing: %s", modelsRec.Body.String())
+	}
+}
+
 func TestListModelsExposesManagedXAIImageRole(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

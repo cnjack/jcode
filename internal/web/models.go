@@ -261,11 +261,15 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	// picker after a refresh. Project them as conservative text/tool models. New
 	// enables are also persisted into CustomModels by handleToggleModelEnabled;
 	// this fallback keeps existing installations working without a migration that
-	// mutates config during a GET.
+	// mutates config during a GET. Keep it limited to legacy API-key profiles with
+	// no declared chat or image models: once config has an authored catalog, it is
+	// authoritative and removals from the provider editor must stay removed.
 	for _, ref := range modelState.EnabledModels {
 		pc, configured := configuredProviders[ref.Provider]
 		if !configured || pc == nil || ref.Provider == "" || ref.Model == "" ||
-			!modelState.IsModelEnabled(ref, false) || !providerIsCustom(registry, ref.Provider) {
+			pc.Auth != nil || strings.TrimSpace(pc.BaseURL) == "" || pc.HasConfiguredChatModels() ||
+			pc.ImageEndpoint != nil || !modelState.IsModelEnabled(ref, false) ||
+			!providerIsCustom(registry, ref.Provider) {
 			continue
 		}
 		providerIndex, exists := providerIndexes[ref.Provider]
@@ -745,6 +749,10 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 		if !managedConfigChanged {
 			customConfigChanged, err = s.ensureCustomModelConfigured(req.Provider, req.Model)
 			if err != nil {
+				config.Logger().Printf(
+					"[models] custom model persistence failed provider=%q model=%q: %v",
+					req.Provider, req.Model, err,
+				)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save custom model"})
 				return
 			}
@@ -780,7 +788,7 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 func (s *Server) ensureCustomModelConfigured(providerID, modelID string) (bool, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("load config for custom provider %q: %w", providerID, err)
 	}
 	provider := cfg.GetProviders()[providerID]
 	if provider == nil || provider.Auth != nil || strings.TrimSpace(provider.BaseURL) == "" ||
@@ -818,7 +826,7 @@ func (s *Server) ensureCustomModelConfigured(providerID, modelID string) (bool, 
 		return nil
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("persist custom model %q for provider %q: %w", modelID, providerID, err)
 	}
 	s.publishConfigSnapshotLocked(latest)
 	s.cfgMu.Unlock()
