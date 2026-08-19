@@ -19,6 +19,7 @@ import {
   modelActions,
   sessionActions,
   loadWorkspaceState,
+  startScratchChat,
 } from './store'
 import { api } from '../lib/api'
 import { iconForProvider } from '../lib/providerIcons'
@@ -103,6 +104,7 @@ function buildStrings(t: (key: string, opts?: Record<string, unknown>) => string
     workspaceOpenFolder: t('workspace.openFolder'),
     workspaceOpenError: t('workspace.openError'),
     workspacePathPlaceholder: t('projectSwitcher.pathPlaceholder'),
+    workspaceScratchAction: t('workspace.workWithoutProject'),
     remoteConnect: t('nav.remoteConnect'),
 
     branchesTitle: t('branches.title'),
@@ -249,9 +251,11 @@ const actions = {
   async switchWorkspace(path: string) {
     const state = store.getState() as RootState
     if (path === state.session.projectPath) {
-      const resp = await api.newSession()
+      const resp = await api.newSession(undefined, undefined, state.session.workspaceKind)
       store.dispatch(chatActions.clearChat())
       store.dispatch(sessionActions.setCurrentSession(resp.session_id))
+      store.dispatch(sessionActions.setProjectPath(resp.project || resp.workspace_key || resp.pwd || path))
+      store.dispatch(sessionActions.setWorkspaceKind(resp.workspace_kind))
       await store.dispatch(loadWorkspaceState())
       return
     }
@@ -259,7 +263,12 @@ const actions = {
     store.dispatch(chatActions.clearChat())
     store.dispatch(sessionActions.setCurrentSession(''))
     store.dispatch(sessionActions.setProjectPath(resp.pwd || path))
+    store.dispatch(sessionActions.setWorkspaceKind(resp.workspace_kind))
     await store.dispatch(loadWorkspaceState())
+  },
+
+  async startScratchWorkspace() {
+    await store.dispatch(startScratchChat()).unwrap()
   },
 
   openRemoteConnect,
@@ -311,6 +320,7 @@ export function useProductComposerHost(): ProductComposerHost {
   const goalArmed = useAppSelector((s) => s.chat.goalArmed)
   const sessionId = useAppSelector((s) => s.session.currentSessionId)
   const projectPath = useAppSelector((s) => s.session.projectPath)
+  const workspaceKind = useAppSelector((s) => s.session.workspaceKind)
   const tasks = useAppSelector((s) => s.session.tasks)
 
   const strings = useMemo(() => buildStrings(t), [t])
@@ -332,6 +342,7 @@ export function useProductComposerHost(): ProductComposerHost {
       goalArmed,
       sessionId,
       projectPath,
+      workspaceKind,
       tasks,
       strings,
       resolveProviderIcon: iconForProvider,
@@ -341,7 +352,7 @@ export function useProductComposerHost(): ProductComposerHost {
     [
       providerName, modelName, mode, providers, favoriteModels, recentModels,
       imageSupport, effortOverrides, agents, agentName, slashCommands, hasMessages, goalArmed,
-      sessionId, projectPath, tasks, strings,
+      sessionId, projectPath, workspaceKind, tasks, strings,
     ],
   )
 }

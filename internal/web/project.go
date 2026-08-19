@@ -13,6 +13,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/mode"
+	"github.com/cnjack/jcode/internal/session"
 )
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
@@ -164,13 +165,15 @@ func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
 	s.wsBroker.Broadcast(WSEvent{
 		Type: "project_switched",
 		Data: map[string]string{
-			"pwd": req.Path,
+			"pwd":            req.Path,
+			"workspace_kind": string(session.WorkspaceProject),
 		},
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok",
-		"pwd":    req.Path,
+		"status":         "ok",
+		"pwd":            req.Path,
+		"workspace_kind": session.WorkspaceProject,
 	})
 }
 

@@ -9,15 +9,18 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	pathpkg "path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/remote"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/tools"
+	managedworkspace "github.com/cnjack/jcode/internal/workspace"
 )
 
 type conversationKind string
@@ -94,19 +97,20 @@ func parseConversationTarget(project string) (conversationTarget, error) {
 }
 
 type activationResult struct {
-	Status       string           `json:"status"`
-	SessionID    string           `json:"session_id"`
-	Kind         conversationKind `json:"kind"`
-	Pwd          string           `json:"pwd"`
-	Project      string           `json:"project"`
-	WorkspaceKey string           `json:"workspace_key"`
-	Provider     string           `json:"provider,omitempty"`
-	Model        string           `json:"model,omitempty"`
-	Agent        string           `json:"agent,omitempty"`
-	Mode         string           `json:"mode"`
-	Running      bool             `json:"running"`
-	Activated    bool             `json:"activated"`
-	Focused      bool             `json:"focused"`
+	Status        string                `json:"status"`
+	SessionID     string                `json:"session_id"`
+	Kind          conversationKind      `json:"kind"`
+	Pwd           string                `json:"pwd"`
+	Project       string                `json:"project"`
+	WorkspaceKey  string                `json:"workspace_key"`
+	WorkspaceKind session.WorkspaceKind `json:"workspace_kind"`
+	Provider      string                `json:"provider,omitempty"`
+	Model         string                `json:"model,omitempty"`
+	Agent         string                `json:"agent,omitempty"`
+	Mode          string                `json:"mode"`
+	Running       bool                  `json:"running"`
+	Activated     bool                  `json:"activated"`
+	Focused       bool                  `json:"focused"`
 }
 
 func activationSnapshot(eng *Engine, kind conversationKind, activated bool) activationResult {
@@ -115,7 +119,8 @@ func activationSnapshot(eng *Engine, kind conversationKind, activated bool) acti
 	return activationResult{
 		Status: "ready", SessionID: eng.taskID, Kind: kind, Pwd: eng.pwd,
 		Project: project, WorkspaceKey: project,
-		Provider: provider, Model: modelName, Agent: eng.curAgentRole(), Mode: modeName,
+		WorkspaceKind: session.NormalizeWorkspaceKind(eng.workspaceKind),
+		Provider:      provider, Model: modelName, Agent: eng.curAgentRole(), Mode: modeName,
 		Running: eng.running.Load(), Activated: activated,
 	}
 }
@@ -197,14 +202,23 @@ func (s *Server) ensureConversation(
 	ctx context.Context,
 	sessionID, projectPath, source string,
 ) (activationResult, error) {
+	return s.ensureConversationKind(ctx, sessionID, projectPath, source, "")
+}
+
+func (s *Server) ensureConversationKind(
+	ctx context.Context,
+	sessionID, projectPath, source string,
+	requestedKind session.WorkspaceKind,
+) (activationResult, error) {
 	s.taskCreateMu.Lock()
 	defer s.taskCreateMu.Unlock()
-	return s.ensureConversationLocked(ctx, sessionID, projectPath, source)
+	return s.ensureConversationLocked(ctx, sessionID, projectPath, source, requestedKind)
 }
 
 func (s *Server) ensureConversationLocked(
 	ctx context.Context,
 	sessionID, projectPath, source string,
+	requestedKind session.WorkspaceKind,
 ) (activationResult, error) {
 
 	var meta *session.SessionMeta
@@ -222,7 +236,38 @@ func (s *Server) ensureConversationLocked(
 		}
 	}
 
+	workspaceKind := requestedKind
+	switch {
+	case meta != nil:
+		workspaceKind = session.NormalizeWorkspaceKind(meta.WorkspaceKind)
+	case workspaceKind == "":
+		workspaceKind = session.WorkspaceProject
+		if sessionID == "" && projectPath == "" {
+			if active := s.activeEngine(); active != nil && active.workspaceKind == session.WorkspaceScratch {
+				workspaceKind = session.WorkspaceScratch
+			}
+		}
+	default:
+		workspaceKind = session.NormalizeWorkspaceKind(workspaceKind)
+	}
 	project := projectPath
+	createdScratch := ""
+	if meta == nil && sessionID == "" && workspaceKind == session.WorkspaceScratch {
+		if projectPath != "" {
+			return activationResult{}, fmt.Errorf("%w: scratch workspace path is managed by JCode", errInvalidConversationTarget)
+		}
+		var createErr error
+		project, createErr = managedworkspace.CreateScratch(time.Now())
+		if createErr != nil {
+			return activationResult{}, createErr
+		}
+		createdScratch = project
+	}
+	cleanupScratch := func() {
+		if createdScratch != "" {
+			_ = os.Remove(createdScratch) // only removes a failed attempt that stayed empty
+		}
+	}
 	buildMode := s.activeMode()
 	var restoredState *session.SessionState
 	if meta != nil {
@@ -256,9 +301,24 @@ func (s *Server) ensureConversationLocked(
 	if project == "" {
 		project = engineProject(old)
 	}
+	// The managed scratch root is reserved. A new project-classified session may
+	// not bind one of those paths explicitly or by inheriting the active scratch
+	// engine; callers must request scratch so a fresh directory is allocated.
+	if meta == nil && workspaceKind == session.WorkspaceProject && project != "" {
+		if err := managedworkspace.ValidateScratchPath(project); err == nil {
+			return activationResult{}, fmt.Errorf("%w: managed scratch workspace cannot be opened as a project", errInvalidConversationTarget)
+		}
+	}
+	if workspaceKind == session.WorkspaceScratch {
+		if err := managedworkspace.ValidateScratchPath(project); err != nil {
+			cleanupScratch()
+			return activationResult{}, fmt.Errorf("%w: %v", errInvalidConversationTarget, err)
+		}
+	}
 
 	target, err := parseConversationTarget(project)
 	if err != nil {
+		cleanupScratch()
 		return activationResult{}, fmt.Errorf("%w: %v", errInvalidConversationTarget, err)
 	}
 	if meta == nil && source != "" && target.kind != conversationLocal {
@@ -281,8 +341,9 @@ func (s *Server) ensureConversationLocked(
 		}
 	}
 
-	eng, err := s.assembleConversationEngine(ctx, sessionID, target, buildMode)
+	eng, err := s.assembleConversationEngine(ctx, sessionID, target, buildMode, workspaceKind)
 	if err != nil {
+		cleanupScratch()
 		return activationResult{}, err
 	}
 	if restoredState != nil {
@@ -290,6 +351,7 @@ func (s *Server) ensureConversationLocked(
 	}
 	if err := s.publishEngineCandidate(eng, old); err != nil {
 		eng.teardown()
+		cleanupScratch()
 		return activationResult{}, fmt.Errorf("publish conversation %s: %w", eng.taskID, err)
 	}
 	if sessionID == "" {
@@ -303,12 +365,17 @@ func (s *Server) assembleConversationEngine(
 	sessionID string,
 	target conversationTarget,
 	modeName string,
+	workspaceKind session.WorkspaceKind,
 ) (*Engine, error) {
 	if target.kind == conversationLocal {
-		if s.newEngine == nil {
+		factory := s.newEngine
+		if session.NormalizeWorkspaceKind(workspaceKind) == session.WorkspaceScratch {
+			factory = s.newScratchEngine
+		}
+		if factory == nil {
 			return nil, fmt.Errorf("activate local conversation: task creation is not supported")
 		}
-		eng, err := s.assembleLocalEngine(sessionID, target.pwd, modeName, s.newEngine)
+		eng, err := s.assembleLocalEngine(sessionID, target.pwd, modeName, factory)
 		if err != nil {
 			return nil, fmt.Errorf("activate local conversation: %w", err)
 		}

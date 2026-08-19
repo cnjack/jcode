@@ -427,7 +427,13 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 	// that may be headless) exclude them. An agent in an automation run that calls
 	// ask_user would otherwise block on the WS channel forever (no client resolves
 	// it) and stall the run until the liveness ceiling cancels it.
-	buildWebTask := func(taskID, taskPwd, modeStr string, exec tools.RemoteExecutor, excludeInteractive bool) (*web.EngineConfig, error) {
+	buildWebTask := func(
+		taskID, taskPwd, modeStr string,
+		exec tools.RemoteExecutor,
+		excludeInteractive bool,
+		workspaceKind session.WorkspaceKind,
+	) (*web.EngineConfig, error) {
+		scratch := exec == nil && session.NormalizeWorkspaceKind(workspaceKind) == session.WorkspaceScratch
 		// Per-task config snapshot, so a live task is insulated from mid-run
 		// edits (the shared copy in internal/web is guarded by cfgMu). In setup
 		// mode there is no valid config on disk yet — LoadConfig always fails —
@@ -446,11 +452,11 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		if modeStr != "" {
 			startMode = mode.Parse(modeStr)
 		}
-		if exec == nil { // project config overlay (local tasks only)
+		if exec == nil && !scratch { // project config overlay (project-bound local tasks only)
 			config.ApplyProjectOverlay(taskCfg, taskPwd)
 		} else {
-			// Remote tasks skip project config (can't read .jcode/ remotely)
-			// but env vars are local process state and always apply.
+			// Remote and scratch tasks skip project config. Environment variables
+			// are user-owned process state and still apply to both.
 			config.ApplyEnvOverlay(taskCfg)
 		}
 		// Fresh execution environment for this task only.
@@ -473,7 +479,9 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			envLabel = fmt.Sprintf("%s (pwd: %s)", exec.Label(), taskPwd)
 			projectKey = exec.ProjectLabel(taskPwd)
 		} else {
-			taskLoader.ScanProjectSkills(taskPwd)
+			if !scratch {
+				taskLoader.ScanProjectSkills(taskPwd)
+			}
 			taskEnvInfo = util.CollectEnvInfo(taskPwd)
 		}
 
@@ -481,12 +489,15 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		// shared with the workflow_run tool so slash triggers and inline runs
 		// resolve the same set. Project workflows only apply to a local exec.
 		taskFlowLoader := flow.NewLoader()
-		if exec == nil {
+		if exec == nil && !scratch {
 			taskFlowLoader.LoadProject(taskPwd)
 		}
 
 		tbg := tools.NewBackgroundManager(tenv)
 		trec, _ := session.NewRecorder(projectKey, providerName, modelName)
+		if trec != nil {
+			trec.SetWorkspaceKind(workspaceKind)
+		}
 		if taskID != "" && trec != nil {
 			trec.SetUUID(taskID)
 		}
@@ -559,7 +570,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		// on the remote host — the memory store and session index are keyed to
 		// the local machine, so a remote path would just create a junk scope
 		// and never match any sessions.
-		if exec == nil {
+		if exec == nil && !scratch {
 			mempipeline.MaybeStartBackground(taskCfg, taskPwd)
 		}
 
@@ -575,7 +586,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			return prompts.GetSystemPrompt(platform, taskPwd, "local", taskEnvInfo, skillDescs),
 				prompts.GetPlanSystemPrompt(platform, taskPwd, "local", taskEnvInfo)
 		}
-		providerRuntimeLoader := webProviderRuntimeConfigLoader(taskPwd, exec != nil)
+		providerRuntimeLoader := webProviderRuntimeConfigLoader(taskPwd, exec != nil || scratch)
 
 		// Snapshot and wrap process-wide raw MCP endpoints for this task. The
 		// ledger is created once above and reused across every model/mode/config
@@ -686,7 +697,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					config.Logger().Printf("[image] web generate_image unavailable: %v", imageErr)
 				}
 			}
-			if config.MemoryEnabled(agentCfg) {
+			if config.MemoryEnabled(agentCfg) && !scratch {
 				all = append(all, tenv.NewMemoryNoteTool(&tools.MemoryNoteDeps{
 					SessionIDFn: func() string {
 						if trec != nil {
@@ -764,7 +775,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			if loadErr != nil {
 				return nil, fmt.Errorf("reload agent config: %w", loadErr)
 			}
-			if exec == nil {
+			if exec == nil && !scratch {
 				config.ApplyProjectOverlay(agentCfg, taskPwd)
 			} else {
 				config.ApplyEnvOverlay(agentCfg)
@@ -917,7 +928,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			if loadErr != nil {
 				return web.ToolSearchCounts{}
 			}
-			if exec == nil {
+			if exec == nil && !scratch {
 				config.ApplyProjectOverlay(agentCfg, taskPwd)
 			} else {
 				config.ApplyEnvOverlay(agentCfg)
@@ -1047,7 +1058,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			}
 			currentCfg, currentCfgErr := config.LoadConfig()
 			if currentCfgErr == nil {
-				if exec == nil {
+				if exec == nil && !scratch {
 					config.ApplyProjectOverlay(currentCfg, taskPwd)
 				} else {
 					config.ApplyEnvOverlay(currentCfg)
@@ -1096,6 +1107,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		return &web.EngineConfig{
 			TaskID:          taskID,
 			Pwd:             taskPwd,
+			WorkspaceKind:   session.NormalizeWorkspaceKind(workspaceKind),
 			Mode:            startMode.String(),
 			ProviderName:    providerName,
 			ModelName:       modelName,
@@ -1151,6 +1163,7 @@ type webTaskBuilder func(
 	taskID, taskPwd, modeStr string,
 	exec tools.RemoteExecutor,
 	excludeInteractive bool,
+	workspaceKind session.WorkspaceKind,
 ) (*web.EngineConfig, error)
 
 type webServerRuntime struct {
@@ -1193,7 +1206,9 @@ func startWebServer(runtime webServerRuntime) error {
 	}
 
 	cloudSup := newCloudSupervisor(runtime.cfg, runtime.port, webToken)
-	bootEC, err := runtime.buildTask("", runtime.pwd, runtime.startupMode, nil, false)
+	bootEC, err := runtime.buildTask(
+		"", runtime.pwd, runtime.startupMode, nil, false, session.WorkspaceProject,
+	)
 	if err != nil {
 		return err
 	}
@@ -1210,16 +1225,20 @@ func startWebServer(runtime webServerRuntime) error {
 		RebuildForMode: bootEC.RebuildForMode,
 		RebuildForRole: bootEC.RebuildForRole,
 		NewEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
-			return runtime.buildTask(taskID, taskPwd, modeStr, nil, false)
+			return runtime.buildTask(taskID, taskPwd, modeStr, nil, false, session.WorkspaceProject)
+		},
+		NewScratchEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
+			return runtime.buildTask(taskID, taskPwd, modeStr, nil, false, session.WorkspaceScratch)
 		},
 		NewRemoteEngine: func(
 			taskID string, exec tools.RemoteExecutor, remotePwd, modeStr string,
 		) (*web.EngineConfig, error) {
-			return runtime.buildTask(taskID, remotePwd, modeStr, exec, false)
+			return runtime.buildTask(taskID, remotePwd, modeStr, exec, false, session.WorkspaceProject)
 		},
 		NewAutomationEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
-			return runtime.buildTask(taskID, taskPwd, modeStr, nil, true)
+			return runtime.buildTask(taskID, taskPwd, modeStr, nil, true, session.WorkspaceProject)
 		},
+		WorkspaceKind:      session.WorkspaceProject,
 		InitialMode:        runtime.startupMode,
 		TodoStore:          bootEC.TodoStore,
 		Recorder:           bootEC.Recorder,

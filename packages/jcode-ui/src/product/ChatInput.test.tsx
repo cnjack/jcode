@@ -55,6 +55,7 @@ function makeHost(overrides: Partial<ProductComposerHost> = {}): ProductComposer
     goalArmed: false,
     sessionId: 's1',
     projectPath: '/tmp/project',
+    workspaceKind: 'project',
     tasks: [],
     selectModel: vi.fn(),
     selectMode: vi.fn(),
@@ -68,6 +69,7 @@ function makeHost(overrides: Partial<ProductComposerHost> = {}): ProductComposer
     validateWorkspacePaths: vi.fn(async () => []),
     browseFolders: vi.fn(async () => ({ current: '/', folders: [] })),
     switchWorkspace: vi.fn(async () => {}),
+    startScratchWorkspace: vi.fn(async () => {}),
     fetchBranches: vi.fn(async () => ({ current: '', branches: [] })),
     checkoutBranch: vi.fn(async () => ({ branch: '' })),
     setGoal: vi.fn(async () => ({ objective: '', status: 'active' as const })),
@@ -239,6 +241,57 @@ describe('workspace picker', () => {
 
     await waitFor(() => expect(browseFolders).toHaveBeenCalledWith('/tmp/project'))
     expect(screen.getByText('src')).toBeTruthy()
+  })
+
+  it('creates a managed no-project workspace without listing scratch paths as projects', async () => {
+    const startScratchWorkspace = vi.fn(async () => {})
+    renderComposer(makeHost({
+      startScratchWorkspace,
+      tasks: [
+        { uuid: 'project-task', project: '/tmp/project', workspace_kind: 'project', updated_at: '2026-08-19T10:00:00Z' },
+        { uuid: 'scratch-task', project: '/tmp/.jcode/workspace/2026-08-19-001', workspace_kind: 'scratch', updated_at: '2026-08-19T11:00:00Z' },
+      ],
+    }))
+
+    fireEvent.click(screen.getByText('project'))
+    expect(screen.queryByText('2026-08-19-001')).toBeNull()
+    fireEvent.click(screen.getByText('Work without a project'))
+    await waitFor(() => expect(startScratchWorkspace).toHaveBeenCalledTimes(1))
+  })
+
+  it('orders merged workspaces by timestamp instant across UTC offsets', () => {
+    const { container } = renderComposer(makeHost({
+      projectPath: '',
+      tasks: [
+        // 02:00 UTC — the older activity for this workspace.
+        { uuid: 'older-mixed', project: '/tmp/mixed', workspace_kind: 'project', updated_at: '2026-08-19T10:00:00+08:00' },
+        // 05:00 UTC — newer despite its smaller local clock value.
+        { uuid: 'newer-mixed', project: '/tmp/mixed', workspace_kind: 'project', updated_at: '2026-08-19T05:00:00Z' },
+        // 04:00 UTC — should follow the merged /tmp/mixed workspace.
+        { uuid: 'intermediate', project: '/tmp/intermediate', workspace_kind: 'project', updated_at: '2026-08-19T12:00:00+08:00' },
+      ],
+    }))
+
+    const pickerButton = container.querySelector('.ws-pill-action')
+    if (!pickerButton) throw new Error('workspace picker button not found')
+    fireEvent.click(pickerButton)
+
+    const names = [...container.querySelectorAll('.ws-row-name')].map((node) => node.textContent)
+    expect(names).toEqual(['mixed', 'intermediate'])
+  })
+
+  it('shows the no-project state as selected without allocating again', () => {
+    const startScratchWorkspace = vi.fn(async () => {})
+    renderComposer(makeHost({
+      projectPath: '/tmp/.jcode/workspace/2026-08-19-001',
+      workspaceKind: 'scratch',
+      startScratchWorkspace,
+    }))
+
+    fireEvent.click(screen.getByText('Work without a project'))
+    const labels = screen.getAllByText('Work without a project')
+    fireEvent.click(labels[labels.length - 1])
+    expect(startScratchWorkspace).not.toHaveBeenCalled()
   })
 })
 

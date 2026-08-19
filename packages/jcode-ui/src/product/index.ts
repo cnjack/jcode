@@ -41,6 +41,7 @@ export type {
   SlashCommandInfo,
   TaskContextBreakdown,
   TaskStats,
+  WorkspaceKind,
   WorkspaceTaskRef,
   BrowseFolder,
   BrowseResult,

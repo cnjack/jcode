@@ -28,7 +28,7 @@ import type {
 } from 'jcode-ui-core'
 import { api, isAPIError } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
-import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef, type RemoteConnectRequest, type RemoteHostKeyErrorPayload, type RemoteHostKeyErrorCode, type RemoteConnectionStatusData, type ModelRetryStatusData, type SessionActivationResponse } from '../lib/types'
+import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef, type RemoteConnectRequest, type RemoteHostKeyErrorPayload, type RemoteHostKeyErrorCode, type RemoteConnectionStatusData, type ModelRetryStatusData, type SessionActivationResponse, type WorkspaceKind } from '../lib/types'
 import { parseRemoteLabel } from '../lib/remote'
 import { i18n, setLocale, SUPPORTED_LOCALES } from '../i18n'
 import { hydrateTheme } from '../lib/useTheme'
@@ -961,8 +961,11 @@ interface SessionState {
    *  end — never on delete — so the sidebar's project ordering is stable
    *  across conversation deletions. */
   projectTimes: Record<string, string>
+  /** Workspace classification for projectTimes entries, keyed by real path. */
+  projectKinds: Record<string, WorkspaceKind>
   currentSessionId: string
   projectPath: string
+  workspaceKind: WorkspaceKind
   wsConnected: boolean
 }
 
@@ -970,8 +973,10 @@ const initialSession: SessionState = {
   sessions: [],
   tasks: [],
   projectTimes: {},
+  projectKinds: {},
   currentSessionId: '',
   projectPath: '',
+  workspaceKind: 'project',
   wsConnected: false,
 }
 
@@ -1005,6 +1010,10 @@ const sessionSlice = createSlice({
     setProjectPath(s, a: { payload: string }) {
       s.projectPath = a.payload
     },
+    setWorkspaceKind(s, a: { payload: WorkspaceKind | undefined }) {
+      s.workspaceKind = a.payload === 'scratch' ? 'scratch' : 'project'
+      if (s.projectPath) s.projectKinds[s.projectPath] = s.workspaceKind
+    },
     setWsConnected(s, a: { payload: boolean }) {
       s.wsConnected = a.payload
     },
@@ -1020,6 +1029,7 @@ const sessionSlice = createSlice({
       for (const p of a.payload) {
         if (!p.path || !p.updated_at) continue
         if (isNewerTs(p.updated_at, s.projectTimes[p.path])) s.projectTimes[p.path] = p.updated_at
+        s.projectKinds[p.path] = p.workspace_kind === 'scratch' ? 'scratch' : 'project'
       }
     },
     /** Live-bump one project's timestamp (a turn started/ended there). Mirrors
@@ -1028,6 +1038,12 @@ const sessionSlice = createSlice({
       const { path, ts } = a.payload
       if (!path || !ts) return
       if (isNewerTs(ts, s.projectTimes[path])) s.projectTimes[path] = ts
+      if (!s.projectKinds[path]) {
+        const taskKind = s.tasks.find((task) => task.project === path)?.workspace_kind
+        s.projectKinds[path] = taskKind === 'scratch'
+          ? 'scratch'
+          : path === s.projectPath ? s.workspaceKind : 'project'
+      }
     },
     /** Insert or merge a task so the sidebar shows it immediately. */
     upsertTask(s, a: { payload: TaskItem }) {
@@ -1073,6 +1089,7 @@ export interface ConversationLoadTarget {
   uuid: string
   project: string
   title?: string
+  workspaceKind?: WorkspaceKind
 }
 
 export type ConversationLoadPhase =
@@ -1649,6 +1666,7 @@ export function revealSessionInSidebar(
     project?: string
     provider?: string
     model?: string
+    workspaceKind?: WorkspaceKind
   },
 ) {
   if (!opts.uuid) return
@@ -1661,6 +1679,7 @@ export function revealSessionInSidebar(
   dispatch(sessionActions.upsertTask({
     uuid: opts.uuid,
     project: existing?.project || project,
+    workspace_kind: opts.workspaceKind || existing?.workspace_kind || state.session.workspaceKind,
     created_at: existing?.created_at || now,
     updated_at: now,
     provider: opts.provider || existing?.provider || state.model.providerName || '',
@@ -1861,6 +1880,7 @@ export const loadStatus = createAsyncThunk('app/loadStatus', async (_, { dispatc
   const status = await api.status()
   dispatch(chatActions.setRunning(!!status.running))
   dispatch(sessionActions.setProjectPath(status.project || status.workspace_key || status.pwd))
+  dispatch(sessionActions.setWorkspaceKind(status.workspace_kind))
   dispatch(modelActions.setProvider(status.provider))
   dispatch(modelActions.setModel(status.model))
   dispatch(modelActions.setAgent(status.agent || ''))
@@ -2194,6 +2214,7 @@ async function connectAndBindConversation(
       pwd: bind.pwd,
       project: bind.project || bind.label || target.project,
       workspace_key: bind.workspace_key || bind.project || bind.label || target.project,
+      workspace_kind: bind.workspace_kind || 'project',
       provider: bind.provider,
       model: bind.model,
       agent: bind.agent,
@@ -2224,6 +2245,7 @@ async function commitConversation(
   const resumedId = response.session_id || target.uuid
   dispatch(sessionActions.setCurrentSession(resumedId))
   dispatch(sessionActions.setProjectPath(response.project || response.workspace_key || target.project || response.pwd))
+  dispatch(sessionActions.setWorkspaceKind(response.workspace_kind || target.workspaceKind))
   dispatch(remoteConnectionActions.clear({ taskId: resumedId }))
   dispatch(chatActions.setRunning(!!response.running))
   dispatch(modelActions.setProvider(response.provider || ''))
@@ -2362,6 +2384,7 @@ export const openConversation = createAsyncThunk(
       uuid: input.uuid,
       project: input.project || indexedTask?.project || state.session.projectPath,
       title: input.title || indexedTask?.title || indexedSession?.title,
+      workspaceKind: input.workspaceKind || indexedTask?.workspace_kind || state.session.workspaceKind,
     }
     dispatch(uiActions.setView('chat'))
     dispatch(conversationLoadActions.begin({ requestId, target }))
@@ -2394,6 +2417,7 @@ export const retryRemoteConnection = createAsyncThunk(
       uuid: input.taskId,
       project: task?.project || (initial.session.currentSessionId === input.taskId ? initial.session.projectPath : ''),
       title: task?.title || session?.title,
+      workspaceKind: task?.workspace_kind || initial.session.workspaceKind,
     }
 
     if (notice.status === 'action_required') {
@@ -2429,6 +2453,7 @@ export const retryRemoteConnection = createAsyncThunk(
         return
       }
       dispatch(sessionActions.setProjectPath(response.project || response.workspace_key || target.project || response.pwd))
+      dispatch(sessionActions.setWorkspaceKind(response.workspace_kind || target.workspaceKind))
       dispatch(remoteConnectionActions.statusReceived({
         task_id: input.taskId,
         kind: response.kind === 'docker' ? 'docker' : 'ssh',
@@ -2595,21 +2620,42 @@ export const loadSession = createAsyncThunk(
  * ⌘N / ⇧⌘O keyboard shortcuts. The empty session stays out of the sidebar until
  * the first user message (backend only indexes then).
  */
-export const startNewChat = createAsyncThunk('session/startNew', async (_, { dispatch }) => {
+async function provisionNewChat(
+  dispatch: AppDispatch,
+  getState: () => RootState,
+  overrideKind?: WorkspaceKind,
+  surfaceError = false,
+) {
+  const workspaceKind = overrideKind || getState().session.workspaceKind
   await dispatch(cancelConversationLoad())
-  dispatch(chatActions.clearChat())
-  dispatch(sessionActions.setCurrentSession(''))
   dispatch(uiActions.setView('chat'))
   try {
-    const resp = await api.newSession()
+    const resp = await api.newSession(
+      undefined,
+      undefined,
+      workspaceKind,
+    )
+    dispatch(chatActions.clearChat())
+    dispatch(sessionActions.setCurrentSession(''))
     dispatch(sessionActions.setCurrentSession(resp.session_id))
+    dispatch(sessionActions.setProjectPath(resp.project || resp.workspace_key || resp.pwd || getState().session.projectPath))
+    dispatch(sessionActions.setWorkspaceKind(resp.workspace_kind || workspaceKind))
     if (resp.provider !== undefined) dispatch(modelActions.setProvider(resp.provider))
     if (resp.model !== undefined) dispatch(modelActions.setModel(resp.model))
     if (resp.agent !== undefined) dispatch(modelActions.setAgent(resp.agent))
     if (resp.mode !== undefined) dispatch(modelActions.setMode(normalizeMode(resp.mode)))
-  } catch {
-    // surfaced via health/gate
+  } catch (error) {
+    if (surfaceError) throw error
+    // Existing global-new-task behavior stays quiet; health/gate reconciles.
   }
+}
+
+export const startNewChat = createAsyncThunk('session/startNew', async (_, { dispatch, getState }) => {
+  await provisionNewChat(dispatch as AppDispatch, () => getState() as RootState)
+})
+
+export const startScratchChat = createAsyncThunk('session/startScratch', async (_, { dispatch, getState }) => {
+  await provisionNewChat(dispatch as AppDispatch, () => getState() as RootState, 'scratch', true)
 })
 
 export const replaySession = createAsyncThunk(

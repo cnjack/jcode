@@ -1,5 +1,5 @@
 // API client for jcode backend — ported from web/src/composables/api.ts.
-import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, ProviderToolPolicy, ImageEndpointConfig, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse, ArtifactRecord, ArtifactShareResult, ArtifactShareSummary, SessionActivationResponse } from './types'
+import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, ProviderToolPolicy, ImageEndpointConfig, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse, ArtifactRecord, ArtifactShareResult, ArtifactShareSummary, SessionActivationResponse, WorkspaceKind } from './types'
 import type { AuthMethod, ProviderAuthBinding, ProviderAuthFlow, ProviderAuthPollResult, ProviderAuthStatus } from './types'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from './automation'
 import { apiBase } from './apiBase'
@@ -83,7 +83,7 @@ export const api = {
       body: JSON.stringify({ before_user_message: beforeUserMessage }),
     }),
   health: () =>
-    request<{ status: string; version: string; pwd: string; project?: string; workspace_key?: string; provider: string; model: string; agent?: string; mode: string; session_id: string; recent_project?: string; recent_session_id?: string; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
+    request<{ status: string; version: string; pwd: string; project?: string; workspace_key?: string; workspace_kind?: WorkspaceKind; provider: string; model: string; agent?: string; mode: string; session_id: string; recent_project?: string; recent_session_id?: string; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
       '/api/health',
     ),
   // authVerify validates a token typed into the login gate. skipAuth keeps a 401
@@ -101,6 +101,7 @@ export const api = {
       pwd: string
       project?: string
       workspace_key?: string
+      workspace_kind?: WorkspaceKind
       provider: string
       model: string
       agent?: string
@@ -134,7 +135,7 @@ export const api = {
     }),
   deleteSession: (id: string) =>
     request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  newSession: (sessionId?: string, signal?: AbortSignal) =>
+  newSession: (sessionId?: string, signal?: AbortSignal, workspaceKind?: WorkspaceKind) =>
     request<{
       status: string
       session_id: string
@@ -148,6 +149,9 @@ export const api = {
       todos?: TodoItem[]
       running?: boolean
       pwd?: string
+      project?: string
+      workspace_key?: string
+      workspace_kind?: WorkspaceKind
       provider?: string
       model?: string
       agent?: string
@@ -155,7 +159,9 @@ export const api = {
       token?: TokenUpdateData
     }>('/api/sessions', {
       method: 'POST',
-      body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
+      body: sessionId || workspaceKind
+        ? JSON.stringify({ session_id: sessionId, workspace_kind: workspaceKind })
+        : undefined,
       signal,
     }),
   files: (path?: string) => {
@@ -300,7 +306,7 @@ export const api = {
     return request<BrowseResponse>(`/api/browse${q}`)
   },
   switchProject: (path: string, signal?: AbortSignal) =>
-    request<{ status: string; pwd: string }>('/api/project/switch', {
+    request<{ status: string; pwd: string; workspace_kind?: WorkspaceKind }>('/api/project/switch', {
       method: 'POST',
       body: JSON.stringify({ path }),
       signal,

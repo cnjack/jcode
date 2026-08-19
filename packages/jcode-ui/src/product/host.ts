@@ -69,6 +69,8 @@ export interface ProductComposerHost {
 
   // ── Workspace state ───────────────────────────────────────────────────────
   projectPath: string
+  /** Missing means a legacy project-bound host. */
+  workspaceKind?: 'project' | 'scratch'
   /** All known tasks; the workspace picker derives the workspace list from `project`. */
   tasks: WorkspaceTaskRef[]
 
@@ -109,6 +111,8 @@ export interface ProductComposerHost {
    * (the picker shows the error inline).
    */
   switchWorkspace: (path: string) => Promise<void>
+  /** Create and focus a fresh JCode-managed no-project workspace. */
+  startScratchWorkspace?: () => Promise<void>
   /**
    * Desktop-native folder picker. Absent ⇒ the picker only offers the in-app
    * folder browser. A rejection falls back to the in-app browser; null = user

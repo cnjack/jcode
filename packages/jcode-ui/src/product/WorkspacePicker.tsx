@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeftIcon,
+  ChatBubbleLeftRightIcon,
   CheckIcon,
   ChevronDownIcon,
   FolderIcon,
@@ -27,6 +28,7 @@ interface WorkspaceNode {
   path: string
   name: string
   remote: boolean
+  updatedAt: string
 }
 
 interface BrowseFolder {
@@ -34,9 +36,21 @@ interface BrowseFolder {
   path: string
 }
 
+// Session timestamps can be RFC3339 values with either UTC or a numeric offset.
+// Compare parsed instants so a later UTC time is not hidden behind a larger local
+// clock value. Invalid and missing timestamps sort as the oldest activity.
+function compareWorkspaceActivity(a: string, b: string): number {
+  const aTime = a ? Date.parse(a) : Number.NaN
+  const bTime = b ? Date.parse(b) : Number.NaN
+  if (Number.isNaN(aTime)) return Number.isNaN(bTime) ? 0 : -1
+  if (Number.isNaN(bTime)) return 1
+  return aTime - bTime
+}
+
 export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComposerHost; placement?: 'top' | 'bottom' }) {
   const strings = useComposerStrings(host)
   const activePath = host.projectPath
+  const activeScratch = host.workspaceKind === 'scratch'
   const tasks = host.tasks
   const { isRunning } = useRuntimeState()
   const [open, setOpen] = useState(false)
@@ -53,10 +67,23 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
 
   const workspaces = useMemo<WorkspaceNode[]>(() => {
     const map = new Map<string, WorkspaceNode>()
-    if (activePath) map.set(activePath, { path: activePath, name: workspaceName(activePath), remote: isRemotePath(activePath) })
+    if (activePath && !activeScratch) {
+      map.set(activePath, { path: activePath, name: workspaceName(activePath), remote: isRemotePath(activePath), updatedAt: '' })
+    }
     for (const task of tasks) {
-      if (!task.project || map.has(task.project)) continue
-      map.set(task.project, { path: task.project, name: workspaceName(task.project), remote: isRemotePath(task.project) })
+      if (!task.project || task.workspace_kind === 'scratch') continue
+      const existing = map.get(task.project)
+      if (existing) {
+        const updatedAt = task.updated_at || ''
+        if (compareWorkspaceActivity(updatedAt, existing.updatedAt) > 0) existing.updatedAt = updatedAt
+        continue
+      }
+      map.set(task.project, {
+        path: task.project,
+        name: workspaceName(task.project),
+        remote: isRemotePath(task.project),
+        updatedAt: task.updated_at || '',
+      })
     }
     const q = query.trim().toLowerCase()
     return [...map.values()]
@@ -65,16 +92,24 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
       .sort((a, b) => {
         if (a.path === activePath) return -1
         if (b.path === activePath) return 1
-        return a.name.localeCompare(b.name)
+        const byActivity = compareWorkspaceActivity(b.updatedAt, a.updatedAt)
+        if (byActivity !== 0) return byActivity
+        const byName = a.name.localeCompare(b.name)
+        return byName !== 0 ? byName : a.path.localeCompare(b.path)
       })
-  }, [activePath, tasks, missing, query])
+  }, [activePath, activeScratch, tasks, missing, query])
 
-  const activeName = activePath ? workspaceName(activePath) : strings.workspaceNone
-  const activeRemote = isRemotePath(activePath)
+  const activeName = activeScratch
+    ? strings.workspaceScratchAction
+    : activePath ? workspaceName(activePath) : strings.workspaceNone
+  const activeRemote = !activeScratch && isRemotePath(activePath)
 
   const validateKnownPaths = useCallback(async () => {
-    const localPaths = [...new Set(tasks.map((t) => t.project).filter((p) => p && !isRemotePath(p)))]
-    if (activePath && !isRemotePath(activePath)) localPaths.push(activePath)
+    const localPaths = [...new Set(tasks
+      .filter((task) => task.workspace_kind !== 'scratch')
+      .map((task) => task.project)
+      .filter((p) => p && !isRemotePath(p)))]
+    if (activePath && !activeScratch && !isRemotePath(activePath)) localPaths.push(activePath)
     if (localPaths.length === 0) return
     try {
       const missingPaths = await host.validateWorkspacePaths([...new Set(localPaths)])
@@ -82,7 +117,7 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
     } catch {
       // The picker remains usable; failed validation should not hide paths.
     }
-  }, [activePath, tasks, host])
+  }, [activePath, activeScratch, tasks, host])
 
   useEffect(() => {
     void validateKnownPaths()
@@ -169,6 +204,24 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
     host.openRemoteConnect?.()
   }
 
+  async function startScratch() {
+    if (activeScratch) {
+      reset()
+      return
+    }
+    if (!host.startScratchWorkspace) return
+    setSwitching(true)
+    setError('')
+    try {
+      await host.startScratchWorkspace()
+      reset()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : strings.workspaceOpenError)
+    } finally {
+      setSwitching(false)
+    }
+  }
+
   function reset() {
     setOpen(false)
     setQuery('')
@@ -200,7 +253,9 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
         }}
         className="ws-pill ws-pill-action"
       >
-        {activeRemote
+        {activeScratch
+          ? <ChatBubbleLeftRightIcon className="h-3.5 w-3.5 ws-pill-icon" />
+          : activeRemote
           ? <ServerIcon className="h-3.5 w-3.5 ws-pill-icon" />
           : <FolderOpenIcon className="h-3.5 w-3.5 ws-pill-icon" />}
         <span className="ws-name">{activeName}</span>
@@ -292,6 +347,14 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
                   <ServerIcon className="h-3.5 w-3.5" />
                   <span>{strings.remoteConnect}</span>
                 </button>}
+                {host.startScratchWorkspace && <>
+                  <div className="ws-action-separator" />
+                  <button type="button" disabled={switching} className={`ws-action${activeScratch ? ' active' : ''}`} onClick={() => void startScratch()}>
+                    <ChatBubbleLeftRightIcon className="h-3.5 w-3.5" />
+                    <span>{strings.workspaceScratchAction}</span>
+                    {activeScratch && <CheckIcon className="ml-auto h-3.5 w-3.5 ws-check" />}
+                  </button>
+                </>}
               </div>
             </div>
           )}
@@ -484,7 +547,10 @@ const WS_CSS = `
   transition: background 0.12s;
 }
 .ws-action:hover { background: var(--color-muted); }
+.ws-action.active { background: var(--neutral-wash-soft, var(--color-muted)); }
+.ws-action:disabled { opacity: 0.55; cursor: not-allowed; }
 .ws-action svg { color: var(--color-muted-foreground); flex-shrink: 0; }
+.ws-action-separator { height: 1px; margin: 2px 0; background: var(--color-border); }
 .ws-browser-foot {
   display: flex;
   align-items: center;

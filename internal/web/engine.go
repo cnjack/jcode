@@ -59,6 +59,9 @@ type Engine struct {
 	// it is immutable for the task's lifetime; "switching project" creates a new
 	// Engine rather than mutating this one's env in place.
 	pwd string
+	// workspaceKind distinguishes a user-selected project from a JCode-managed
+	// no-project workspace. It is immutable for the task's lifetime.
+	workspaceKind session.WorkspaceKind
 
 	// --- run state (guarded today by Server.mu; gains its own lock in a later
 	// increment once Server.mu's single-run role is gone) ---
@@ -118,6 +121,7 @@ type Engine struct {
 type EngineConfig struct {
 	TaskID          string
 	Pwd             string
+	WorkspaceKind   session.WorkspaceKind
 	Mode            string
 	ProviderName    string
 	ModelName       string
@@ -165,6 +169,7 @@ func newEngine(c *EngineConfig) *Engine {
 	e := &Engine{
 		taskID:          taskID,
 		pwd:             c.Pwd,
+		workspaceKind:   session.NormalizeWorkspaceKind(c.WorkspaceKind),
 		mode:            c.Mode,
 		providerName:    c.ProviderName,
 		modelName:       c.ModelName,
