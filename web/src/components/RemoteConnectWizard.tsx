@@ -386,6 +386,7 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
       setConnectionId('')
       dispatch(chatActions.clearChat())
       dispatch(sessionActions.setProjectPath(res.project || res.workspace_key || res.label || res.pwd))
+      dispatch(sessionActions.setWorkspaceKind(res.workspace_kind))
       dispatch(sessionActions.setCurrentSession(''))
       await dispatch(loadWorkspaceState())
       onBound?.()

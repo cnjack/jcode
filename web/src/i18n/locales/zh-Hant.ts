@@ -156,6 +156,7 @@ export default {
 
   welcome: {
     startIn: '在 {project} 中開始一項新工作',
+    startWithoutProject: '開始一項無專案工作',
     subtitle: '傳送訊息即可開始。{kbd} 查看指令。',
   },
 
@@ -1073,6 +1074,7 @@ export default {
     running: '執行中',
     untitled: '新對話',
     newTaskHere: '在此新建工作',
+    newNoProjectTask: '新建無專案工作',
     filter: {
       title: '篩選與排序',
       status: '狀態',
@@ -1349,6 +1351,8 @@ export default {
 
   workspace: {
     none: '無工作區',
+    noProject: '無專案',
+    workWithoutProject: '不在專案中工作',
     loading: '載入中…',
     noFolders: '無資料夾',
     open: '開啟',

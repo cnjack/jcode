@@ -261,19 +261,20 @@ type EntryImage struct {
 
 // Entry is one line of the JSONL session file.
 type Entry struct {
-	Type       EntryType `json:"type"`
-	UUID       string    `json:"uuid,omitempty"`
-	Project    string    `json:"project,omitempty"`
-	Provider   string    `json:"provider,omitempty"`
-	Model      string    `json:"model,omitempty"`
-	Agent      string    `json:"agent,omitempty"`
-	Content    string    `json:"content,omitempty"`
-	Name       string    `json:"name,omitempty"`         // tool name
-	Args       string    `json:"args,omitempty"`         // tool args JSON
-	Output     string    `json:"output,omitempty"`       // tool output
-	Error      string    `json:"error,omitempty"`        // tool error
-	ToolCallID string    `json:"tool_call_id,omitempty"` // links tool_call ↔ tool_result
-	Timestamp  string    `json:"timestamp"`
+	Type          EntryType     `json:"type"`
+	UUID          string        `json:"uuid,omitempty"`
+	Project       string        `json:"project,omitempty"`
+	WorkspaceKind WorkspaceKind `json:"workspace_kind,omitempty"`
+	Provider      string        `json:"provider,omitempty"`
+	Model         string        `json:"model,omitempty"`
+	Agent         string        `json:"agent,omitempty"`
+	Content       string        `json:"content,omitempty"`
+	Name          string        `json:"name,omitempty"`         // tool name
+	Args          string        `json:"args,omitempty"`         // tool args JSON
+	Output        string        `json:"output,omitempty"`       // tool output
+	Error         string        `json:"error,omitempty"`        // tool error
+	ToolCallID    string        `json:"tool_call_id,omitempty"` // links tool_call ↔ tool_result
+	Timestamp     string        `json:"timestamp"`
 	// Typed tool/generation correlation. These additive fields are shared by
 	// operation journal and enhanced tool-result entries.
 	OperationID string   `json:"operation_id,omitempty"`
@@ -391,13 +392,14 @@ type Entry struct {
 
 // SessionMeta is stored in the index for fast listing.
 type SessionMeta struct {
-	UUID      string `json:"uuid"`
-	Project   string `json:"project"`
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	Agent     string `json:"agent,omitempty"`
-	StartTime string `json:"start_time"` // RFC3339
-	Title     string `json:"title,omitempty"`
+	UUID          string        `json:"uuid"`
+	Project       string        `json:"project"`
+	WorkspaceKind WorkspaceKind `json:"workspace_kind,omitempty"`
+	Provider      string        `json:"provider"`
+	Model         string        `json:"model"`
+	Agent         string        `json:"agent,omitempty"`
+	StartTime     string        `json:"start_time"` // RFC3339
+	Title         string        `json:"title,omitempty"`
 	// Task metadata. Additive — legacy index files simply lack these keys, which
 	// unmarshal to zero values (not pinned / not archived / read).
 	Pinned    bool   `json:"pinned,omitempty"`
@@ -442,7 +444,8 @@ type SessionMeta struct {
 // sidecar file they never touch is immune; losing it only degrades the
 // sidebar to session-derived recency, and the next turn re-stamps it.
 type ProjectMeta struct {
-	UpdatedAt string `json:"updated_at,omitempty"` // RFC3339
+	UpdatedAt     string        `json:"updated_at,omitempty"` // RFC3339
+	WorkspaceKind WorkspaceKind `json:"workspace_kind,omitempty"`
 }
 
 // sessionIndex is the on-disk structure of session.json.
@@ -476,7 +479,7 @@ func isNewerTimestamp(candidate, current string) bool {
 // out-of-order write never moves the timestamp backwards). Callers must hold
 // indexMu, which serializes every read-modify-rename writer of BOTH the
 // session index and the projects file.
-func touchProjectLocked(project, ts string) error {
+func touchProjectLocked(project, ts string, kind WorkspaceKind) error {
 	if project == "" || ts == "" {
 		return nil
 	}
@@ -487,10 +490,20 @@ func touchProjectLocked(project, ts string) error {
 	if projects == nil {
 		projects = make(map[string]ProjectMeta)
 	}
-	if !isNewerTimestamp(ts, projects[project].UpdatedAt) {
+	current := projects[project]
+	changed := false
+	if isNewerTimestamp(ts, current.UpdatedAt) {
+		current.UpdatedAt = ts
+		changed = true
+	}
+	if NormalizeWorkspaceKind(kind) == WorkspaceScratch && current.WorkspaceKind != WorkspaceScratch {
+		current.WorkspaceKind = WorkspaceScratch
+		changed = true
+	}
+	if !changed {
 		return nil
 	}
-	projects[project] = ProjectMeta{UpdatedAt: ts}
+	projects[project] = current
 	return saveProjectsLocked(projects)
 }
 
@@ -615,14 +628,15 @@ func openPrivateSessionAppend(path string) (*os.File, error) {
 // sessions with no conversation are never persisted.
 // Call Close() (or defer it) to finalize.
 type Recorder struct {
-	uuid      string
-	project   string
-	provider  string
-	model     string
-	agent     string
-	startTime time.Time
-	file      *os.File
-	mu        sync.Mutex
+	uuid          string
+	project       string
+	workspaceKind WorkspaceKind
+	provider      string
+	model         string
+	agent         string
+	startTime     time.Time
+	file          *os.File
+	mu            sync.Mutex
 	// Per-teammate fields (empty for leader recorder).
 	customDir string // leader UUID for subagent path
 	agentID   string // teammate agent ID
@@ -651,11 +665,12 @@ type Recorder struct {
 // best-effort and must not break normal operation.
 func NewRecorder(project, provider, model string) (*Recorder, error) {
 	return &Recorder{
-		uuid:      uuid.New().String(),
-		project:   project,
-		provider:  provider,
-		model:     model,
-		startTime: time.Now(),
+		uuid:          uuid.New().String(),
+		project:       project,
+		workspaceKind: WorkspaceProject,
+		provider:      provider,
+		model:         model,
+		startTime:     time.Now(),
 	}, nil
 }
 
@@ -669,6 +684,21 @@ func (r *Recorder) UUID() string {
 
 // Project returns the workspace path this recorder is scoped to.
 func (r *Recorder) Project() string { return r.project }
+
+// WorkspaceKind returns the conversation's persisted workspace classification.
+func (r *Recorder) WorkspaceKind() WorkspaceKind {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return NormalizeWorkspaceKind(r.workspaceKind)
+}
+
+// SetWorkspaceKind classifies a recorder before its first durable entry. It is
+// also safe on resumed recorders: the index is already authoritative there.
+func (r *Recorder) SetWorkspaceKind(kind WorkspaceKind) {
+	r.mu.Lock()
+	r.workspaceKind = NormalizeWorkspaceKind(kind)
+	r.mu.Unlock()
+}
 
 // Provider returns the provider currently attributed to recorded usage.
 func (r *Recorder) Provider() string {
@@ -1436,13 +1466,14 @@ func (r *Recorder) ensureFile() error {
 
 	// Write the header entry (timestamp already known).
 	startEntry := Entry{
-		Type:      EntrySessionStart,
-		UUID:      r.uuid,
-		Project:   r.project,
-		Provider:  r.provider,
-		Model:     r.model,
-		Agent:     r.agent,
-		Timestamp: r.startTime.Format(time.RFC3339),
+		Type:          EntrySessionStart,
+		UUID:          r.uuid,
+		Project:       r.project,
+		WorkspaceKind: NormalizeWorkspaceKind(r.workspaceKind),
+		Provider:      r.provider,
+		Model:         r.model,
+		Agent:         r.agent,
+		Timestamp:     r.startTime.Format(time.RFC3339),
 	}
 	data, err := json.Marshal(startEntry)
 	if err != nil {
@@ -1455,12 +1486,13 @@ func (r *Recorder) ensureFile() error {
 	// Update the shared index (non-fatal, skip for teammate recorders).
 	if r.agentID == "" {
 		_ = addToIndex(r.project, SessionMeta{
-			UUID:      r.uuid,
-			Project:   r.project,
-			Provider:  r.provider,
-			Model:     r.model,
-			Agent:     r.agent,
-			StartTime: r.startTime.Format(time.RFC3339),
+			UUID:          r.uuid,
+			Project:       r.project,
+			WorkspaceKind: NormalizeWorkspaceKind(r.workspaceKind),
+			Provider:      r.provider,
+			Model:         r.model,
+			Agent:         r.agent,
+			StartTime:     r.startTime.Format(time.RFC3339),
 		})
 	}
 	return nil
@@ -1629,7 +1661,7 @@ func addToIndex(project string, meta SessionMeta) error {
 	// the sidebar's project ordering reflects it. Best-effort AFTER the index
 	// write succeeded — a projects-file hiccup must not fail session creation
 	// (the sidebar falls back to session-derived recency).
-	_ = touchProjectLocked(project, meta.StartTime)
+	_ = touchProjectLocked(project, meta.StartTime, meta.WorkspaceKind)
 	return nil
 }
 
@@ -1818,7 +1850,7 @@ func UpdateSessionMeta(uuid string, mutate func(*SessionMeta)) (*SessionMeta, er
 				// UpdatedAt untouched, so they never reorder projects either.
 				// Best-effort, like addToIndex: the index write already succeeded.
 				if metas[i].UpdatedAt != beforeUpdatedAt {
-					_ = touchProjectLocked(project, metas[i].UpdatedAt)
+					_ = touchProjectLocked(project, metas[i].UpdatedAt, metas[i].WorkspaceKind)
 				}
 				updated := metas[i]
 				// The index keys sessions by project, so the stored meta may not

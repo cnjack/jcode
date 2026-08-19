@@ -94,6 +94,7 @@ export interface ProductComposerStrings {
   workspaceOpenFolder: string
   workspaceOpenError: string
   workspacePathPlaceholder: string
+  workspaceScratchAction: string
   remoteConnect: string
 
   // ── branch picker ──
@@ -221,6 +222,7 @@ export const defaultProductComposerStrings: ProductComposerStrings = {
   workspaceOpenFolder: 'Open folder',
   workspaceOpenError: 'Failed to open workspace',
   workspacePathPlaceholder: '/path/to/folder',
+  workspaceScratchAction: 'Work without a project',
   remoteConnect: 'Remote connect',
 
   branchesTitle: 'Branches',

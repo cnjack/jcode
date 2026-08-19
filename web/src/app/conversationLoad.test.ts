@@ -11,6 +11,7 @@ import {
   openConversation,
   sessionActions,
   startNewChat,
+  startScratchChat,
   store,
 } from './store'
 import { createWSHandlers } from './wsBridge'
@@ -22,6 +23,7 @@ beforeEach(async () => {
   store.dispatch(chatActions.dropSessionQueue('session-agent-done-commit'))
   store.dispatch(sessionActions.setCurrentSession(''))
   store.dispatch(sessionActions.setProjectPath(''))
+  store.dispatch(sessionActions.setWorkspaceKind('project'))
 })
 
 afterEach(async () => {
@@ -362,6 +364,26 @@ describe('conversation loading state', () => {
     expect(store.getState().conversationLoad.phase).toBe('idle')
     expect(store.getState().session.currentSessionId).toBe('brand-new')
     expect(store.getState().chat.timeline).toEqual([])
+  })
+
+  it('allocates a fresh scratch workspace for no-project new tasks', async () => {
+    const scratchPath = '/Users/test/.jcode/workspace/2026-08-19-001'
+    const create = vi.spyOn(api, 'newSession').mockResolvedValue({
+      status: 'ok',
+      session_id: 'scratch-session',
+      pwd: scratchPath,
+      project: scratchPath,
+      workspace_kind: 'scratch',
+    })
+
+    await store.dispatch(startScratchChat())
+
+    expect(create).toHaveBeenCalledWith(undefined, undefined, 'scratch')
+    expect(store.getState().session).toMatchObject({
+      currentSessionId: 'scratch-session',
+      projectPath: scratchPath,
+      workspaceKind: 'scratch',
+    })
   })
 
   it('guards a background history repair from overwriting a newer navigation', async () => {

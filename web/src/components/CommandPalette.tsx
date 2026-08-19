@@ -60,6 +60,7 @@ export function CommandPalette() {
         uuid: task.uuid,
         project: task.project || '',
         title: task.title,
+        workspaceKind: task.workspace_kind,
       }))
     } finally {
       setOpening(false)
@@ -90,7 +91,7 @@ export function CommandPalette() {
         id: `task-${task.uuid}`,
         group: t('commandPalette.groups.tasks'),
         label: task.title || `${task.uuid.slice(0, 8)}...`,
-        hint: workspaceName(task.project),
+        hint: task.workspace_kind === 'scratch' ? t('workspace.noProject') : workspaceName(task.project),
         Icon: ChatBubbleLeftIcon,
         run: () => openTask(task),
       })),

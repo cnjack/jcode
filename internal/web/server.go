@@ -92,6 +92,9 @@ type Server struct {
 	// mutating any other task's. taskID is non-empty when resuming an existing
 	// session. nil in setup mode.
 	newEngine func(taskID, pwd, mode string) (*EngineConfig, error)
+	// newScratchEngine builds local tasks without project overlays, project
+	// skills/workflows, or project-memory writers.
+	newScratchEngine func(taskID, pwd, mode string) (*EngineConfig, error)
 
 	// newRemoteEngine is newEngine's remote sibling: it builds a task engine bound
 	// to a remote executor (SSH or Docker) instead of a local pwd.
@@ -270,12 +273,14 @@ type ServerConfig struct {
 	Host                string
 	OpenBrowser         bool
 	Pwd                 string
+	WorkspaceKind       session.WorkspaceKind
 	Version             string
 	Agent               *adk.ChatModelAgent
 	CreateAgent         func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	RebuildForMode      func(planMode bool) (*adk.ChatModelAgent, error)
 	RebuildForRole      func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
 	NewEngine           func(taskID, pwd, mode string) (*EngineConfig, error)                                             // factory for new concurrent task engines (local)
+	NewScratchEngine    func(taskID, pwd, mode string) (*EngineConfig, error)                                             // local JCode-managed no-project task factory
 	NewRemoteEngine     func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine (SSH or Docker)
 	NewAutomationEngine func(taskID, pwd, mode string) (*EngineConfig, error)                                             // headless sibling of NewEngine for automation runs (drops interactive tools)
 	InitialMode         string                                                                                            // unified startup mode string ("approval"/"plan"/"full_access")
@@ -327,6 +332,7 @@ func NewServer(cfg *ServerConfig) *Server {
 	// The bootstrap Engine carries the per-task run state of the initial session.
 	boot := &Engine{
 		pwd:             cfg.Pwd,
+		workspaceKind:   session.NormalizeWorkspaceKind(cfg.WorkspaceKind),
 		handler:         h,
 		agent:           cfg.Agent,
 		todoStore:       cfg.TodoStore,
@@ -373,6 +379,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		version:              cfg.Version,
 		wsBroker:             NewWSBroker(),
 		newEngine:            cfg.NewEngine,
+		newScratchEngine:     cfg.NewScratchEngine,
 		newRemoteEngine:      cfg.NewRemoteEngine,
 		newAutomationEngine:  cfg.NewAutomationEngine,
 		remoteConns:          newRemoteConnRegistry(),
@@ -682,9 +689,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.needsSetup || eng == nil {
 		pwd := ""
 		project := ""
+		workspaceKind := session.WorkspaceProject
 		if eng != nil {
 			pwd = eng.pwd
 			project = engineProject(eng)
+			workspaceKind = session.NormalizeWorkspaceKind(eng.workspaceKind)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":            "needs_setup",
@@ -692,6 +701,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"pwd":               pwd,
 			"project":           project,
 			"workspace_key":     project,
+			"workspace_kind":    workspaceKind,
 			"provider":          "",
 			"model":             "",
 			"agent":             "",
@@ -728,6 +738,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"pwd":               eng.pwd,
 		"project":           project,
 		"workspace_key":     project,
+		"workspace_kind":    session.NormalizeWorkspaceKind(eng.workspaceKind),
 		"provider":          provider,
 		"model":             mdl,
 		"agent":             eng.curAgentRole(),
@@ -749,14 +760,15 @@ func (s *Server) statusSnapshot(eng *Engine) map[string]any {
 	provider, mdl, modeStr := eng.modelSnapshot()
 	project := engineProject(eng)
 	return map[string]any{
-		"running":       eng.running.Load(),
-		"pwd":           eng.pwd,
-		"project":       project,
-		"workspace_key": project,
-		"provider":      provider,
-		"model":         mdl,
-		"agent":         eng.curAgentRole(),
-		"mode":          modeStr,
+		"running":        eng.running.Load(),
+		"pwd":            eng.pwd,
+		"project":        project,
+		"workspace_key":  project,
+		"workspace_kind": session.NormalizeWorkspaceKind(eng.workspaceKind),
+		"provider":       provider,
+		"model":          mdl,
+		"agent":          eng.curAgentRole(),
+		"mode":           modeStr,
 		// Live token snapshot so a client reconnecting between turns can render
 		// the context bar + cache hit rate without waiting for the next
 		// token_update WS event. total_tokens = current context occupancy.

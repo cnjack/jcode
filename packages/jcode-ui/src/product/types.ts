@@ -106,10 +106,14 @@ export interface TaskStats {
 
 // ─── Workspace ──────────────────────────────────────────────────────────────
 
-/** Minimal task shape the workspace picker consumes (it only reads `project`). */
+export type WorkspaceKind = 'project' | 'scratch'
+
+/** Minimal task shape the workspace picker consumes. */
 export interface WorkspaceTaskRef {
   uuid: string
   project: string
+  workspace_kind?: WorkspaceKind
+  updated_at?: string
 }
 
 export interface BrowseFolder {

@@ -109,7 +109,12 @@ func (s *Server) engineForChatContext(ctx context.Context, taskID, modeStr strin
 			return eng, nil
 		}
 	}
-	project := engineProject(s.activeEngine())
+	active := s.activeEngine()
+	project := engineProject(active)
+	workspaceKind := session.WorkspaceProject
+	if active != nil {
+		workspaceKind = session.NormalizeWorkspaceKind(active.workspaceKind)
+	}
 	if project == "" {
 		// Setup-focused tests and embedders may have a bootstrap engine without a
 		// workspace yet. This branch is only for a genuinely new, non-indexed task;
@@ -131,7 +136,7 @@ func (s *Server) engineForChatContext(ctx context.Context, taskID, modeStr strin
 	if err != nil {
 		return nil, fmt.Errorf("resolve active conversation target: %w", err)
 	}
-	eng, err := s.assembleConversationEngine(ctx, taskID, target, modeStr)
+	eng, err := s.assembleConversationEngine(ctx, taskID, target, modeStr, workspaceKind)
 	if err != nil {
 		return nil, err
 	}
@@ -267,6 +272,7 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 			eng.running.Store(false)
 			return "", fmt.Errorf("create session recorder: returned nil recorder")
 		}
+		rec.SetWorkspaceKind(eng.workspaceKind)
 		rec.SetAgent(eng.agentRole)
 		if sessionID != "" {
 			rec.SetUUID(sessionID)
@@ -294,6 +300,7 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 			eng.running.Store(false)
 			return "", fmt.Errorf("create recorder for session %s: returned nil recorder", sessionID)
 		}
+		rec.SetWorkspaceKind(eng.workspaceKind)
 		rec.SetAgent(eng.agentRole)
 		rec.SetUUID(sessionID)
 		if eng.recorderInit != nil {

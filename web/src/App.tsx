@@ -87,6 +87,7 @@ export default function App() {
         dispatch(modelActions.setServerVersion(h.version))
         dispatch(modelActions.setImageSupport(!!h.image_support))
         dispatch(sessionActions.setProjectPath(h.project || h.workspace_key || h.pwd))
+        dispatch(sessionActions.setWorkspaceKind(h.workspace_kind))
         const restoreSessionId = isTauri ? h.recent_session_id || h.session_id : h.session_id
         const restoreProject = isTauri && h.recent_session_id
           ? h.recent_project || h.project || h.workspace_key || h.pwd
@@ -107,6 +108,7 @@ export default function App() {
               uuid: restoreSessionId,
               project: indexedTask?.project || restoreProject,
               title: indexedTask?.title || indexedSession?.title,
+              workspaceKind: indexedTask?.workspace_kind,
             }))
           }
         }

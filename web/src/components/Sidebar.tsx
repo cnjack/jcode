@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   PlusIcon,
+  ChatBubbleLeftRightIcon,
   ChevronRightIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -32,9 +33,9 @@ import {
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { uiActions, sessionActions, chatActions, remoteConnectionActions, loadWorkspaceState, openConversation, startNewChat } from '../app/store'
+import { uiActions, sessionActions, chatActions, remoteConnectionActions, loadWorkspaceState, openConversation, startNewChat, startScratchChat } from '../app/store'
 import { api } from '../lib/api'
-import type { TaskItem } from '../lib/types'
+import type { TaskItem, WorkspaceKind } from '../lib/types'
 import { ThemeToggle } from './ThemeToggle'
 import { CloudBadge } from './CloudBadge'
 import {
@@ -47,12 +48,14 @@ import {
 import { isRemotePath, openRemoteConnect, parseRemoteLabel } from '../lib/remote'
 
 const FILTERS_KEY = 'jcode_sidebar_filters'
+const SCRATCH_GROUP_KEY = '__jcode_scratch__'
 
 // ─── Enriched row: a session joined with its task metadata ───
 
 interface SessionRow {
   uuid: string
   project: string
+  workspaceKind: WorkspaceKind
   title: string
   created_at: string
   updated_at: string
@@ -82,6 +85,7 @@ interface SidebarGroup {
   kind: 'project' | 'date'
   label: string
   path?: string
+  workspaceKind: WorkspaceKind
   items: SessionRow[]
 }
 
@@ -93,6 +97,7 @@ export function Sidebar() {
   const sessions = useAppSelector((s) => s.session.sessions)
   const tasks = useAppSelector((s) => s.session.tasks)
   const projectTimes = useAppSelector((s) => s.session.projectTimes)
+  const projectKinds = useAppSelector((s) => s.session.projectKinds)
   const currentSessionId = useAppSelector((s) => s.session.currentSessionId)
   // Latest currentSessionId readable from async handlers (deleteItem) after an
   // await, when the render-scope value is stale: if the user navigated away
@@ -100,6 +105,7 @@ export function Sidebar() {
   const currentSessionRef = useRef(currentSessionId)
   currentSessionRef.current = currentSessionId
   const activePath = useAppSelector((s) => s.session.projectPath)
+  const activeWorkspaceKind = useAppSelector((s) => s.session.workspaceKind)
   const activeView = useAppSelector((s) => s.ui.activeView)
 
   const [filters, setFilters] = useState<FilterState>(() => loadFilters())
@@ -133,14 +139,15 @@ export function Sidebar() {
   }, [filters])
 
   useEffect(() => {
-    if (!activePath) return
+    const activeGroup = activeWorkspaceKind === 'scratch' ? SCRATCH_GROUP_KEY : activePath
+    if (!activeGroup) return
     setExpanded((prev) => {
-      if (prev.has(activePath)) return prev
+      if (prev.has(activeGroup)) return prev
       const next = new Set(prev)
-      next.add(activePath)
+      next.add(activeGroup)
       return next
     })
-  }, [activePath])
+  }, [activePath, activeWorkspaceKind])
 
   // Vue's sidebar is task-first: /api/tasks is the cross-project source of
   // truth, while /api/sessions only describes the active project. Keep a small
@@ -154,6 +161,7 @@ export function Sidebar() {
       out.push({
         uuid: s.uuid,
         project: activePath,
+        workspaceKind: activeWorkspaceKind,
         title: s.title || '',
         created_at: s.created_at || '',
         updated_at: s.created_at || '',
@@ -164,7 +172,7 @@ export function Sidebar() {
       })
     }
     return out
-  }, [tasks, sessions, activePath])
+  }, [tasks, sessions, activePath, activeWorkspaceKind])
 
   // After the first non-empty paint, animate only newly-added rows (not the
   // initial hydrate of the whole list).
@@ -199,16 +207,24 @@ export function Sidebar() {
 
   const projects = useMemo(() => {
     const map = new Map<string, string>()
-    if (activePath) map.set(activePath, projectName(activePath))
+    let hasScratch = activeWorkspaceKind === 'scratch'
+    if (activePath && activeWorkspaceKind !== 'scratch') map.set(activePath, projectName(activePath))
     for (const r of rows) {
-      if (r.project) map.set(r.project, projectName(r.project))
+      if (r.workspaceKind === 'scratch') {
+        hasScratch = true
+      } else if (r.project) {
+        map.set(r.project, projectName(r.project))
+      }
     }
-    return [...map].map(([path, name]) => ({ path, name })).sort((a, b) => {
+    const actual = [...map].map(([path, name]) => ({ path, name })).sort((a, b) => {
       if (a.path === activePath) return -1
       if (b.path === activePath) return 1
-      return a.name.localeCompare(b.name)
+      const byName = a.name.localeCompare(b.name)
+      return byName !== 0 ? byName : a.path.localeCompare(b.path)
     })
-  }, [rows, activePath])
+    if (hasScratch) actual.push({ path: SCRATCH_GROUP_KEY, name: t('workspace.noProject') })
+    return actual
+  }, [rows, activePath, activeWorkspaceKind, t])
 
   const projectFilter = useMemo(() => {
     if (!filters.project) return ''
@@ -228,7 +244,8 @@ export function Sidebar() {
       if (r.uuid === currentSessionId) return true
       if (filters.status === 'active' && r.archived) return false
       if (filters.status === 'archived' && !r.archived) return false
-      if (projectFilter && r.project !== projectFilter) return false
+      if (projectFilter === SCRATCH_GROUP_KEY && r.workspaceKind !== 'scratch') return false
+      if (projectFilter && projectFilter !== SCRATCH_GROUP_KEY && r.project !== projectFilter) return false
       if (filters.lastActivity !== 'all') {
         const ts = r.updated_at || r.created_at || ''
         const then = new Date(ts).getTime()
@@ -269,22 +286,26 @@ export function Sidebar() {
     if (filters.groupBy === 'project') {
       const map = new Map<string, SessionRow[]>()
       for (const r of sorted) {
-        const key = r.project || activePath || ''
+        const key = r.workspaceKind === 'scratch' ? SCRATCH_GROUP_KEY : r.project || activePath || ''
         const arr = map.get(key)
         if (arr) arr.push(r)
         else map.set(key, [r])
       }
       const paths = projectFilter ? new Set([projectFilter]) : new Set(map.keys())
       const narrowing = !!projectFilter || filters.status === 'archived' || filters.lastActivity !== 'all'
-      if (activePath && (map.has(activePath) || !narrowing)) paths.add(activePath)
-      const projectGroups = [...paths].map((path) => ({
+      const activeGroupKey = activeWorkspaceKind === 'scratch' ? SCRATCH_GROUP_KEY : activePath
+      if (activeGroupKey && (map.has(activeGroupKey) || !narrowing)) paths.add(activeGroupKey)
+      const projectGroups = [...paths].map((key) => ({
         kind: 'project' as const,
-        key: path || 'current',
-        path,
-        label: projectName(path),
-        items: map.get(path) || [],
+        key: key || 'current',
+        path: key === SCRATCH_GROUP_KEY ? undefined : key,
+        workspaceKind: (key === SCRATCH_GROUP_KEY ? 'scratch' : 'project') as WorkspaceKind,
+        label: key === SCRATCH_GROUP_KEY ? t('workspace.noProject') : projectName(key),
+        items: map.get(key) || [],
       }))
-      return projectGroups.sort((a, b) => compareProjectGroups(a, b, activePath, projectTimes))
+      return projectGroups.sort((a, b) => compareProjectGroups(
+        a, b, activePath, activeWorkspaceKind, projectTimes, projectKinds,
+      ))
     }
 
     const map = new Map<string, SessionRow[]>()
@@ -298,9 +319,10 @@ export function Sidebar() {
       kind: 'date' as const,
       key: k,
       label: t(`sidebar.dateBucket.${k}`),
+      workspaceKind: 'project' as const,
       items: map.get(k)!,
     }))
-  }, [sorted, filters.groupBy, filters.status, filters.lastActivity, projectFilter, activePath, projectTimes, now, t])
+  }, [sorted, filters.groupBy, filters.status, filters.lastActivity, projectFilter, activePath, activeWorkspaceKind, projectTimes, projectKinds, now, t])
 
   const duplicateProjectNames = useMemo(() => {
     const counts = new Map<string, number>()
@@ -348,6 +370,7 @@ export function Sidebar() {
       uuid: row.uuid,
       project: row.project,
       title: row.title,
+      workspaceKind: row.workspaceKind,
     }))
   }
 
@@ -500,6 +523,7 @@ export function Sidebar() {
       try {
         const resp = await api.switchProject(path)
         dispatch(sessionActions.setProjectPath(resp.pwd || path))
+        dispatch(sessionActions.setWorkspaceKind(resp.workspace_kind))
         await dispatch(loadWorkspaceState())
       } catch {
         dispatch(chatActions.addMessage({
@@ -512,6 +536,12 @@ export function Sidebar() {
     }
     await newChat()
     setExpanded((prev) => new Set(prev).add(path))
+  }
+
+  async function newScratchTask() {
+    dispatch(uiActions.setView('chat'))
+    await dispatch(startScratchChat())
+    setExpanded((prev) => new Set(prev).add(SCRATCH_GROUP_KEY))
   }
 
   const ctxRow = ctx?.row
@@ -562,16 +592,21 @@ export function Sidebar() {
         ) : (
           groups.map((g) => {
             const isProject = g.kind === 'project'
+            const isScratch = isProject && g.workspaceKind === 'scratch'
             const open = !isProject || expanded.has(g.key)
-            const activeProject = isProject && g.path === activePath
-            const ProjectIcon = g.path && isRemotePath(g.path) ? ServerIcon : activeProject ? FolderOpenIcon : FolderIcon
+            const activeProject = isProject && (isScratch
+              ? activeWorkspaceKind === 'scratch'
+              : activeWorkspaceKind !== 'scratch' && g.path === activePath)
+            const ProjectIcon = isScratch
+              ? ChatBubbleLeftRightIcon
+              : g.path && isRemotePath(g.path) ? ServerIcon : activeProject ? FolderOpenIcon : FolderIcon
             return (
               <div key={g.key} className="sb-project-group">
                 {isProject ? (
                   <div
                     role="button"
                     tabIndex={0}
-                    title={g.path}
+                    title={isScratch ? t('workspace.workWithoutProject') : g.path}
                     onClick={() => toggleGroup(g.key)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -588,19 +623,20 @@ export function Sidebar() {
                       <span className="sb-project-hint">{projectParentHint(g.path)}</span>
                     )}
                     <span className="sb-project-time">
-                      {relativeTime((g.path && projectTimes[g.path]) || aggregate(g.items).lastTs, now, t)}
+                      {relativeTime(groupLastActivity(g, projectTimes, projectKinds), now, t)}
                     </span>
                     {!open && g.items.some((row) => row.running) && (
                       <span className="sb-ring sb-project-ring" title={t('sidebar.running')} aria-hidden="true" />
                     )}
-                    {g.path && (
+                    {(g.path || isScratch) && (
                       <button
                         type="button"
-                        title={t('sidebar.newTaskHere', { defaultValue: t('nav.newTask') })}
-                        aria-label={t('sidebar.newTaskHere', { defaultValue: t('nav.newTask') })}
+                        title={isScratch ? t('sidebar.newNoProjectTask') : t('sidebar.newTaskHere', { defaultValue: t('nav.newTask') })}
+                        aria-label={isScratch ? t('sidebar.newNoProjectTask') : t('sidebar.newTaskHere', { defaultValue: t('nav.newTask') })}
                         onClick={(e) => {
                           e.stopPropagation()
-                          void newTaskInProject(g.path!)
+                          if (isScratch) void newScratchTask()
+                          else void newTaskInProject(g.path!)
                         }}
                         className="sb-project-add"
                       >
@@ -648,7 +684,9 @@ export function Sidebar() {
                           )}
                           {row.pinned && <BookmarkIcon className="sb-task-pin h-2.5 w-2.5 shrink-0" />}
                           <span className="sb-task-title">{rowTitle(row, untitledLabel)}</span>
-                          {!isProject && <span className="sb-task-project">{projectName(row.project)}</span>}
+                          {!isProject && <span className={`sb-task-project${row.workspaceKind === 'scratch' ? ' scratch' : ''}`}>
+                            {row.workspaceKind === 'scratch' ? t('workspace.noProject') : projectName(row.project)}
+                          </span>}
                           <span className={`sb-task-time ${row.running ? 'running' : ''}`}>
                             {row.running ? t('sidebar.running') : relativeTime(row.updated_at || row.created_at, now, t)}
                           </span>
@@ -822,6 +860,10 @@ export function Sidebar() {
           max-width:90px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
           color:var(--color-muted-foreground); font-size:10px; line-height:1; opacity:0.75;
         }
+        .sb-task-project.scratch {
+          border:1px solid var(--color-border); border-radius:var(--radius-pill); padding:2px 5px;
+          background:var(--neutral-wash-soft); color:var(--color-foreground); opacity:1;
+        }
         /* ⋯ button (Vue .task-menu-btn) */
         .sb-task-menu-btn {
           display: grid;
@@ -923,6 +965,7 @@ function taskToRow(t: TaskItem): SessionRow {
   return {
     uuid: t.uuid,
     project: t.project,
+    workspaceKind: t.workspace_kind === 'scratch' ? 'scratch' : 'project',
     title: t.title || '',
     created_at: t.created_at || '',
     updated_at: t.updated_at || t.created_at || '',
@@ -999,14 +1042,27 @@ function projectParentHint(path: string): string {
   return parts[parts.length - 2] || ''
 }
 
-function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: string, projectTimes: Record<string, string>): number {
+function compareProjectGroups(
+  a: SidebarGroup,
+  b: SidebarGroup,
+  activePath: string,
+  activeWorkspaceKind: WorkspaceKind,
+  projectTimes: Record<string, string>,
+  projectKinds: Record<string, WorkspaceKind>,
+): number {
   // Fallback ONLY for an empty active project: a freshly-opened project with no
   // sessions has no activity timestamp, so pure lastTs ordering would sink it to
   // the bottom. Float just that case to the top so the project you're in stays in
   // view. A non-empty active project is ordered by its activity like any other —
   // selecting a project must not yank it around.
-  const aEmptyActive = a.path === activePath && a.items.length === 0
-  const bEmptyActive = b.path === activePath && b.items.length === 0
+  const aActive = a.workspaceKind === 'scratch'
+    ? activeWorkspaceKind === 'scratch'
+    : activeWorkspaceKind !== 'scratch' && a.path === activePath
+  const bActive = b.workspaceKind === 'scratch'
+    ? activeWorkspaceKind === 'scratch'
+    : activeWorkspaceKind !== 'scratch' && b.path === activePath
+  const aEmptyActive = aActive && a.items.length === 0
+  const bEmptyActive = bActive && b.items.length === 0
   if (aEmptyActive !== bEmptyActive) return aEmptyActive ? -1 : 1
 
   const A = aggregate(a.items)
@@ -1018,8 +1074,8 @@ function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: stri
   // can't reorder the list. Legacy indexes without project metadata fall back
   // to deriving recency from the surviving child sessions.
   if (A.running !== B.running) return A.running ? -1 : 1
-  const aTs = (a.path && projectTimes[a.path]) || A.lastTs
-  const bTs = (b.path && projectTimes[b.path]) || B.lastTs
+  const aTs = groupLastActivity(a, projectTimes, projectKinds) || A.lastTs
+  const bTs = groupLastActivity(b, projectTimes, projectKinds) || B.lastTs
   // Compare parsed instants, not strings: RFC3339 string order breaks across
   // UTC offsets (the index mixes server-local "+08:00" writes with UTC "Z").
   const byActivity = tsCmp(aTs, bTs)
@@ -1028,6 +1084,22 @@ function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: stri
   // Stable final tiebreaker (path) so equal-label groups don't reshuffle when
   // /api/tasks is re-fetched in a non-deterministic order.
   return byLabel !== 0 ? byLabel : (a.path || '').localeCompare(b.path || '')
+}
+
+function groupLastActivity(
+  group: SidebarGroup,
+  projectTimes: Record<string, string>,
+  projectKinds: Record<string, WorkspaceKind>,
+): string {
+  let latest = aggregate(group.items).lastTs
+  if (group.workspaceKind === 'scratch') {
+    for (const [path, ts] of Object.entries(projectTimes)) {
+      if (projectKinds[path] === 'scratch' && tsCmp(ts, latest) > 0) latest = ts
+    }
+    return latest
+  }
+  const projectTs = group.path ? projectTimes[group.path] : ''
+  return tsCmp(projectTs, latest) > 0 ? projectTs : latest
 }
 
 /** Chronological compare for RFC3339 strings: negative if a is older, positive

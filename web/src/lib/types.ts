@@ -1,9 +1,12 @@
 // API types for jcode web backend
 
+export type WorkspaceKind = 'project' | 'scratch'
+
 export interface HealthResponse {
   status: string
   version: string
   pwd: string
+  workspace_kind?: WorkspaceKind
   provider: string
   model: string
   agent?: string
@@ -14,6 +17,7 @@ export interface StatusResponse {
   running: boolean
   clients: number
   pwd: string
+  workspace_kind?: WorkspaceKind
   provider: string
   model: string
   agent?: string
@@ -39,6 +43,7 @@ export interface SessionEntry {
   type: string
   uuid?: string
   project?: string
+  workspace_kind?: WorkspaceKind
   provider?: string
   model?: string
   agent?: string
@@ -279,6 +284,7 @@ export interface GitCheckoutResponse {
 export interface TaskItem {
   uuid: string
   project: string // project path
+  workspace_kind?: WorkspaceKind
   created_at: string
   updated_at?: string
   provider: string
@@ -307,6 +313,7 @@ export interface TaskMetaPatch {
 export interface ProjectInfo {
   path: string
   updated_at?: string
+  workspace_kind?: WorkspaceKind
 }
 
 // MCP types
@@ -450,6 +457,7 @@ export interface RemoteBindResponse {
   activated?: boolean
   focused?: boolean
   workspace_key?: string
+  workspace_kind?: WorkspaceKind
 }
 
 export interface SessionActivationResponse {
@@ -459,6 +467,7 @@ export interface SessionActivationResponse {
   pwd: string
   project: string
   workspace_key: string
+  workspace_kind?: WorkspaceKind
   provider?: string
   model?: string
   agent?: string

@@ -81,12 +81,15 @@ export function ChatView({ readOnly }: ChatViewProps) {
     return null
   })
   const projectPath = useAppSelector((s) => s.session.projectPath)
+  const workspaceKind = useAppSelector((s) => s.session.workspaceKind)
   const backdropKind = useAppSelector((s) => {
     const provider = s.model.providers.find((candidate) => candidate.id === s.model.providerName)
     const model = provider?.models.find((candidate) => candidate.id === s.model.modelName)
     return modelBackdropKind([provider?.kind, s.model.providerName, provider?.name, s.model.modelName, model?.name])
   })
-  const project = projectName(projectPath) || 'jcode'
+  const project = workspaceKind === 'scratch'
+    ? t('workspace.noProject')
+    : projectName(projectPath) || 'jcode'
 
   if (readOnly) {
     return (
@@ -124,7 +127,9 @@ export function ChatView({ readOnly }: ChatViewProps) {
   // Welcome screen: centered hero + elevated composer (no messages yet).
   if (!hasMessages) {
     const subtitle = t('welcome.subtitle')
-    const title = t('welcome.startIn').replace('{project}', project)
+    const title = workspaceKind === 'scratch'
+      ? t('welcome.startWithoutProject')
+      : t('welcome.startIn').replace('{project}', project)
     const [subtitleBefore, subtitleAfter] = subtitle.split('{kbd}')
 
     return (

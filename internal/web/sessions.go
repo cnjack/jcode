@@ -19,27 +19,29 @@ import (
 // field drifting (start_time vs created_at) that would blank created_at and
 // scramble the recency sort.
 type taskItem struct {
-	UUID           string `json:"uuid"`
-	Project        string `json:"project"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at,omitempty"`
-	Provider       string `json:"provider"`
-	Model          string `json:"model"`
-	Agent          string `json:"agent,omitempty"`
-	Title          string `json:"title,omitempty"`
-	Pinned         bool   `json:"pinned"`
-	Archived       bool   `json:"archived"`
-	Unread         bool   `json:"unread"`
-	Status         string `json:"status,omitempty"`
-	Running        bool   `json:"running"`
-	ArtifactCount  int    `json:"artifact_count,omitempty"`
-	ArtifactUnseen bool   `json:"artifact_unseen,omitempty"`
+	UUID           string                `json:"uuid"`
+	Project        string                `json:"project"`
+	WorkspaceKind  session.WorkspaceKind `json:"workspace_kind"`
+	CreatedAt      string                `json:"created_at"`
+	UpdatedAt      string                `json:"updated_at,omitempty"`
+	Provider       string                `json:"provider"`
+	Model          string                `json:"model"`
+	Agent          string                `json:"agent,omitempty"`
+	Title          string                `json:"title,omitempty"`
+	Pinned         bool                  `json:"pinned"`
+	Archived       bool                  `json:"archived"`
+	Unread         bool                  `json:"unread"`
+	Status         string                `json:"status,omitempty"`
+	Running        bool                  `json:"running"`
+	ArtifactCount  int                   `json:"artifact_count,omitempty"`
+	ArtifactUnseen bool                  `json:"artifact_unseen,omitempty"`
 }
 
 func newTaskItem(m *session.SessionMeta, project string, running bool) taskItem {
 	return taskItem{
 		UUID:           m.UUID,
 		Project:        project,
+		WorkspaceKind:  session.NormalizeWorkspaceKind(m.WorkspaceKind),
 		CreatedAt:      m.StartTime,
 		UpdatedAt:      m.UpdatedAt,
 		Provider:       m.Provider,
@@ -106,8 +108,9 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 // from the surviving sessions, so deleting a conversation never reorders the
 // project list.
 type projectItem struct {
-	Path      string `json:"path"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	Path          string                `json:"path"`
+	UpdatedAt     string                `json:"updated_at,omitempty"`
+	WorkspaceKind session.WorkspaceKind `json:"workspace_kind"`
 }
 
 // handleListProjects returns every project that has persisted metadata (last
@@ -121,7 +124,10 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]projectItem, 0, len(meta))
 	for path, pm := range meta {
-		items = append(items, projectItem{Path: path, UpdatedAt: pm.UpdatedAt})
+		items = append(items, projectItem{
+			Path: path, UpdatedAt: pm.UpdatedAt,
+			WorkspaceKind: session.NormalizeWorkspaceKind(pm.WorkspaceKind),
+		})
 	}
 	writeJSON(w, http.StatusOK, items)
 }
@@ -377,8 +383,9 @@ func (s *Server) writeResumeReply(w http.ResponseWriter, eng *Engine, entries []
 
 func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SessionID string `json:"session_id,omitempty"`
-		Pwd       string `json:"pwd,omitempty"`
+		SessionID     string                `json:"session_id,omitempty"`
+		Pwd           string                `json:"pwd,omitempty"`
+		WorkspaceKind session.WorkspaceKind `json:"workspace_kind,omitempty"`
 		// Source is the optional channel label ("console"/"mobile") the cloud
 		// relay passes through when the session is created from the cloud —
 		// such sessions are always stamped as cloud-synced (M19).
@@ -390,12 +397,18 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
+	if req.WorkspaceKind != "" && req.WorkspaceKind != session.WorkspaceProject && req.WorkspaceKind != session.WorkspaceScratch {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid workspace_kind"})
+		return
+	}
 
 	// Build or recover the task without changing the foreground until every
 	// remote connection and hydration step has succeeded. This is the same cold
 	// activation path used by Cloud commands, so a persisted SSH/Docker UUID can
 	// never silently fall back to a local engine.
-	result, err := s.ensureConversation(r.Context(), req.SessionID, req.Pwd, req.Source)
+	result, err := s.ensureConversationKind(
+		r.Context(), req.SessionID, req.Pwd, req.Source, req.WorkspaceKind,
+	)
 	if err != nil {
 		writeConversationActivationError(w, err)
 		return

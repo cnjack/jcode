@@ -51,6 +51,7 @@ export function DesktopTitlebar(props: Props) {
   const tasks = useAppSelector((s) => s.session.tasks)
   const sessions = useAppSelector((s) => s.session.sessions)
   const projectPath = useAppSelector((s) => s.session.projectPath)
+  const currentWorkspaceKind = useAppSelector((s) => s.session.workspaceKind)
   const currentProvider = useAppSelector((s) => s.model.providerName)
   const currentModel = useAppSelector((s) => s.model.modelName)
 
@@ -64,7 +65,10 @@ export function DesktopTitlebar(props: Props) {
   )
   const taskTitle = activeTask?.title?.trim() || activeSession?.title?.trim() || t('sidebar.untitled')
   const activeProject = activeTask?.project || projectPath
-  const projectLabel = workspaceName(activeProject)
+  const activeWorkspaceKind = activeTask?.workspace_kind || currentWorkspaceKind
+  const projectLabel = activeWorkspaceKind === 'scratch'
+    ? t('workspace.noProject')
+    : workspaceName(activeProject)
   const modelLabel = [activeTask?.provider || currentProvider, activeTask?.model || currentModel]
     .filter(Boolean)
     .join(' / ')
@@ -109,6 +113,7 @@ export function DesktopTitlebar(props: Props) {
         title={taskTitle}
         project={activeProject}
         projectLabel={projectLabel}
+        workspaceKind={activeWorkspaceKind}
         branch={branch}
         model={modelLabel}
         pinned={!!activeTask?.pinned}
@@ -135,6 +140,7 @@ interface TaskDetailsProps {
   title: string
   project: string
   projectLabel: string
+  workspaceKind: 'project' | 'scratch'
   branch: string
   model: string
   pinned: boolean
@@ -149,6 +155,7 @@ function TaskDetails({
   title,
   project,
   projectLabel,
+  workspaceKind,
   branch,
   model,
   pinned,
@@ -273,6 +280,11 @@ function TaskDetails({
             ) : (
               <div className="flex min-w-0 items-center gap-2">
                 <h2 className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[var(--color-foreground)]">{title}</h2>
+                {workspaceKind === 'scratch' && (
+                  <span className="shrink-0 rounded-[var(--radius-pill)] border border-[var(--color-border)] bg-[var(--neutral-wash-soft)] px-2 py-1 text-[10px] font-medium text-[var(--color-foreground)]">
+                    {t('workspace.noProject')}
+                  </span>
+                )}
                 <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-[10px] font-medium ${
                   running
                     ? 'bg-[var(--neutral-wash)] text-[var(--color-accent-neutral)]'

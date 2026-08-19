@@ -31,6 +31,7 @@ export function AuthGate() {
         dispatch(modelActions.setServerVersion(h.version))
         dispatch(modelActions.setImageSupport(!!h.image_support))
         dispatch(sessionActions.setProjectPath(h.pwd))
+        dispatch(sessionActions.setWorkspaceKind(h.workspace_kind))
         dispatch(sessionActions.setCurrentSession(h.session_id || ''))
         dispatch(chatActions.setRunning(!!h.running))
         await dispatch(loadWorkspaceState())
