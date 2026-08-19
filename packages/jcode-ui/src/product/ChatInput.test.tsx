@@ -259,6 +259,27 @@ describe('workspace picker', () => {
     await waitFor(() => expect(startScratchWorkspace).toHaveBeenCalledTimes(1))
   })
 
+  it('orders merged workspaces by timestamp instant across UTC offsets', () => {
+    const { container } = renderComposer(makeHost({
+      projectPath: '',
+      tasks: [
+        // 02:00 UTC — the older activity for this workspace.
+        { uuid: 'older-mixed', project: '/tmp/mixed', workspace_kind: 'project', updated_at: '2026-08-19T10:00:00+08:00' },
+        // 05:00 UTC — newer despite its smaller local clock value.
+        { uuid: 'newer-mixed', project: '/tmp/mixed', workspace_kind: 'project', updated_at: '2026-08-19T05:00:00Z' },
+        // 04:00 UTC — should follow the merged /tmp/mixed workspace.
+        { uuid: 'intermediate', project: '/tmp/intermediate', workspace_kind: 'project', updated_at: '2026-08-19T12:00:00+08:00' },
+      ],
+    }))
+
+    const pickerButton = container.querySelector('.ws-pill-action')
+    if (!pickerButton) throw new Error('workspace picker button not found')
+    fireEvent.click(pickerButton)
+
+    const names = [...container.querySelectorAll('.ws-row-name')].map((node) => node.textContent)
+    expect(names).toEqual(['mixed', 'intermediate'])
+  })
+
   it('shows the no-project state as selected without allocating again', () => {
     const startScratchWorkspace = vi.fn(async () => {})
     renderComposer(makeHost({

@@ -36,6 +36,17 @@ interface BrowseFolder {
   path: string
 }
 
+// Session timestamps can be RFC3339 values with either UTC or a numeric offset.
+// Compare parsed instants so a later UTC time is not hidden behind a larger local
+// clock value. Invalid and missing timestamps sort as the oldest activity.
+function compareWorkspaceActivity(a: string, b: string): number {
+  const aTime = a ? Date.parse(a) : Number.NaN
+  const bTime = b ? Date.parse(b) : Number.NaN
+  if (Number.isNaN(aTime)) return Number.isNaN(bTime) ? 0 : -1
+  if (Number.isNaN(bTime)) return 1
+  return aTime - bTime
+}
+
 export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComposerHost; placement?: 'top' | 'bottom' }) {
   const strings = useComposerStrings(host)
   const activePath = host.projectPath
@@ -63,7 +74,8 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
       if (!task.project || task.workspace_kind === 'scratch') continue
       const existing = map.get(task.project)
       if (existing) {
-        if ((task.updated_at || '') > existing.updatedAt) existing.updatedAt = task.updated_at || ''
+        const updatedAt = task.updated_at || ''
+        if (compareWorkspaceActivity(updatedAt, existing.updatedAt) > 0) existing.updatedAt = updatedAt
         continue
       }
       map.set(task.project, {
@@ -80,7 +92,7 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
       .sort((a, b) => {
         if (a.path === activePath) return -1
         if (b.path === activePath) return 1
-        const byActivity = b.updatedAt.localeCompare(a.updatedAt)
+        const byActivity = compareWorkspaceActivity(b.updatedAt, a.updatedAt)
         if (byActivity !== 0) return byActivity
         const byName = a.name.localeCompare(b.name)
         return byName !== 0 ? byName : a.path.localeCompare(b.path)
