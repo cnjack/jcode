@@ -39,6 +39,25 @@ export default {
     done: '완료',
   },
 
+  update: {
+    sectionTitle: '버전 및 업데이트',
+    currentVersion: '현재 버전',
+    checkButton: '업데이트 확인',
+    checking: '확인 중…',
+    upToDate: '최신 버전입니다',
+    newVersionFound: '새 버전 {version} 사용 가능',
+    availableTitle: '새 버전이 있습니다',
+    updateTo: '{version}(으)로 업데이트',
+    downloading: '업데이트 다운로드 중…',
+    restarting: '업데이트를 완료하기 위해 재시작 중…',
+    failed: '업데이트 실패',
+    checkFailed: '확인 실패',
+    later: '나중에',
+    updateRestart: '업데이트 후 재시작',
+    retry: '재시도',
+    dismiss: '닫기',
+  },
+
   nav: {
     newTask: '새 작업',
     automations: '자동화',

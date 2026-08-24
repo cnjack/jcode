@@ -91,7 +91,9 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        // Relaunch support for the updater (swaps in the staged bundle).
+        .plugin(tauri_plugin_process::init());
 
     #[cfg(desktop)]
     {
@@ -99,7 +101,11 @@ fn main() {
             .plugin(tauri_plugin_window_state::Builder::default().build())
             // Registered without a shortcut here; the accelerator is bound in
             // setup() so a hotkey conflict logs instead of crashing the app.
-            .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            // Auto-updater: fetches the signed latest.json from GitHub Releases,
+            // verifies against the pubkey in tauri.conf.json. The in-app flow
+            // (banner → download → install → relaunch) lives in the web UI.
+            .plugin(tauri_plugin_updater::Builder::new().build());
     }
 
     let app = builder

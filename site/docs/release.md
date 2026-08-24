@@ -148,10 +148,39 @@ verified publisher is required.
 Linux `.deb` / `.AppImage` bundles are not code-signed (the platform has no equivalent
 Gatekeeper gate). No secrets are required.
 
+## Desktop auto-updater (required secret)
+
+The desktop bundles carry an auto-updater (see [Desktop App](desktop.html)). It
+verifies update artifacts with a **minisign** keypair: the public key lives in
+`desktop/src-tauri/tauri.conf.json` → `plugins.updater.pubkey`, and CI signs the
+updater artifacts with the private key from a secret.
+
+| Secret | What it is |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | **Required.** Contents of the minisign private key file (the local copy lives at `~/.jcode/desktop-updater.key`; generated once via `pnpm tauri signer generate`). **Losing it means no more signed updates** — every published version's signature chain depends on it. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Only if the key was generated with a password (the jcode key has none — leave the secret unset). |
+
+How the feed is produced on every tagged release: each desktop matrix leg builds with
+`bundle.createUpdaterArtifacts` enabled, ships the updater artifact plus its `.sig`
+(macOS `.app.tar.gz` renamed per-arch, Windows NSIS `-setup.exe`, Linux `.AppImage`),
+and writes an `updater-fragment-<platform>.json`; the release job merges all fragments
+into **`latest.json`** and attaches it to the release. The build **fails loudly** if a
+`.sig` is missing (e.g. the secret is unset), so a release can never ship an unsigned
+feed by accident.
+
+Notes:
+
+- **Stable channel only.** The feed URL resolves via `releases/latest/download/…`,
+  which GitHub never points at prereleases — `alpha` / `beta` / `rc` tags are built
+  and published but never auto-installed.
+- Desktop installs on **v0.5.3 or earlier** (no updater) need one manual upgrade; from
+  the first updater-bearing release on, updates chain automatically.
+- `bundle.createUpdaterArtifacts` is intentionally **absent from the committed**
+  `tauri.conf.json` — with it set, every local `make desktop-build` would demand the
+  signing key or hard-fail. CI flips it on in the release workflow only.
+
 ## Notes
 
-- The desktop **auto-updater is not enabled**, so **no** `TAURI_SIGNING_PRIVATE_KEY` /
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets are needed.
 - If a single platform's desktop build fails, the matrix uses `fail-fast: false` so the
   others still publish; re-run the failed job afterward.
 

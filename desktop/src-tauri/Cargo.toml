@@ -15,18 +15,21 @@ tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Desktop-only plugins (no Android/iOS support).
-# NOTE: the updater plugin is intentionally absent — it panics at startup unless
-# `plugins.updater` (endpoints + pubkey) is configured, which requires a signed
-# release feed. Add it back together with that config. Autostart is likewise
-# deferred until there's a settings toggle for it.
+# The updater requires the `plugins.updater` config (endpoints + pubkey) in
+# tauri.conf.json — it is present. `bundle.createUpdaterArtifacts` is,
+# however, deliberately left out of the committed conf: with it set, every
+# `tauri build` needs TAURI_SIGNING_PRIVATE_KEY or it hard-fails, which would
+# break local `make desktop-build`. CI enables it per-build (release.yml).
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 base64 = "0.22"

@@ -39,6 +39,25 @@ export default {
     done: '完了',
   },
 
+  update: {
+    sectionTitle: 'バージョンとアップデート',
+    currentVersion: '現在のバージョン',
+    checkButton: 'アップデートを確認',
+    checking: '確認中…',
+    upToDate: '最新です',
+    newVersionFound: '新バージョン {version} があります',
+    availableTitle: '新しいバージョンがあります',
+    updateTo: '{version} にアップデート',
+    downloading: 'アップデートをダウンロード中…',
+    restarting: '再起動して更新を完了しています…',
+    failed: 'アップデートに失敗しました',
+    checkFailed: '確認に失敗しました',
+    later: '後で',
+    updateRestart: '更新して再起動',
+    retry: '再試行',
+    dismiss: '閉じる',
+  },
+
   nav: {
     newTask: '新しいタスク',
     automations: '自動化',

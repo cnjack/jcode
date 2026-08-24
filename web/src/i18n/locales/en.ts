@@ -41,6 +41,25 @@ export default {
     done: 'Done',
   },
 
+  update: {
+    sectionTitle: 'Version & updates',
+    currentVersion: 'Current version',
+    checkButton: 'Check for updates',
+    checking: 'Checking…',
+    upToDate: 'Up to date',
+    newVersionFound: 'New version {version} available',
+    availableTitle: 'A new version is available',
+    updateTo: 'Update to {version}',
+    downloading: 'Downloading update…',
+    restarting: 'Restarting to finish update…',
+    failed: 'Update failed',
+    checkFailed: 'Check failed',
+    later: 'Later',
+    updateRestart: 'Update & restart',
+    retry: 'Retry',
+    dismiss: 'Dismiss',
+  },
+
   nav: {
     newTask: 'New task',
     automations: 'Automations',
