@@ -80,7 +80,9 @@ export const Message = memo(function Message({ message, canEdit, slots }: Messag
     ? message.level === 'error'
       ? 'Error'
       : 'System'
-    : isWechat
+    : message.author
+      ? message.author
+      : isWechat
       ? 'WeChat'
       : isUser
         ? 'You'
@@ -88,7 +90,9 @@ export const Message = memo(function Message({ message, canEdit, slots }: Messag
 
   const avatarGlyph = isSystem
     ? 'S'
-    : isWechat
+    : message.author
+      ? message.author.trim().charAt(0).toUpperCase() || 'U'
+      : isWechat
       ? 'W'
       : isUser
         ? 'U'
@@ -141,6 +145,7 @@ export const Message = memo(function Message({ message, canEdit, slots }: Messag
   return (
     <div
       data-jcode-ui="" className="jcode-message jcode-chat-col group/msg jcode-animate-fade-in pt-3 pb-1.5"
+      data-testid={`thread-message-${message.role}`}
       data-role={message.role}
       data-source={message.source}
       data-level={message.level}

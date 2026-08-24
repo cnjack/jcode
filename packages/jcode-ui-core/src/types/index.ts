@@ -38,6 +38,8 @@ export interface Message {
   timestamp: number
   /** Origin channel for inbound messages (e.g. 'wechat'). Drives avatar tint. */
   source?: string
+  /** Display attribution supplied by multi-user hosts such as jcode Cloud. */
+  author?: string
   images?: ChatImage[]
   /** system-message severity. */
   level?: SystemLevel
