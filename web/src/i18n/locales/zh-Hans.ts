@@ -36,6 +36,24 @@ export default {
     done: '完成',
   },
 
+  update: {
+    sectionTitle: '版本与更新',
+    currentVersion: '当前版本',
+    checkButton: '检查更新',
+    checking: '检查中…',
+    upToDate: '已是最新版本',
+    newVersionFound: '发现新版本 {version}',
+    availableTitle: '有新版本可用',
+    updateTo: '可更新到 {version}',
+    downloading: '正在下载更新…',
+    restarting: '正在重启以完成更新…',
+    failed: '更新失败',
+    later: '稍后',
+    updateRestart: '更新并重启',
+    retry: '重试',
+    dismiss: '关闭',
+  },
+
   nav: {
     newTask: '新建任务',
     automations: '自动化',

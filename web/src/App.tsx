@@ -62,8 +62,10 @@ import { ComputerShotPiP } from './components/ComputerShotPiP'
 import { RightPanel } from './components/RightPanel'
 import { TerminalPanel } from './components/TerminalPanel'
 import { RemoteConnectWizard } from './components/RemoteConnectWizard'
+import { UpdateBanner } from './components/UpdateBanner'
 import type { RemotePrefill } from './lib/remote'
 import { isTauri } from './lib/useDesktop'
+import { AppUpdateProvider } from './lib/useAppUpdate'
 
 export default function App() {
   const dispatch = useAppDispatch()
@@ -181,7 +183,13 @@ export default function App() {
     return <AuthGate />
   }
 
-  return <Shell activeView={activeView} />
+  // The update provider wraps the whole shell so both the UpdateBanner and the
+  // Settings "version & updates" row share one auto-update state machine.
+  return (
+    <AppUpdateProvider>
+      <Shell activeView={activeView} />
+    </AppUpdateProvider>
+  )
 }
 
 // store_getState is bound lazily to avoid a circular import at module eval.
@@ -391,6 +399,8 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
           )}
 
           {paletteOpen && <CommandPalette />}
+          {/* Desktop auto-update toast — bottom-right, all views. */}
+          <UpdateBanner />
           <RemoteConnectWizard
             open={remoteWizardOpen}
             prefill={remotePrefill}

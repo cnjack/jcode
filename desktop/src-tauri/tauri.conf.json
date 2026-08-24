@@ -50,5 +50,12 @@
     "longDescription": "Native desktop shell for jcode — the embedded Go backend runs as a sidecar and Tauri renders the web UI with native system integration.",
     "copyright": "© cnjack"
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/cnjack/jcode/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEwM0E1MzBENEQ5MThGODQKUldTRWo1Rk5EVk02RU9IMTQ4RWdDMFUyVE5wdExqamkrRTdLcUlJSEFkSEpHTEZPL0V1ckp6WUEK"
+    }
+  }
 }

@@ -93,7 +93,8 @@ import {
   writeProviderCatalogCache,
 } from '../lib/providerCatalogCache'
 import { openRemoteConnect } from '../lib/remote'
-import { openUrl } from '../lib/useDesktop'
+import { isTauri, openUrl } from '../lib/useDesktop'
+import { useAppUpdate } from '../lib/useAppUpdate'
 import { LOCALE_LABELS, SUPPORTED_LOCALES, setLocale, type SupportedLocale } from '../i18n'
 import type {
   BrowserConfig,
@@ -1875,6 +1876,11 @@ function GeneralTab() {
         </div>
       </div>
 
+      {/* Desktop only: current app version + manual update check. The banner
+          is the install surface; this row lets the user re-check after
+          dismissing it. */}
+      {isTauri && <VersionUpdateRow />}
+
       {tokenSnapshot && (
         <div className={ROW}>
           <div className="min-w-0 flex-1">
@@ -1961,6 +1967,67 @@ function GeneralTab() {
       <ToolSearchSection />
       <ApprovalReviewSection />
 
+    </div>
+  )
+}
+
+function VersionUpdateRow() {
+  const { t } = useTranslation()
+  const { status, version, check } = useAppUpdate()
+  const [appVersion, setAppVersion] = useState('')
+
+  // The Tauri app version (capability core:app:allow-version), not the sidecar
+  // version — the updater compares against this one.
+  useEffect(() => {
+    if (!isTauri) return
+    let cancelled = false
+    import('@tauri-apps/api/app')
+      .then(({ getVersion }) => getVersion())
+      .then((v) => {
+        if (!cancelled) setAppVersion(v)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const busy = status === 'checking' || status === 'downloading' || status === 'restarting'
+  const hint =
+    status === 'checking'
+      ? t('update.checking')
+      : status === 'up-to-date'
+        ? t('update.upToDate')
+        : status === 'available'
+          ? t('update.newVersionFound', { version })
+          : status === 'downloading'
+            ? t('update.downloading')
+            : status === 'restarting'
+              ? t('update.restarting')
+              : status === 'error'
+                ? t('update.checkFailed')
+                : ''
+
+  return (
+    <div className={ROW}>
+      <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+        <ArrowPathIcon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('update.sectionTitle')}</div>
+        <div className="text-[11px] text-[var(--color-muted-foreground)]">
+          {appVersion ? `${t('update.currentVersion')} v${appVersion}` : ''}
+          {hint ? (appVersion ? ` · ${hint}` : hint) : ''}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => void check({ manual: true })}
+        disabled={busy}
+        className={`${BTN_SECONDARY} ${BTN_XS}`}
+      >
+        {t('update.checkButton')}
+      </button>
     </div>
   )
 }

@@ -188,6 +188,7 @@ jobs:
             cgo: 1
             bundles: dmg
             label: macos-arm64
+            updater-platform: darwin-aarch64
           # macOS Intel
           - os: macos-15-intel
             triple: x86_64-apple-darwin
@@ -195,6 +196,7 @@ jobs:
             cgo: 1
             bundles: dmg
             label: macos-x64
+            updater-platform: darwin-x86_64
           # Windows x64
           - os: windows-latest
             triple: x86_64-pc-windows-msvc
@@ -202,6 +204,7 @@ jobs:
             cgo: 0
             bundles: 'msi,nsis'
             label: windows-x64
+            updater-platform: windows-x86_64
           # Linux x64
           - os: ubuntu-22.04
             triple: x86_64-unknown-linux-gnu
@@ -209,6 +212,7 @@ jobs:
             cgo: 0
             bundles: 'deb,appimage'
             label: linux-x64
+            updater-platform: linux-x86_64
 
     steps:
       - name: Checkout code
@@ -276,8 +280,11 @@ jobs:
         run: |
           VER="${{ steps.get_version.outputs.version }}"
           VER="${VER#v}"
-          node -e "const fs=require('fs');const f='desktop/src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(f));j.version='${VER}';fs.writeFileSync(f, JSON.stringify(j,null,2)+'\n')"
-          echo "Set desktop bundle version to ${VER}"
+          # createUpdaterArtifacts is deliberately absent from the committed
+          # conf (it would make every local `tauri build` require the signing
+          # key); CI turns it on for release builds only.
+          node -e "const fs=require('fs');const f='desktop/src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(f));j.version='${VER}';j.bundle.createUpdaterArtifacts=true;fs.writeFileSync(f, JSON.stringify(j,null,2)+'\n')"
+          echo "Set desktop bundle version to ${VER} (updater artifacts enabled)"
 
       - name: Build sidecar
         shell: bash
@@ -477,6 +484,11 @@ jobs:
           # Lets linuxdeploy build the AppImage on runners without FUSE mounted.
           # The macOS signing/notarization vars arrive via $GITHUB_ENV (above).
           APPIMAGE_EXTRACT_AND_RUN: 1
+          # Updater artifact signing (minisign). The matching pubkey is in
+          # tauri.conf.json plugins.updater; with createUpdaterArtifacts on,
+          # the bundler hard-fails when the private key is missing.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           pnpm install --frozen-lockfile
           pnpm tauri build --bundles ${{ matrix.bundles }}
@@ -490,9 +502,24 @@ jobs:
           for f in "$B"/dmg/*.dmg "$B"/msi/*.msi "$B"/nsis/*-setup.exe "$B"/deb/*.deb "$B"/appimage/*.AppImage; do
             [ -f "$f" ] && cp "$f" dist-desktop/
           done
+          # Updater artifacts + signatures. Both macOS legs emit the same
+          # "jcode.app.tar.gz" name, so rename with the matrix label to keep
+          # the release assets collision-free.
+          if [ -f "$B"/macos/jcode.app.tar.gz ]; then
+            cp "$B"/macos/jcode.app.tar.gz "dist-desktop/jcode-${{ matrix.label }}.app.tar.gz"
+            cp "$B"/macos/jcode.app.tar.gz.sig "dist-desktop/jcode-${{ matrix.label }}.app.tar.gz.sig"
+          fi
+          for f in "$B"/nsis/*-setup.exe.sig "$B"/appimage/*.AppImage.sig; do
+            [ -f "$f" ] && cp "$f" dist-desktop/
+          done
+          # Note: the extra Windows .msi.zip updater artifact is intentionally
+          # NOT collected — NSIS is the update channel; humans still get .msi.
           cd dist-desktop
           for f in *; do
             [ -f "$f" ] || continue
+            case "$f" in
+              *.sig) continue ;; # signatures are verified by the updater, not checksums
+            esac
             if command -v sha256sum >/dev/null 2>&1; then
               sha256sum "$f" > "$f.sha256"
             else
@@ -500,6 +527,38 @@ jobs:
             fi
           done
           ls -la
+
+      # Per-platform latest.json fragment. Each matrix leg records its updater
+      # platform key with the signature and release URL; the release job merges
+      # them into the single latest.json the updater polls. Fails loudly when
+      # the .sig is missing (e.g. TAURI_SIGNING_PRIVATE_KEY not configured)
+      # rather than shipping an unsigned feed.
+      - name: Write updater fragment
+        shell: bash
+        env:
+          UPDATER_PLATFORM: ${{ matrix.updater-platform }}
+          VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          set -euo pipefail
+          case "${{ runner.os }}" in
+            macOS)   PATTERN='jcode-*.app.tar.gz.sig' ;;
+            Windows) PATTERN='*-setup.exe.sig' ;;
+            Linux)   PATTERN='*.AppImage.sig' ;;
+          esac
+          cd dist-desktop
+          SIG_FILE="$(ls $PATTERN 2>/dev/null | head -n 1 || true)"
+          [ -n "$SIG_FILE" ] || { echo "no updater artifact signature matching '$PATTERN' — was signing skipped (TAURI_SIGNING_PRIVATE_KEY unset)?" >&2; exit 1; }
+          ART="$(basename "$SIG_FILE" .sig)"
+          [ -f "$ART" ] || { echo "updater artifact '$ART' missing" >&2; exit 1; }
+          URL="https://github.com/cnjack/jcode/releases/download/${VERSION}/${ART}"
+          node -e '
+            const fs = require("fs");
+            const [sigFile, platform, url] = process.argv.slice(1);
+            const signature = fs.readFileSync(sigFile, "utf8").trim();
+            const fragment = { [platform]: { signature, url } };
+            fs.writeFileSync(`updater-fragment-${platform}.json`, JSON.stringify(fragment, null, 2) + "\n");
+            console.log(`updater fragment for ${platform}: ${url}`);
+          ' "$SIG_FILE" "$UPDATER_PLATFORM" "$URL"
 
       - name: Upload desktop bundles
         uses: actions/upload-artifact@v5
@@ -548,6 +607,40 @@ jobs:
         run: |
           echo "── CLI binaries ──"; ls -la dist/
           echo "── Desktop bundles ──"; ls -la dist-desktop/
+
+      # Merge the per-platform updater fragments (written by the desktop matrix
+      # legs) into the single latest.json the desktop auto-updater polls
+      # (releases/latest/download/latest.json). GitHub's /latest never resolves
+      # to prereleases, so alpha/beta/rc tags never auto-update installs.
+      - name: Merge updater manifest
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const dir = "dist-desktop";
+            const platforms = {};
+            let found = 0;
+            for (const f of fs.readdirSync(dir)) {
+              if (!f.startsWith("updater-fragment-") || !f.endsWith(".json")) continue;
+              found++;
+              Object.assign(platforms, JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
+              fs.rmSync(path.join(dir, f));
+            }
+            if (found === 0) {
+              console.error("WARNING: no updater fragments found — publishing without latest.json");
+              process.exit(0);
+            }
+            const manifest = {
+              version: process.env.VERSION.replace(/^v/, ""),
+              notes: "",
+              pub_date: new Date().toISOString(),
+              platforms,
+            };
+            fs.writeFileSync(path.join(dir, "latest.json"), JSON.stringify(manifest, null, 2) + "\n");
+            console.log("latest.json platforms: " + Object.keys(platforms).join(", "));
+          '
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

@@ -68,6 +68,7 @@ entry (`http://localhost:*`, `http://127.0.0.1:*`) in
 | **Native folder picker** | "Open folder" in the workspace switcher uses the OS dialog on desktop. |
 | **External links** | Links open in the system browser via the opener plugin. |
 | **Overlay title bar** | On macOS the traffic-light buttons sit in a slim draggable strip above the shell. |
+| **Auto-update** | Checks GitHub Releases for a newer version at startup and installs signed updates in place (see below). |
 
 ## Security model
 
@@ -144,6 +145,29 @@ The desktop bridge on the frontend side lives in
 `web/src/lib/useDesktop.ts` — every export is feature-detected, so the
 same web bundle runs unchanged in a browser and inside the desktop shell.
 
+## Auto-update
+
+The desktop app bundles [`tauri-plugin-updater`](https://v2.tauri.app/plugin/updater/)
+(desktop-only) plus `tauri-plugin-process` for the post-install relaunch.
+
+- **Feed:** `https://github.com/cnjack/jcode/releases/latest/download/latest.json`
+  (configured in `tauri.conf.json` → `plugins.updater`, together with the minisign
+  **pubkey**; artifacts are signed with the matching private key in CI).
+- **Flow:** ~4s after startup the app checks silently (never in `tauri dev`). When a
+  newer version exists, a bottom-right banner shows the version and release notes;
+  "Update & restart" downloads with a progress bar, verifies the signature, and
+  relaunches into the new build. Settings → General → *Version & updates* has a
+  manual check (useful after dismissing the banner). A failed passive check stays
+  silent — only the manual check surfaces errors.
+- **Channel:** stable only. The feed resolves via GitHub's `/releases/latest`, which
+  never matches prereleases, so `alpha` / `beta` / `rc` tags are never auto-installed.
+- **Artifacts:** macOS `.app.tar.gz` (per arch), Windows NSIS `-setup.exe` (doubles as
+  the installer), Linux `.AppImage` — each with a `.sig`. `.deb` / `.msi` are installers
+  only. `bundle.createUpdaterArtifacts` is **not** in the committed config (it would
+  make every local `tauri build` demand the signing key); CI enables it per build.
+- Desktop installs from **before** the updater shipped need one manual upgrade; from
+  that version on, updates chain automatically.
+
 ## Troubleshooting
 
 - **Window never appears.** The shell waits for the sidecar to accept
@@ -153,8 +177,9 @@ same web bundle runs unchanged in a browser and inside the desktop shell.
 - **Native notifications don't fire.** Confirm OS notification permission was
   granted, and that the localhost origin is listed under `remote.urls` in the
   capability file (this is what enables Tauri JS APIs on the loopback origin).
-- **Auto-update.** The updater plugin is intentionally not bundled yet: it
-  panics at startup unless `plugins.updater` (endpoints + pubkey) is configured,
-  which needs a signed release feed. To enable it, re-add `tauri-plugin-updater`
-  (Cargo + `main.rs` + the `updater:default` capability), set
-  `bundle.createUpdaterArtifacts: true`, and add the `plugins.updater` config.
+- **Auto-update finds nothing / errors on manual check.** The updater needs a
+  published, **non-prerelease** release carrying `latest.json` — check that the
+  release is marked "Latest" on GitHub and that the artifact for your platform
+  exists. A first run after the updater shipped also verifies against the pubkey
+  in `tauri.conf.json`; a mismatched key (re-generated without re-publishing)
+  fails every install.
