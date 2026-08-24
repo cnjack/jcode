@@ -53,6 +53,7 @@ export default {
     downloading: 'Downloading update…',
     restarting: 'Restarting to finish update…',
     failed: 'Update failed',
+    checkFailed: 'Check failed',
     later: 'Later',
     updateRestart: 'Update & restart',
     retry: 'Retry',

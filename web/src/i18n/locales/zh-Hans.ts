@@ -48,6 +48,7 @@ export default {
     downloading: '正在下载更新…',
     restarting: '正在重启以完成更新…',
     failed: '更新失败',
+    checkFailed: '检查失败',
     later: '稍后',
     updateRestart: '更新并重启',
     retry: '重试',

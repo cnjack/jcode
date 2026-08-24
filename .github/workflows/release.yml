@@ -551,14 +551,40 @@ jobs:
           ART="$(basename "$SIG_FILE" .sig)"
           [ -f "$ART" ] || { echo "updater artifact '$ART' missing" >&2; exit 1; }
           URL="https://github.com/cnjack/jcode/releases/download/${VERSION}/${ART}"
+          # Verify the detached minisign signature against plugins.updater.pubkey
+          # before publishing: a wrong TAURI_SIGNING_PRIVATE_KEY (or a stale
+          # key in a fork) would otherwise ship a latest.json every client
+          # rejects. Scheme: pubkey = base64(minisign key file), "RWS" line =
+          # base64("Ed" + keynum + ed25519-pk); .sig = base64(minisign sig
+          # file), first non-comment line = base64("ED" + keynum + sig); the
+          # signature covers BLAKE2b-512 of the artifact (node crypto supports
+          # both via ed25519 + blake2b512).
           node -e '
             const fs = require("fs");
-            const [sigFile, platform, url] = process.argv.slice(1);
+            const crypto = require("crypto");
+            const [confPath, sigFile, platform, url] = process.argv.slice(1);
+            const conf = JSON.parse(fs.readFileSync(confPath, "utf8"));
+            const pubText = Buffer.from(conf.plugins.updater.pubkey, "base64").toString("utf8");
+            const keyBin = Buffer.from((pubText.split(/\r?\n/).find((l) => /^RW/.test(l)) || "").trim(), "base64");
+            if (keyBin.length !== 42) throw new Error(`unexpected public key length ${keyBin.length}`);
+            const sigText = Buffer.from(fs.readFileSync(sigFile, "utf8").trim(), "base64").toString("utf8");
+            const sigBin = Buffer.from((sigText.split(/\r?\n/).find((l) => !l.startsWith("untrusted")) || "").trim(), "base64");
+            if (sigBin.length !== 74) throw new Error(`unexpected signature length ${sigBin.length}`);
+            if (!sigBin.subarray(2, 10).equals(keyBin.subarray(2, 10))) {
+              throw new Error(`signature key id does not match plugins.updater.pubkey in ${confPath}`);
+            }
+            const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), keyBin.subarray(10)]);
+            const pub = crypto.createPublicKey({ key: spki, format: "der", type: "spki" });
+            const artifact = sigFile.replace(/\.sig$/, "");
+            const digest = crypto.createHash("blake2b512").update(fs.readFileSync(artifact)).digest();
+            if (!crypto.verify(null, digest, pub, sigBin.subarray(10))) {
+              console.error(`signature verification FAILED for ${artifact}: TAURI_SIGNING_PRIVATE_KEY does not match plugins.updater.pubkey`);
+              process.exit(1);
+            }
             const signature = fs.readFileSync(sigFile, "utf8").trim();
-            const fragment = { [platform]: { signature, url } };
-            fs.writeFileSync(`updater-fragment-${platform}.json`, JSON.stringify(fragment, null, 2) + "\n");
-            console.log(`updater fragment for ${platform}: ${url}`);
-          ' "$SIG_FILE" "$UPDATER_PLATFORM" "$URL"
+            fs.writeFileSync(`updater-fragment-${platform}.json`, JSON.stringify({ [platform]: { signature, url } }, null, 2) + "\n");
+            console.log(`updater fragment for ${platform}: ${url} (signature verified)`);
+          ' "$GITHUB_WORKSPACE/desktop/src-tauri/tauri.conf.json" "$SIG_FILE" "$UPDATER_PLATFORM" "$URL"
 
       - name: Upload desktop bundles
         uses: actions/upload-artifact@v5

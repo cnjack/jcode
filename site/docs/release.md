@@ -173,8 +173,8 @@ Notes:
 - **Stable channel only.** The feed URL resolves via `releases/latest/download/…`,
   which GitHub never points at prereleases — `alpha` / `beta` / `rc` tags are built
   and published but never auto-installed.
-- Desktop installs from **before** the updater shipped need one manual upgrade; from
-  that version on, updates chain automatically.
+- Desktop installs on **v0.5.3 or earlier** (no updater) need one manual upgrade; from
+  the first updater-bearing release on, updates chain automatically.
 - `bundle.createUpdaterArtifacts` is intentionally **absent from the committed**
   `tauri.conf.json` — with it set, every local `make desktop-build` would demand the
   signing key or hard-fail. CI flips it on in the release workflow only.

@@ -165,8 +165,9 @@ The desktop app bundles [`tauri-plugin-updater`](https://v2.tauri.app/plugin/upd
   the installer), Linux `.AppImage` — each with a `.sig`. `.deb` / `.msi` are installers
   only. `bundle.createUpdaterArtifacts` is **not** in the committed config (it would
   make every local `tauri build` demand the signing key); CI enables it per build.
-- Desktop installs from **before** the updater shipped need one manual upgrade; from
-  that version on, updates chain automatically.
+- Desktop installs on **v0.5.3 or earlier** (the last releases without the
+  updater) need one manual upgrade; from the first updater-bearing release on,
+  updates chain automatically.
 
 ## Troubleshooting
 

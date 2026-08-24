@@ -52,6 +52,7 @@ export default {
     downloading: '正在下載更新…',
     restarting: '正在重新啟動以完成更新…',
     failed: '更新失敗',
+    checkFailed: '檢查失敗',
     later: '稍後',
     updateRestart: '更新並重新啟動',
     retry: '重試',

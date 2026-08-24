@@ -87,6 +87,10 @@ export function AppUpdateProvider({
       const update = await tauriCheck()
       if (update) {
         updateRef.current = update
+        // A check that finds an update re-arms the banner: the user dismissed
+        // the previous notice, but this is a fresh discovery — and the
+        // Settings row has no install button of its own.
+        setDismissed(false)
         setState((s) => ({
           ...s,
           status: 'available',

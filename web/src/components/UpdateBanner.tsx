@@ -13,7 +13,7 @@ import { isTauri } from '../lib/useDesktop'
 
 export function UpdateBanner() {
   const { t } = useTranslation()
-  const { status, version, notes, progress, error, dismissed, install, dismiss } = useAppUpdate()
+  const { status, version, notes, progress, error, dismissed, check, install, dismiss } = useAppUpdate()
 
   if (!isTauri || dismissed) return null
   // Passive states stay invisible; manual-check feedback lives in Settings.
@@ -100,9 +100,12 @@ export function UpdateBanner() {
 
       {status === 'error' && (
         <div className="flex items-center justify-end gap-2">
+          {/* Retry re-runs the check rather than install(): an error from a
+              failed check leaves no Update handle, and after a failed install
+              a fresh check rediscovers the update for another attempt. */}
           <button
             type="button"
-            onClick={() => void install()}
+            onClick={() => void check({ manual: true })}
             className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-primary)] px-3 py-1.5 text-[12px] font-semibold text-[var(--color-on-primary)] transition-opacity hover:opacity-90"
           >
             <ArrowPathIcon className="h-3.5 w-3.5" />

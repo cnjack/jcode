@@ -51,6 +51,7 @@ export default {
     downloading: 'アップデートをダウンロード中…',
     restarting: '再起動して更新を完了しています…',
     failed: 'アップデートに失敗しました',
+    checkFailed: '確認に失敗しました',
     later: '後で',
     updateRestart: '更新して再起動',
     retry: '再試行',
