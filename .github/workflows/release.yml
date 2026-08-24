@@ -181,12 +181,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS Apple Silicon (M-series)
+          # macOS Apple Silicon (M-series). The `app` target is required for
+          # the updater artifact: with `dmg` alone tauri-bundler never creates
+          # the .app.tar.gz (+ .sig) the updater feed needs (v0.13.1 lesson).
           - os: macos-latest
             triple: aarch64-apple-darwin
             ext: ''
             cgo: 1
-            bundles: dmg
+            bundles: 'app,dmg'
             label: macos-arm64
             updater-platform: darwin-aarch64
           # macOS Intel
@@ -194,7 +196,7 @@ jobs:
             triple: x86_64-apple-darwin
             ext: ''
             cgo: 1
-            bundles: dmg
+            bundles: 'app,dmg'
             label: macos-x64
             updater-platform: darwin-x86_64
           # Windows x64
@@ -554,54 +556,56 @@ jobs:
           # Verify the detached minisign signature against plugins.updater.pubkey
           # before publishing: a wrong TAURI_SIGNING_PRIVATE_KEY (or a stale
           # key in a fork) would otherwise ship a latest.json every client
-          # rejects. Scheme: pubkey = base64(minisign key file), "RWS" line =
-          # base64("Ed" + keynum + ed25519-pk); .sig = base64(minisign sig
-          # file), first non-comment line = base64("ED" + keynum + sig); the
-          # signature covers BLAKE2b-512 of the artifact (node crypto supports
-          # both via ed25519 + blake2b512).
-          node -e '
-            const fs = require("fs");
-            const crypto = require("crypto");
-            const [confPath, sigFile, platform, url] = process.argv.slice(1);
-            const conf = JSON.parse(fs.readFileSync(confPath, "utf8"));
-            const pubText = Buffer.from(conf.plugins.updater.pubkey, "base64").toString("utf8");
-            const keyBin = Buffer.from((pubText.split(/\r?\n/).find((l) => /^RW/.test(l)) || "").trim(), "base64");
-            if (keyBin.length !== 42) throw new Error(`unexpected public key length ${keyBin.length}`);
-            const sigText = Buffer.from(fs.readFileSync(sigFile, "utf8").trim(), "base64").toString("utf8");
-            const lines = sigText.split(/\r?\n/).filter((l) => l.trim() !== "");
-            // minisign-verify (the client crate) requires all four lines:
-            // untrusted comment, signature, trusted comment, global signature.
-            // A truncated file would pass a primary-only check but the
-            // client's Signature::decode rejects it — fail it here instead.
-            if (lines.length < 4) throw new Error(`truncated signature: expected 4 lines, got ${lines.length}`);
-            if (!lines[2].startsWith("trusted comment: ")) throw new Error("malformed trusted comment");
-            const sigBin = Buffer.from(lines[1].trim(), "base64");
-            if (sigBin.length !== 74) throw new Error(`unexpected signature length ${sigBin.length}`);
-            if (!sigBin.subarray(2, 10).equals(keyBin.subarray(2, 10))) {
-              throw new Error(`signature key id does not match plugins.updater.pubkey in ${confPath}`);
-            }
-            const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), keyBin.subarray(10)]);
-            const pub = crypto.createPublicKey({ key: spki, format: "der", type: "spki" });
-            const artifact = sigFile.replace(/\.sig$/, "");
-            const digest = crypto.createHash("blake2b512").update(fs.readFileSync(artifact)).digest();
-            if (!crypto.verify(null, digest, pub, sigBin.subarray(10))) {
-              console.error(`signature verification FAILED for ${artifact}: TAURI_SIGNING_PRIVATE_KEY does not match plugins.updater.pubkey`);
-              process.exit(1);
-            }
-            // Global signature covers sig64 || trusted comment (minus its
-            // "trusted comment: " prefix) — mirrors verify_ed25519 in
-            // minisign-verify.
-            const globalSig = Buffer.from(lines[3].trim(), "base64");
-            if (globalSig.length !== 64) throw new Error(`unexpected global signature length ${globalSig.length}`);
-            const globalMsg = Buffer.concat([sigBin.subarray(10), Buffer.from(lines[2].slice(17), "utf8")]);
-            if (!crypto.verify(null, globalMsg, pub, globalSig)) {
-              console.error(`global signature verification FAILED for ${artifact}`);
-              process.exit(1);
-            }
-            const signature = fs.readFileSync(sigFile, "utf8").trim();
-            fs.writeFileSync(`updater-fragment-${platform}.json`, JSON.stringify({ [platform]: { signature, url } }, null, 2) + "\n");
-            console.log(`updater fragment for ${platform}: ${url} (signature verified)`);
-          ' "$GITHUB_WORKSPACE/desktop/src-tauri/tauri.conf.json" "$SIG_FILE" "$UPDATER_PLATFORM" "$URL"
+          # rejects. The validator is written via a QUOTED heredoc and run as a
+          # file — embedding JS in `node -e '...'` broke on an apostrophe in a
+          # comment (v0.13.1), which single quotes cannot contain. Scheme:
+          # pubkey = base64(minisign key file), "RWS" line = base64("Ed" +
+          # keynum + ed25519-pk); .sig = base64(minisign sig file), first
+          # non-comment line = base64("ED" + keynum + sig); the signature
+          # covers BLAKE2b-512 of the artifact, plus a global signature over
+          # sig64 || trusted comment (mirrors minisign-verify, the client
+          # crate — node crypto covers both via ed25519 + blake2b512).
+          cat > "$RUNNER_TEMP/verify_updater_fragment.cjs" <<'FRAGMENT_EOF'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const [confPath, sigFile, platform, url] = process.argv.slice(2);
+          const conf = JSON.parse(fs.readFileSync(confPath, "utf8"));
+          const pubText = Buffer.from(conf.plugins.updater.pubkey, "base64").toString("utf8");
+          const keyBin = Buffer.from((pubText.split(/\r?\n/).find((l) => /^RW/.test(l)) || "").trim(), "base64");
+          if (keyBin.length !== 42) throw new Error(`unexpected public key length ${keyBin.length}`);
+          const sigText = Buffer.from(fs.readFileSync(sigFile, "utf8").trim(), "base64").toString("utf8");
+          const lines = sigText.split(/\r?\n/).filter((l) => l.trim() !== "");
+          // minisign-verify (the client crate) requires all four lines:
+          // untrusted comment, signature, trusted comment, global signature.
+          // A truncated file would pass a primary-only check but the client
+          // rejects it in Signature::decode — fail it here instead.
+          if (lines.length < 4) throw new Error(`truncated signature: expected 4 lines, got ${lines.length}`);
+          if (!lines[2].startsWith("trusted comment: ")) throw new Error("malformed trusted comment");
+          const sigBin = Buffer.from(lines[1].trim(), "base64");
+          if (sigBin.length !== 74) throw new Error(`unexpected signature length ${sigBin.length}`);
+          if (!sigBin.subarray(2, 10).equals(keyBin.subarray(2, 10))) {
+            throw new Error(`signature key id does not match plugins.updater.pubkey in ${confPath}`);
+          }
+          const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), keyBin.subarray(10)]);
+          const pub = crypto.createPublicKey({ key: spki, format: "der", type: "spki" });
+          const artifact = sigFile.replace(/\.sig$/, "");
+          const digest = crypto.createHash("blake2b512").update(fs.readFileSync(artifact)).digest();
+          if (!crypto.verify(null, digest, pub, sigBin.subarray(10))) {
+            console.error(`signature verification FAILED for ${artifact}: TAURI_SIGNING_PRIVATE_KEY does not match plugins.updater.pubkey`);
+            process.exit(1);
+          }
+          const globalSig = Buffer.from(lines[3].trim(), "base64");
+          if (globalSig.length !== 64) throw new Error(`unexpected global signature length ${globalSig.length}`);
+          const globalMsg = Buffer.concat([sigBin.subarray(10), Buffer.from(lines[2].slice(17), "utf8")]);
+          if (!crypto.verify(null, globalMsg, pub, globalSig)) {
+            console.error(`global signature verification FAILED for ${artifact}`);
+            process.exit(1);
+          }
+          const signature = fs.readFileSync(sigFile, "utf8").trim();
+          fs.writeFileSync(`updater-fragment-${platform}.json`, JSON.stringify({ [platform]: { signature, url } }, null, 2) + "\n");
+          console.log(`updater fragment for ${platform}: ${url} (signature verified)`);
+          FRAGMENT_EOF
+          node "$RUNNER_TEMP/verify_updater_fragment.cjs" "$GITHUB_WORKSPACE/desktop/src-tauri/tauri.conf.json" "$SIG_FILE" "$UPDATER_PLATFORM" "$URL"
 
       - name: Upload desktop bundles
         uses: actions/upload-artifact@v5
@@ -659,31 +663,34 @@ jobs:
         env:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          node -e '
-            const fs = require("fs");
-            const path = require("path");
-            const dir = "dist-desktop";
-            const platforms = {};
-            let found = 0;
-            for (const f of fs.readdirSync(dir)) {
-              if (!f.startsWith("updater-fragment-") || !f.endsWith(".json")) continue;
-              found++;
-              Object.assign(platforms, JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
-              fs.rmSync(path.join(dir, f));
-            }
-            if (found === 0) {
-              console.error("WARNING: no updater fragments found — publishing without latest.json");
-              process.exit(0);
-            }
-            const manifest = {
-              version: process.env.VERSION.replace(/^v/, ""),
-              notes: "",
-              pub_date: new Date().toISOString(),
-              platforms,
-            };
-            fs.writeFileSync(path.join(dir, "latest.json"), JSON.stringify(manifest, null, 2) + "\n");
-            console.log("latest.json platforms: " + Object.keys(platforms).join(", "));
-          '
+          # Heredoc + file execution (not `node -e '...'`): single quotes
+          # cannot contain apostrophes, and one broke the v0.13.1 release.
+          cat > "$RUNNER_TEMP/merge_updater_manifest.cjs" <<'MERGE_EOF'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const dir = "dist-desktop";
+          const platforms = {};
+          let found = 0;
+          for (const f of fs.readdirSync(dir)) {
+            if (!f.startsWith("updater-fragment-") || !f.endsWith(".json")) continue;
+            found++;
+            Object.assign(platforms, JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
+            fs.rmSync(path.join(dir, f));
+          }
+          if (found === 0) {
+            console.error("WARNING: no updater fragments found — publishing without latest.json");
+            process.exit(0);
+          }
+          const manifest = {
+            version: process.env.VERSION.replace(/^v/, ""),
+            notes: "",
+            pub_date: new Date().toISOString(),
+            platforms,
+          };
+          fs.writeFileSync(path.join(dir, "latest.json"), JSON.stringify(manifest, null, 2) + "\n");
+          console.log("latest.json platforms: " + Object.keys(platforms).join(", "));
+          MERGE_EOF
+          node "$RUNNER_TEMP/merge_updater_manifest.cjs"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
