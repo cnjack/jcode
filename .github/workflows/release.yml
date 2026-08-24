@@ -568,7 +568,14 @@ jobs:
             const keyBin = Buffer.from((pubText.split(/\r?\n/).find((l) => /^RW/.test(l)) || "").trim(), "base64");
             if (keyBin.length !== 42) throw new Error(`unexpected public key length ${keyBin.length}`);
             const sigText = Buffer.from(fs.readFileSync(sigFile, "utf8").trim(), "base64").toString("utf8");
-            const sigBin = Buffer.from((sigText.split(/\r?\n/).find((l) => !l.startsWith("untrusted")) || "").trim(), "base64");
+            const lines = sigText.split(/\r?\n/).filter((l) => l.trim() !== "");
+            // minisign-verify (the client crate) requires all four lines:
+            // untrusted comment, signature, trusted comment, global signature.
+            // A truncated file would pass a primary-only check but the
+            // client's Signature::decode rejects it — fail it here instead.
+            if (lines.length < 4) throw new Error(`truncated signature: expected 4 lines, got ${lines.length}`);
+            if (!lines[2].startsWith("trusted comment: ")) throw new Error("malformed trusted comment");
+            const sigBin = Buffer.from(lines[1].trim(), "base64");
             if (sigBin.length !== 74) throw new Error(`unexpected signature length ${sigBin.length}`);
             if (!sigBin.subarray(2, 10).equals(keyBin.subarray(2, 10))) {
               throw new Error(`signature key id does not match plugins.updater.pubkey in ${confPath}`);
@@ -579,6 +586,16 @@ jobs:
             const digest = crypto.createHash("blake2b512").update(fs.readFileSync(artifact)).digest();
             if (!crypto.verify(null, digest, pub, sigBin.subarray(10))) {
               console.error(`signature verification FAILED for ${artifact}: TAURI_SIGNING_PRIVATE_KEY does not match plugins.updater.pubkey`);
+              process.exit(1);
+            }
+            // Global signature covers sig64 || trusted comment (minus its
+            // "trusted comment: " prefix) — mirrors verify_ed25519 in
+            // minisign-verify.
+            const globalSig = Buffer.from(lines[3].trim(), "base64");
+            if (globalSig.length !== 64) throw new Error(`unexpected global signature length ${globalSig.length}`);
+            const globalMsg = Buffer.concat([sigBin.subarray(10), Buffer.from(lines[2].slice(17), "utf8")]);
+            if (!crypto.verify(null, globalMsg, pub, globalSig)) {
+              console.error(`global signature verification FAILED for ${artifact}`);
               process.exit(1);
             }
             const signature = fs.readFileSync(sigFile, "utf8").trim();

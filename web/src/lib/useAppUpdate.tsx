@@ -100,7 +100,9 @@ export function AppUpdateProvider({
           error: '',
         }))
       } else {
-        setState((s) => ({ ...s, status: 'up-to-date' }))
+        // No update: also drop any stale version/notes from an earlier
+        // discovery so nothing renders outdated details.
+        setState((s) => ({ ...s, status: 'up-to-date', version: '', notes: '' }))
       }
     } catch (err) {
       // A failed passive startup check must never nag the user; only a manual
