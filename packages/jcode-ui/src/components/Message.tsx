@@ -79,7 +79,9 @@ export const Message = memo(function Message({ message, canEdit, showDuration = 
     ? message.level === 'error'
       ? 'Error'
       : 'System'
-    : isWechat
+    : message.author
+      ? message.author
+      : isWechat
       ? 'WeChat'
       : isUser
         ? 'You'
@@ -131,6 +133,7 @@ export const Message = memo(function Message({ message, canEdit, showDuration = 
 
   return (
     <div
+      data-testid={`thread-message-${message.role}`}
       data-jcode-ui=""
       className="jcode-message jcode-chat-col group/msg jcode-animate-fade-in pt-3 pb-1.5"
       data-role={message.role}
@@ -143,7 +146,7 @@ export const Message = memo(function Message({ message, canEdit, showDuration = 
           external-source messages keep a compact visible label. */}
       {slots?.header ? (
         slots.header(message)
-      ) : (slots?.avatar || isSystem || isWechat) ? (
+      ) : (slots?.avatar || message.author || isSystem || isWechat) ? (
         <div className="jcode-message__header mb-2 flex items-center gap-2.5">
           {slots?.avatar?.(message)}
           <span className="text-[11px] font-semibold tracking-wide" style={{ color: labelColor }}>
