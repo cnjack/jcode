@@ -172,11 +172,74 @@ describe('goal armed', () => {
 })
 
 describe('composer toolbar', () => {
+  it('exposes the active prompt as the textarea accessible name', () => {
+    const { container } = renderComposer(makeHost({ strings: { placeholder: 'Describe a task' } }))
+    expect(textarea(container).getAttribute('aria-label')).toBe('Describe a task')
+  })
+
+  it('keeps drafting available while a host temporarily disables submission', () => {
+    const runtime = createMockRuntime()
+    const { container } = render(
+      <RuntimeProvider runtime={runtime}>
+        <ChatInput host={makeHost()} sendDisabled />
+      </RuntimeProvider>,
+    )
+    const ta = textarea(container)
+    fireEvent.change(ta, { target: { value: 'keep this draft' } })
+    expect(ta.disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('keeps the add control without exposing a task-scoped Tools entry', () => {
     renderComposer(makeHost())
 
     expect(screen.getByRole('button', { name: 'Add' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Tools' })).toBeNull()
+  })
+
+  it('lets a host replace the desktop workspace and branch row with its own context control', () => {
+    const { container } = render(
+      <RuntimeProvider runtime={createMockRuntime()}>
+        <ChatInput
+          host={makeHost()}
+          contextHeader={<button type="button">acme/payments</button>}
+        />
+      </RuntimeProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'acme/payments' })).toBeTruthy()
+    expect(container.querySelector('.ws-bar')).toBeNull()
+    expect(container.querySelector('.branch-picker')).toBeNull()
+  })
+
+  it('omits model management and favorite affordances when the host cannot persist them', async () => {
+    const { container } = render(
+      <RuntimeProvider runtime={createMockRuntime()}>
+        <ChatInput host={makeHost()} modelManagement={false} modelFavorites={false} />
+      </RuntimeProvider>,
+    )
+
+    fireEvent.click(screen.getByText('GPT-4o'))
+    await waitFor(() => expect(screen.getByPlaceholderText('Filter models…')).toBeTruthy())
+    expect(screen.queryByText('Manage models…')).toBeNull()
+    expect(container.querySelectorAll('.jcode-product-composer-model-list [data-model-favorite]').length).toBe(0)
+  })
+
+  it('omits selectors that the host cannot apply to the current conversation', () => {
+    const { container } = render(
+      <RuntimeProvider runtime={createMockRuntime()}>
+        <ChatInput
+          host={makeHost()}
+          modelSelection={false}
+          modeSelection={false}
+          effortSelection={false}
+        />
+      </RuntimeProvider>,
+    )
+
+    expect(container.querySelector('.jcode-product-composer-model-picker')).toBeNull()
+    expect(container.querySelector('.jcode-product-composer-mode-picker')).toBeNull()
+    expect(container.querySelector('.jcode-product-composer-effort-picker')).toBeNull()
   })
 })
 

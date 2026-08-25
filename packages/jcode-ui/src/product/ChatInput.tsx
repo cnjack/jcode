@@ -28,7 +28,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   HandRaisedIcon,
@@ -83,6 +83,24 @@ export interface ProductChatInputProps {
    * new-task screen). Docked conversation composers stay recessed.
    */
   elevated?: boolean
+  /**
+   * Host-owned context control rendered in the welcome composer's upper-left.
+   * Supplying it replaces the desktop-only Workspace + Branch pickers while
+   * keeping the rest of the product composer identical.
+   */
+  contextHeader?: ReactNode
+  /** Hide Manage Models when the host has no persistence API for that action. */
+  modelManagement?: boolean
+  /** Hide favorite affordances when the host cannot persist favorites. */
+  modelFavorites?: boolean
+  /** Hide model selection when the current conversation cannot change models. */
+  modelSelection?: boolean
+  /** Hide mode selection when the current conversation cannot change modes. */
+  modeSelection?: boolean
+  /** Hide reasoning effort when the current conversation cannot change effort. */
+  effortSelection?: boolean
+  /** Keep drafting/context selection available while the host cannot submit. */
+  sendDisabled?: boolean
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -247,7 +265,19 @@ function slashTokenAt(text: string, cursor: number): { start: number; filter: st
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = false }: ProductChatInputProps) {
+export function ChatInput({
+  host,
+  onSent,
+  pickerPlacement = 'top',
+  elevated = false,
+  contextHeader,
+  modelManagement = true,
+  modelFavorites = true,
+  modelSelection = true,
+  modeSelection = true,
+  effortSelection = true,
+  sendDisabled = false,
+}: ProductChatInputProps) {
   const strings = useComposerStrings(host)
 
   // Runtime (timeline/queue + send/stop actions).
@@ -479,6 +509,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   // ─── Send / queue ─────────────────────────────────────────────────────────
 
   const send = useCallback(() => {
+    if (sendDisabled) return
     const text = input.trim()
     if (!text && pendingImages.length === 0) return
     const images: RuntimeChatImage[] | undefined =
@@ -496,7 +527,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     setPendingImages([])
     setShowSlashMenu(false)
     onSent?.()
-  }, [actions, input, isRunning, onSent, pendingImages, currentSessionId, strings])
+  }, [actions, input, isRunning, onSent, pendingImages, currentSessionId, strings, sendDisabled])
 
   // ─── Model / mode selection ───────────────────────────────────────────────
 
@@ -815,7 +846,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     setShowEffortPicker(false)
   }
 
-  const canSend = input.trim().length > 0 || pendingImages.length > 0
+  const canSend = !sendDisabled && (input.trim().length > 0 || pendingImages.length > 0)
   const showSend = !isRunning || input.trim().length > 0 || pendingImages.length > 0
   const currentModeDef = MODE_DEFS.find((m) => m.value === mode) ?? MODE_DEFS[0]
   // Host-restricted mode list (M20 cloud ceiling): absent ⇒ all four modes.
@@ -907,8 +938,12 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
             className="flex min-w-0 items-center gap-1.5"
             style={{ padding: isElevated ? '2px 4px 9px' : '0 2px 5px' }}
           >
-            <WorkspacePicker host={host} placement={pickerPlacement} />
-            <BranchPicker host={host} placement={pickerPlacement} />
+            {contextHeader ?? (
+              <>
+                <WorkspacePicker host={host} placement={pickerPlacement} />
+                <BranchPicker host={host} placement={pickerPlacement} />
+              </>
+            )}
           </div>
         )}
 
@@ -930,6 +965,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
               onKeyDown={handleKeyDown}
               onSelect={handleSelect}
               onPaste={handlePaste}
+              aria-label={strings.placeholder}
               placeholder={
                 isRunning
                   ? strings.queuePlaceholder
@@ -1033,7 +1069,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
               </div>
 
               {/* Mode picker */}
-              <div className="jcode-product-composer-picker-anchor jcode-product-composer-mode-picker relative">
+              {modeSelection && <div className="jcode-product-composer-picker-anchor jcode-product-composer-mode-picker relative">
                 <button
                   type="button"
                   aria-expanded={showModePicker}
@@ -1117,7 +1153,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                     )}
                   </div>
                 )}
-              </div>
+              </div>}
 
               {/* Goal chip (armed) */}
               {goalArmed && (
@@ -1197,7 +1233,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
               )}
 
               {/* Model picker + effort picker */}
-              <div className="jcode-product-composer-picker-anchor jcode-product-composer-model-picker relative flex items-center gap-1">
+              {modelSelection && <div className="jcode-product-composer-picker-anchor jcode-product-composer-model-picker relative flex items-center gap-1">
                 <button
                   type="button"
                   aria-expanded={showModelPicker}
@@ -1217,7 +1253,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                 </button>
 
                 {/* Effort picker */}
-                {showEffortControl && (
+                {effortSelection && showEffortControl && (
                   <div className="jcode-product-composer-picker-anchor jcode-product-composer-effort-picker relative">
                     <button
                       type="button"
@@ -1411,10 +1447,13 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                                   {acceptsImageInput(info) && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
                                   {generatesImages(info) && <SquaresPlusIcon className="h-[15px] w-[15px]" title={strings.modelImageOutput} strokeWidth={1.9} />}
                                 </span>
-                                <StarIconSolid
-                                  className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]"
-                                  onClick={(e: ReactMouseEvent) => { e.stopPropagation(); void host.toggleFavorite(r.provider, r.model) }}
-                                />
+                                {modelFavorites && (
+                                  <StarIconSolid
+                                    data-model-favorite
+                                    className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]"
+                                    onClick={(e: ReactMouseEvent) => { e.stopPropagation(); void host.toggleFavorite(r.provider, r.model) }}
+                                  />
+                                )}
                               </button>
                             )
                           })}
@@ -1467,12 +1506,15 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                                   {m.input_modalities && !acceptsImageInput(m) && <PhotoIcon className="h-[15px] w-[15px] text-[var(--color-warning-fg)]" title={strings.modelNoImageInput} strokeWidth={1.9} />}
                                 </span>
                                 {active && <CheckIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" strokeWidth={2} />}
-                                <StarIcon
-                                  className={`h-3.5 w-3.5 shrink-0 cursor-pointer border-none bg-transparent transition-opacity hover:text-[var(--color-primary)] ${
-                                    isFav ? 'text-[var(--color-primary)] opacity-100' : 'text-[var(--color-muted-foreground)] opacity-0 group-hover:opacity-100'
-                                  }`}
-                                  onClick={(e: ReactMouseEvent) => { e.stopPropagation(); void host.toggleFavorite(p.id, m.id) }}
-                                />
+                                {modelFavorites && (
+                                  <StarIcon
+                                    data-model-favorite
+                                    className={`h-3.5 w-3.5 shrink-0 cursor-pointer border-none bg-transparent transition-opacity hover:text-[var(--color-primary)] ${
+                                      isFav ? 'text-[var(--color-primary)] opacity-100' : 'text-[var(--color-muted-foreground)] opacity-0 group-hover:opacity-100'
+                                    }`}
+                                    onClick={(e: ReactMouseEvent) => { e.stopPropagation(); void host.toggleFavorite(p.id, m.id) }}
+                                  />
+                                )}
                               </div>
                             )
                           })}
@@ -1487,7 +1529,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                     </div>
 
                     {/* Footer → Manage models */}
-                    <div className="border-t border-[var(--color-border)] p-1.5">
+                    {modelManagement && <div className="border-t border-[var(--color-border)] p-1.5">
                       <button
                         type="button"
                         onClick={(e: ReactMouseEvent) => { e.stopPropagation(); setShowModelPicker(false); setShowManageModels(true) }}
@@ -1496,10 +1538,10 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                         <SquaresPlusIcon className="h-3.5 w-3.5" />
                         {strings.modelManage}
                       </button>
-                    </div>
+                    </div>}
                   </div>
                 )}
-              </div>
+              </div>}
 
               {/* Stop button */}
               {isRunning && (
@@ -1535,7 +1577,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
       </div>
 
       {/* Manage Models dialog (portal to body) */}
-      {showManageModels && createPortal(
+      {modelManagement && showManageModels && createPortal(
         <ManageModelsDialog
           strings={strings}
           resolveIcon={host.resolveProviderIcon}
