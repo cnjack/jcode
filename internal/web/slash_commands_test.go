@@ -49,8 +49,8 @@ func TestHandleSlashCommands_IncludesFlows(t *testing.T) {
 }
 
 // TestHandleSlashCommands_TaskScoped verifies the endpoint resolves workflows
-// from the FOREGROUND task's project loader, so a task in another project sees
-// its own .jcode/workflows even though the server's boot loader does not.
+// from the requested task's project loader, so another tab's foreground task
+// cannot replace its .jcode/workflows catalog.
 func TestHandleSlashCommands_TaskScoped(t *testing.T) {
 	// A project dir with one project-only workflow.
 	proj := t.TempDir()
@@ -67,15 +67,18 @@ return "ok";`
 	taskLoader := flow.NewLoader()
 	taskLoader.LoadProject(proj)
 
-	// Boot loader (builtins only) must NOT know the project workflow; the active
-	// engine's loader must.
+	// Boot/active loaders (builtins only) must NOT know the project workflow; the
+	// explicitly requested task's loader must.
+	active := &Engine{taskID: "task-a", flowLoader: flow.NewLoader()}
+	target := &Engine{taskID: "task-b", flowLoader: taskLoader}
 	s := &Server{
 		flowLoader: flow.NewLoader(),
-		Engine:     &Engine{flowLoader: taskLoader},
+		Engine:     active,
+		tasks:      map[string]*Engine{"task-a": active, "task-b": target},
 	}
 
 	rec := httptest.NewRecorder()
-	s.handleSlashCommands(rec, httptest.NewRequest(http.MethodGet, "/api/slash-commands", nil))
+	s.handleSlashCommands(rec, httptest.NewRequest(http.MethodGet, "/api/slash-commands?task_id=task-b", nil))
 
 	var items []struct {
 		Slash string `json:"slash"`
@@ -94,7 +97,13 @@ return "ok";`
 		}
 	}
 	if !found {
-		t.Error("foreground task's project workflow /task-only-wf not advertised")
+		t.Error("requested task's project workflow /task-only-wf not advertised")
+	}
+
+	unknown := httptest.NewRecorder()
+	s.handleSlashCommands(unknown, httptest.NewRequest(http.MethodGet, "/api/slash-commands?task_id=missing", nil))
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown task code=%d body=%s", unknown.Code, unknown.Body.String())
 	}
 }
 

@@ -68,8 +68,9 @@ function mockFollowUpAPIs() {
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => { resolve = done })
-  return { promise, resolve }
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail })
+  return { promise, resolve, reject }
 }
 
 describe('conversation loading state', () => {
@@ -378,9 +379,15 @@ describe('conversation loading state', () => {
       workspace_kind: 'project',
     })
 
-    await store.dispatch(startFreshChat()).unwrap()
+    await store.dispatch(startFreshChat({ expectedSessionId: 'previous-session' })).unwrap()
 
-    expect(create).toHaveBeenCalledWith(undefined, undefined, 'project', undefined)
+    expect(create).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      'project',
+      '/workspace',
+      { expectedSessionId: 'previous-session', requireIdle: false },
+    )
     expect(store.getState().session.currentSessionId).toBe('fresh-on-boot')
     expect(store.getState().chat.timeline).toEqual([])
     expect(store.getState().conversationLoad.phase).toBe('idle')
@@ -391,7 +398,29 @@ describe('conversation loading state', () => {
     store.dispatch(chatActions.addMessage({ role: 'assistant', content: 'old conversation' }))
     vi.spyOn(api, 'newSession').mockRejectedValue(new Error('cannot provision fresh task'))
 
-    await expect(store.dispatch(startFreshChat()).unwrap()).rejects.toThrow('cannot provision fresh task')
+    await expect(store.dispatch(startFreshChat({ expectedSessionId: 'previous-session' })).unwrap())
+      .rejects.toThrow('cannot provision fresh task')
+
+    expect(store.getState().session.currentSessionId).toBe('')
+    expect(store.getState().chat.timeline).toEqual([])
+  })
+
+  it('surfaces an authoritative fresh-session guard conflict while this page still owns the UI', async () => {
+    store.dispatch(sessionActions.setCurrentSession('previous-session'))
+    store.dispatch(chatActions.addMessage({ role: 'assistant', content: 'old conversation' }))
+    const guardError = Object.assign(new Error('active task changed while creating a fresh task'), {
+      status: 409,
+      code: 'fresh_session_guard_failed',
+      body: {
+        code: 'fresh_session_guard_failed',
+        reason: 'session_changed',
+      },
+    })
+    vi.spyOn(api, 'newSession').mockRejectedValue(guardError)
+
+    await expect(store.dispatch(startFreshChat({
+      expectedSessionId: 'previous-session',
+    })).unwrap()).rejects.toThrow('active task changed while creating a fresh task')
 
     expect(store.getState().session.currentSessionId).toBe('')
     expect(store.getState().chat.timeline).toEqual([])
@@ -454,6 +483,72 @@ describe('conversation loading state', () => {
     expect(create).not.toHaveBeenCalled()
     expect(store.getState().session.currentSessionId).toBe('reopen-session')
     expect(store.getState().chat.isRunning).toBe(true)
+  })
+
+  it('does not apply a guarded fresh response after navigation or a run starts', async () => {
+    store.dispatch(sessionActions.setCurrentSession('reopen-session'))
+    store.dispatch(sessionActions.setProjectPath('/reopen-project'))
+    store.dispatch(chatActions.setRunning(false))
+    const first = deferred<Awaited<ReturnType<typeof api.newSession>>>()
+    const create = vi.spyOn(api, 'newSession').mockReturnValueOnce(first.promise)
+
+    const reopening = store.dispatch(startFreshChat({
+      expectedSessionId: 'reopen-session',
+      requireIdle: true,
+    }))
+    await vi.waitFor(() => expect(create).toHaveBeenCalled())
+    store.dispatch(sessionActions.setCurrentSession('navigated-session'))
+    store.dispatch(chatActions.clearChat())
+    store.dispatch(chatActions.addMessage({ role: 'assistant', content: 'newer conversation' }))
+    first.resolve({ status: 'ok', session_id: 'stale-fresh-session' })
+    await reopening.unwrap()
+
+    expect(store.getState().session.currentSessionId).toBe('navigated-session')
+    expect(store.getState().chat.timeline).toHaveLength(1)
+    expect(store.getState().chat.timeline[0]).toMatchObject({
+      kind: 'message', data: { content: 'newer conversation' },
+    })
+    expect(create).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      'project',
+      '/reopen-project',
+      { expectedSessionId: 'reopen-session', requireIdle: true },
+    )
+
+    store.dispatch(sessionActions.setCurrentSession('running-session'))
+    store.dispatch(chatActions.clearChat())
+    store.dispatch(chatActions.setRunning(false))
+    const second = deferred<Awaited<ReturnType<typeof api.newSession>>>()
+    create.mockReturnValueOnce(second.promise)
+    const runningReopen = store.dispatch(startFreshChat({
+      expectedSessionId: 'running-session',
+      requireIdle: true,
+    }))
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2))
+    store.dispatch(chatActions.setRunning(true))
+    second.resolve({ status: 'ok', session_id: 'stale-running-fresh' })
+    await runningReopen.unwrap()
+
+    expect(store.getState().session.currentSessionId).toBe('running-session')
+    expect(store.getState().chat.isRunning).toBe(true)
+  })
+
+  it('ignores a failed guarded request after the user navigates away', async () => {
+    store.dispatch(sessionActions.setCurrentSession('reopen-session'))
+    const pending = deferred<Awaited<ReturnType<typeof api.newSession>>>()
+    vi.spyOn(api, 'newSession').mockReturnValue(pending.promise)
+
+    const reopening = store.dispatch(startFreshChat({
+      expectedSessionId: 'reopen-session',
+      requireIdle: true,
+    }))
+    await vi.waitFor(() => expect(api.newSession).toHaveBeenCalled())
+    store.dispatch(sessionActions.setCurrentSession('navigated-session'))
+    pending.reject(new Error('obsolete reopen failed'))
+
+    await expect(reopening.unwrap()).resolves.toBeUndefined()
+    expect(store.getState().session.currentSessionId).toBe('navigated-session')
   })
 
   it('allocates a fresh scratch workspace for no-project new tasks', async () => {

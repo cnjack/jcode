@@ -122,6 +122,13 @@ func (s *Server) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
 		Type        string `json:"type"` // "skill" | "flow"
 	}
 
+	taskID := r.URL.Query().Get("task_id")
+	eng := s.resolveEngine(taskID)
+	if taskID != "" && eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+
 	var items []slashItem
 	if s.skillLoader != nil {
 		for _, sk := range s.skillLoader.SlashCommands() {
@@ -132,9 +139,9 @@ func (s *Server) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	// Workflows resolve against the foreground task's project so its
-	// .jcode/workflows show up in autocomplete, falling back to the boot loader.
-	if fl := s.flowLoaderFor(s.activeEngine()); fl != nil {
+	// Workflows resolve against the requested task's project so another tab's
+	// foreground switch cannot replace this task's autocomplete catalog.
+	if fl := s.flowLoaderFor(eng); fl != nil {
 		for _, fc := range fl.SlashCommands() {
 			items = append(items, slashItem{
 				Slash:       fc.Slash,

@@ -116,14 +116,17 @@ export const api = {
     }),
   usageStats: (days = 30) => request<UsageStats>(`/api/usage/stats?days=${days}`),
   taskStats: (id: string) => request<TaskStats>(`/api/tasks/${encodeURIComponent(id)}/stats`),
-  todos: () => request<TodoItem[]>('/api/todos'),
-  goal: () => request<Goal | null>('/api/goal'),
-  setGoal: (objective: string, start = true) =>
+  todos: (taskId?: string) => request<TodoItem[]>(`/api/todos${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`),
+  goal: (taskId?: string) => request<Goal | null>(`/api/goal${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`),
+  setGoal: (objective: string, start = true, taskId?: string) =>
     request<Goal>('/api/goal', {
       method: 'POST',
-      body: JSON.stringify({ objective, start }),
+      body: JSON.stringify({ objective, start, task_id: taskId }),
     }),
-  clearGoal: () => request<{ status: string }>('/api/goal', { method: 'DELETE' }),
+  clearGoal: (taskId?: string) => request<{ status: string }>(
+    `/api/goal${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`,
+    { method: 'DELETE' },
+  ),
   sessions: () => request<SessionItem[]>('/api/sessions'),
   session: (id: string, signal?: AbortSignal) =>
     request<SessionEntry[]>(`/api/sessions/${encodeURIComponent(id)}`, { signal }),
@@ -135,7 +138,13 @@ export const api = {
     }),
   deleteSession: (id: string) =>
     request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  newSession: (sessionId?: string, signal?: AbortSignal, workspaceKind?: WorkspaceKind, projectPath?: string) =>
+  newSession: (
+    sessionId?: string,
+    signal?: AbortSignal,
+    workspaceKind?: WorkspaceKind,
+    projectPath?: string,
+    guard?: { expectedSessionId?: string; requireIdle?: boolean },
+  ) =>
     request<{
       status: string
       session_id: string
@@ -159,8 +168,14 @@ export const api = {
       token?: TokenUpdateData
     }>('/api/sessions', {
       method: 'POST',
-      body: sessionId || workspaceKind || projectPath
-        ? JSON.stringify({ session_id: sessionId, workspace_kind: workspaceKind, pwd: projectPath })
+      body: sessionId || workspaceKind || projectPath || guard?.expectedSessionId !== undefined || guard?.requireIdle
+        ? JSON.stringify({
+            session_id: sessionId,
+            workspace_kind: workspaceKind,
+            pwd: projectPath,
+            expected_session_id: guard?.expectedSessionId,
+            require_idle: guard?.requireIdle,
+          })
         : undefined,
       signal,
     }),
@@ -220,19 +235,25 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ id, answers, task_id: taskId }),
     }),
-  askPending: () => request<AskUserRequestData[]>('/api/ask/pending'),
-  approvalPending: () => request<ApprovalRequestData[]>('/api/approval/pending'),
-  models: () => request<ModelsResponse>('/api/models'),
-  agents: () => request<{ agents: CustomAgentInfo[]; current: string }>('/api/agents'),
-  switchAgent: (agent: string) =>
+  askPending: (taskId?: string) => request<AskUserRequestData[]>(
+    `/api/ask/pending${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`,
+  ),
+  approvalPending: (taskId?: string) => request<ApprovalRequestData[]>(
+    `/api/approval/pending${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`,
+  ),
+  models: (taskId?: string) => request<ModelsResponse>(`/api/models${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`),
+  agents: (taskId?: string) => request<{ agents: CustomAgentInfo[]; current: string }>(
+    `/api/agents${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`,
+  ),
+  switchAgent: (agent: string, taskId?: string) =>
     request<{ status: string; agent: string; provider?: string; model?: string }>('/api/agent', {
       method: 'POST',
-      body: JSON.stringify({ agent }),
+      body: JSON.stringify({ agent, task_id: taskId }),
     }),
-  switchModel: (provider: string, model: string) =>
+  switchModel: (provider: string, model: string, taskId?: string) =>
     request<{ status: string }>('/api/model', {
       method: 'POST',
-      body: JSON.stringify({ provider, model }),
+      body: JSON.stringify({ provider, model, task_id: taskId }),
     }),
   // Set or clear config.small_model (both empty = clear). Persisted server-side;
   // takes effect immediately (subagent "small" alias, session titles).
@@ -246,10 +267,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ provider, model }),
     }),
-  switchMode: (mode: string) =>
+  switchMode: (mode: string, taskId?: string) =>
     request<{ status: string; mode: string }>('/api/mode', {
       method: 'POST',
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({ mode, task_id: taskId }),
     }),
   exec: (command: string) =>
     request<ExecResponse>('/api/exec', {
@@ -264,11 +285,13 @@ export const api = {
     const q = taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''
     return request<WorkspaceInfo>(`/api/workspace${q}`)
   },
-  gitBranches: () => request<GitBranchesResponse>('/api/git/branches'),
-  gitCheckout: (branch: string, create = false, strategy: '' | 'stash' | 'force' = '') =>
+  gitBranches: (taskId?: string) => request<GitBranchesResponse>(
+    `/api/git/branches${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`,
+  ),
+  gitCheckout: (branch: string, create = false, strategy: '' | 'stash' | 'force' = '', taskId?: string) =>
     request<GitCheckoutResponse>('/api/git/checkout', {
       method: 'POST',
-      body: JSON.stringify({ branch, create, strategy }),
+      body: JSON.stringify({ branch, create, strategy, task_id: taskId }),
     }),
   tasks: () => request<TaskItem[]>('/api/tasks'),
   projects: () => request<ProjectInfo[]>('/api/projects'),
@@ -325,12 +348,12 @@ export const api = {
     request<{ sessions: string[] }>('/api/pty'),
   ptyKill: (id: string) =>
     request<{ status: string }>(`/api/pty/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  approvalMode: () =>
-    request<{ auto_approve: boolean }>('/api/approval/mode'),
-  setApprovalMode: (autoApprove: boolean) =>
+  approvalMode: (taskId?: string) =>
+    request<{ auto_approve: boolean }>(`/api/approval/mode${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`),
+  setApprovalMode: (autoApprove: boolean, taskId?: string) =>
     request<{ auto_approve: boolean }>('/api/approval/mode', {
       method: 'POST',
-      body: JSON.stringify({ auto_approve: autoApprove }),
+      body: JSON.stringify({ auto_approve: autoApprove, task_id: taskId }),
     }),
   stop: (taskId?: string) =>
     request<{ status: string }>('/api/stop', {
@@ -387,8 +410,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     }),
-  slashCommands: () =>
-    request<SlashCommandInfo[]>('/api/slash-commands'),
+  slashCommands: (taskId?: string) => request<SlashCommandInfo[]>(
+    `/api/slash-commands${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`,
+  ),
   channelStatus: () =>
     request<{ available: boolean; channel?: string; state?: string }>('/api/channel'),
   channelLogin: () =>

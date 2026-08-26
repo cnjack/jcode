@@ -7,17 +7,20 @@
  * final assistant reply visible until the user expands the elapsed-time row.
  */
 
+// Runtime import keeps the .ts suffix so the source-level node:test suite can
+// resolve it directly; tsc rewrites it to .js for dist output.
+import { getApprovalOutcome } from '../types/index.ts'
 import type { Approval, ThreadItem, ToolCall } from '../types/index.js'
 
 /**
  * Attach approval items to the concrete tool-call occurrence they gate.
  *
- * Tool-call ids are model supplied and may be reused across turns, so this does
- * not use a session-wide id map. Each approval binds to the nearest unmatched
- * occurrence inside the same user turn (normally the preceding tool; the
+ * Host-generated approval occurrence ids are authoritative across the current
+ * user turn. Legacy calls without one fall back to the nearest unmatched model
+ * id + tool-name occurrence in that turn (normally the preceding tool; the
  * forward fallback covers transports that deliver approval before tool_call).
- * Matched approval items disappear from the projected list; unmatched legacy
- * approvals remain standalone so no decision UI is lost.
+ * Matched approval items disappear from the projected list; ambiguous or
+ * unmatched approvals remain standalone so no decision UI is lost.
  */
 export function bindApprovalsToTools(items: ThreadItem[]): ThreadItem[] {
   const bindings = new Map<number, Approval>()
@@ -71,8 +74,9 @@ export function bindApprovalsToTools(items: ThreadItem[]): ThreadItem[] {
       !approval.resolved && item.data.status !== 'running' && hasTerminalEvidence
         ? { ...approval, resolved: true, approved: !item.data.denied }
         : approval
-    const pending = !effectiveApproval.resolved
-    const denied = !!effectiveApproval.resolved && effectiveApproval.approved === false
+    const approvalOutcome = getApprovalOutcome(effectiveApproval)
+    const pending = approvalOutcome === 'pending'
+    const denied = approvalOutcome === 'denied'
     out.push({
       ...item,
       data: {
@@ -96,6 +100,27 @@ function findApprovalTool(
   approval: Approval,
   occupied: ReadonlySet<number>,
 ): number {
+  // A host-generated approval occurrence id is authoritative. Search the whole
+  // current user turn before considering legacy model ids: the exact released
+  // tool may follow the approval while an older auto-approved sibling with the
+  // same malformed/reused model id is still running before it.
+  const [turnStart, turnEnd] = approvalTurnBounds(items, approvalIndex)
+  let exactIndex = -1
+  let exactMatches = 0
+  for (let index = turnStart; index < turnEnd; index++) {
+    const item = items[index]
+    if (item.kind !== 'tool' || item.data.approvalID !== approval.id) continue
+    exactMatches++
+    if (!occupied.has(index)) exactIndex = index
+  }
+  // Seeing any exact occurrence closes the legacy fallback. A duplicate
+  // approval for an already-bound tool must stay standalone rather than jump
+  // onto an unrelated legacy sibling; duplicate exact occurrences are equally
+  // ambiguous and fail closed.
+  if (exactMatches > 0) {
+    return exactMatches === 1 && exactIndex >= 0 ? exactIndex : -1
+  }
+
   let priorSettled = -1
   for (let index = approvalIndex - 1; index >= 0; index--) {
     const item = items[index]
@@ -123,6 +148,24 @@ function findApprovalTool(
     }
   }
   return followingSettled >= 0 ? followingSettled : priorSettled
+}
+
+function approvalTurnBounds(items: ThreadItem[], approvalIndex: number): [number, number] {
+  let start = 0
+  for (let index = approvalIndex - 1; index >= 0; index--) {
+    if (isUserMessage(items[index])) {
+      start = index + 1
+      break
+    }
+  }
+  let end = items.length
+  for (let index = approvalIndex + 1; index < items.length; index++) {
+    if (isUserMessage(items[index])) {
+      end = index
+      break
+    }
+  }
+  return [start, end]
 }
 
 function toolMatchesApproval(tool: ToolCall, approval: Approval): boolean {
@@ -193,21 +236,20 @@ export function groupCompletedTurns(
 
     const durationMs = turnDuration(user.data.timestamp, summaryItem.data.timestamp, summaryItem.data.durationMs)
     const intermediate = turn.slice(1, finalAssistantIndex)
-    const visibleReceipts = intermediate.filter(isAlwaysVisibleReceipt)
     out.push(user)
     out.push({
       kind: 'turn',
       seq: summaryItem.seq,
       data: {
         id: `turn_${user.data.id}`,
-        activity: intermediate.filter((item) => !isAlwaysVisibleReceipt(item)),
+        activity: intermediate.map((item) => ({
+          item,
+          alwaysVisible: isAlwaysVisibleReceipt(item),
+        })),
         summary: summaryItem.data,
         durationMs,
       },
     })
-    // Provider-backed media/artifact surfaces and terminal errors are outcomes,
-    // not implementation detail. Keep them visible beside the final summary.
-    out.push(...visibleReceipts)
     out.push(...turn.slice(finalAssistantIndex + 1))
   }
   return out

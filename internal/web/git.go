@@ -15,9 +15,19 @@ import (
 // directory or any git error yields an empty list rather than an error,
 // mirroring handleWorkspace so the UI degrades gracefully.
 func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("task_id")
+	eng := s.resolveEngine(taskID)
+	if taskID != "" && eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	if eng == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"current": "", "branches": []string{}})
+		return
+	}
 	listCmd := exec.CommandContext(r.Context(), "git", "for-each-ref",
 		"--format=%(refname:short)", "--sort=-committerdate", "refs/heads")
-	listCmd.Dir = s.activePwd()
+	listCmd.Dir = eng.pwd
 	listCmd.Env = utils.ScrubbedGitEnv()
 	out, err := listCmd.Output()
 	if err != nil {
@@ -28,7 +38,7 @@ func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
 	// `branch --show-current` reports the unborn branch of a fresh repo (e.g.
 	// "main"), where `rev-parse --abbrev-ref HEAD` would just say "HEAD".
 	curCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
-	curCmd.Dir = s.activePwd()
+	curCmd.Dir = eng.pwd
 	curCmd.Env = utils.ScrubbedGitEnv()
 	curOut, _ := curCmd.Output()
 	current := strings.TrimSpace(string(curOut))
@@ -75,11 +85,26 @@ func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
 //
 // Any failure after a strategy was chosen is genuine and returned as an error.
 func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
-	// Capture the active engine ONCE so the running guard and the checkout target
-	// the same task's repo even if the active engine is swapped concurrently.
-	eng := s.activeEngine()
+	var req struct {
+		Branch   string `json:"branch"`
+		Create   bool   `json:"create"`
+		Strategy string `json:"strategy"` // "" (plain) | "stash" | "force"
+		TaskID   string `json:"task_id,omitempty"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	// Resolve the target engine once so the running guard and every git command
+	// operate on the same task even if another tab changes the server foreground.
+	eng := s.resolveEngine(req.TaskID)
 	if eng == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		status := http.StatusServiceUnavailable
+		if req.TaskID != "" {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]string{"error": "task not found"})
 		return
 	}
 	if eng.running.Load() {
@@ -90,15 +115,6 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	dir := eng.pwd
 
-	var req struct {
-		Branch   string `json:"branch"`
-		Create   bool   `json:"create"`
-		Strategy string `json:"strategy"` // "" (plain) | "stash" | "force"
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
 	branch := strings.TrimSpace(req.Branch)
 	if branch == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "branch is required"})

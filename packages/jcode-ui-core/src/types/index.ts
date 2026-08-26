@@ -303,7 +303,9 @@ export interface AskUserAnswer {
 export type ApprovalOptionKind = 'allow_once' | 'allow_always' | 'deny' | 'custom'
 
 /** A host-defined approval decision (e.g. an ACP permission option). The `id`
- *  is echoed back verbatim via `resolveApprovalOption`. */
+ * is echoed back verbatim via `resolveApprovalOption`. `custom` (and an omitted
+ * kind) has grant semantics for the legacy boolean fallback; rejection options
+ * must use `deny` so renderer gating and receipts remain fail-closed. */
 export interface ApprovalOption {
   id: string
   label: string
@@ -357,6 +359,27 @@ export interface Approval {
   resolvedOptionId?: string
 }
 
+/** Canonical result of an approval gate for rendering and timeline projection. */
+export type ApprovalOutcome = 'pending' | 'allowed' | 'denied'
+
+/**
+ * Resolve the effective approval outcome across the classic boolean contract
+ * and host-defined option contract. A matching selected option is
+ * authoritative because option-based hosts are not required to also populate
+ * the optional `approved` field. Invalid resolved states fail closed.
+ */
+export function getApprovalOutcome(approval: Approval): ApprovalOutcome {
+  if (!approval.resolved) return 'pending'
+
+  const selected = approval.resolvedOptionId
+    ? approval.options?.find((option) => option.id === approval.resolvedOptionId)
+    : undefined
+  if (selected) {
+    return (selected.kind ?? 'custom') === 'deny' ? 'denied' : 'allowed'
+  }
+  return approval.approved === true ? 'allowed' : 'denied'
+}
+
 /**
  * One changed file inside a turn-changes summary. `added`/`removed` are
  * client-derived line counts (absent when the tool args carry no diff text);
@@ -390,13 +413,17 @@ export interface TurnChangesSummary {
 /**
  * A completed user turn projected into one collapsible timeline row. The user
  * message remains outside this item; `activity` contains the intermediate
- * assistant/tool/approval work, while `summary` is the final assistant reply
- * that always stays visible. This is UI-only and does not alter transcript or
- * model-facing message boundaries.
+ * assistant/tool/approval work in transcript order and marks durable outcomes
+ * that stay visible while collapsed. `summary` is the final assistant reply and
+ * therefore remains the last visible message. This is UI-only and does not
+ * alter transcript or model-facing message boundaries.
  */
 export interface CompletedTurn {
   id: string
-  activity: ThreadItem[]
+  activity: Array<{
+    item: ThreadItem
+    alwaysVisible: boolean
+  }>
   summary: Message
   durationMs: number
 }

@@ -117,7 +117,7 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 	eng.eventHandler = &doneCapture{AgentEventHandler: eng.eventHandler, done: done}
 	eng.emu.Unlock()
 
-	if !eng.running.CompareAndSwap(false, true) {
+	if !s.tryStartEngine(eng) {
 		s.deleteEngine(sid)
 		return sid, fmt.Errorf("engine busy")
 	}

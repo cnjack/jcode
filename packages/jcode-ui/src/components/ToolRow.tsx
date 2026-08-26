@@ -13,7 +13,7 @@
 import { useRef } from 'react'
 import { ChevronDownIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
 import type { ToolCall } from 'jcode-ui-core'
-import { useElapsed, formatElapsed } from 'jcode-ui-core'
+import { formatElapsed, getApprovalOutcome, useElapsed } from 'jcode-ui-core'
 import { ToolCallCard } from './ToolCallCard.js'
 
 /** Hide sub-2s durations on finished rows (only slow steps earn a badge). */
@@ -45,9 +45,10 @@ export function ToolRowHeader({ tool }: { tool: ToolCall }) {
   // Denied (user rejected at the approval prompt) ≠ error: struck-through and
   // muted, never red. Awaiting approval paints the row in the warning color
   // and pauses the live elapsed badge (the backend excludes the wait anyway).
-  const isDenied = !!tool.denied
+  const approvalOutcome = tool.approval ? getApprovalOutcome(tool.approval) : undefined
+  const isDenied = !!tool.denied || approvalOutcome === 'denied'
   const isAwaiting = !isDenied && !!tool.awaitingApproval && running
-  const isAllowed = !isDenied && !!tool.approval?.resolved && tool.approval.approved === true
+  const isAllowed = !isDenied && approvalOutcome === 'allowed'
   const isError =
     !isDenied &&
     (tool.status === 'error' || (tool.meta?.exit_code !== undefined && tool.meta.exit_code !== 0))

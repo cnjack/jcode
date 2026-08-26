@@ -15,6 +15,7 @@ import {
   PhotoIcon,
   GlobeAltIcon,
 } from '@heroicons/react/24/outline'
+import { getApprovalOutcome } from 'jcode-ui-core'
 import type { Approval, ApprovalOption } from 'jcode-ui-core'
 import { ApprovalBlock } from 'jcode-ui-core/primitives'
 import type { ApprovalDecisionActions } from 'jcode-ui-core/primitives'
@@ -259,7 +260,7 @@ function ResolvedNote({ approval }: { approval: Approval }) {
   const chosen = approval.resolvedOptionId
     ? approval.options?.find((o) => o.id === approval.resolvedOptionId)
     : undefined
-  const ok = chosen ? (chosen.kind ?? 'custom') !== 'deny' : approval.approved
+  const ok = getApprovalOutcome(approval) === 'allowed'
   const Icon = ok ? ShieldCheckIcon : ShieldExclamationIcon
   return (
     <div className={`jcode-approval-resolved${ok ? ' is-ok' : ''}`}>

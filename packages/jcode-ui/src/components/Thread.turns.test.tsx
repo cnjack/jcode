@@ -2,9 +2,11 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RuntimeProvider, createMockRuntime } from 'jcode-ui-core/runtime'
 import { createToolRendererRegistry } from 'jcode-ui-core/adapters'
+import { ToolCallProvider, ToolCallView } from 'jcode-ui-core/primitives'
 import type { Approval, ThreadItem, ToolCall } from 'jcode-ui-core'
 import { Thread } from './Thread.js'
 import { ToolCallCard } from './ToolCallCard.js'
+import { ToolRowHeader } from './ToolRow.js'
 import { ToolRegistryProvider } from './ToolRegistryContext.js'
 
 afterEach(cleanup)
@@ -95,6 +97,45 @@ describe('Thread completed turns', () => {
     expect(screen.getByTestId('completed-turn')).toBeTruthy()
     expect(screen.queryByText('Shell')).toBeNull()
     expect(screen.getByText('Done.')).toBeTruthy()
+  })
+
+  it('keeps visible receipts before the final summary without reordering expanded work', () => {
+    const items: ThreadItem[] = [
+      { kind: 'message', seq: 1, data: { id: 'user', role: 'user', content: 'Make it', timestamp: 1_000 } },
+      { kind: 'message', seq: 2, data: { id: 'before', role: 'assistant', content: 'Hidden work before', timestamp: 2_000 } },
+      {
+        kind: 'tool',
+        seq: 3,
+        data: executeTool({
+          id: 'visible-receipt',
+          name: 'artifact_receipt',
+          args: '{}',
+          surface: 'standalone',
+          displayInfo: { title: 'Visible receipt', subtitle: 'artifact', kind: 'other' },
+        }),
+      },
+      { kind: 'message', seq: 4, data: { id: 'after', role: 'assistant', content: 'Hidden work after', timestamp: 3_000 } },
+      { kind: 'message', seq: 5, data: { id: 'final', role: 'assistant', content: 'Final summary', timestamp: 4_000 } },
+    ]
+    const { container } = render(
+      <RuntimeProvider runtime={createMockRuntime({ items, isRunning: false })}>
+        <Thread virtualize={false} renderPending={() => null} />
+      </RuntimeProvider>,
+    )
+
+    expect(screen.queryByText('Hidden work before')).toBeNull()
+    expect(screen.queryByText('Hidden work after')).toBeNull()
+    expect(screen.getByText('Visible receipt')).toBeTruthy()
+    expect(screen.getByText('Final summary')).toBeTruthy()
+    let text = container.textContent ?? ''
+    expect(text.indexOf('Visible receipt')).toBeLessThan(text.indexOf('Final summary'))
+
+    fireEvent.click(screen.getByRole('button', { name: /Show work/ }))
+
+    text = container.textContent ?? ''
+    expect(text.indexOf('Hidden work before')).toBeLessThan(text.indexOf('Visible receipt'))
+    expect(text.indexOf('Visible receipt')).toBeLessThan(text.indexOf('Hidden work after'))
+    expect(text.indexOf('Hidden work after')).toBeLessThan(text.indexOf('Final summary'))
   })
 })
 
@@ -235,6 +276,92 @@ describe('Thread approval/tool integration', () => {
     expect(screen.getByText('Denied')).toBeTruthy()
     expect(container.querySelector('[data-tool-name="generate_image"][data-tool-denied="true"]')).toBeTruthy()
   })
+
+  it('blocks a standalone renderer for an option-based denial without approved', () => {
+    let rendererCalls = 0
+    const registry = createToolRendererRegistry().register('generate_image', () => {
+      rendererCalls += 1
+      return <div>image renderer mounted</div>
+    })
+    const deniedApproval = approval({
+      tool_name: 'generate_image',
+      tool_call_id: 'image-call',
+      resolved: true,
+      options: [{ id: 'deny-option', label: 'Deny', kind: 'deny' }],
+      resolvedOptionId: 'deny-option',
+    })
+    const items: ThreadItem[] = [{
+      kind: 'tool',
+      seq: 1,
+      data: {
+        id: 'image-tool',
+        toolCallID: 'image-call',
+        name: 'generate_image',
+        args: '{}',
+        status: 'done',
+        surface: 'standalone',
+        timestamp: 1_000,
+        approval: deniedApproval,
+      },
+    }]
+    const { container } = render(
+      <RuntimeProvider runtime={createMockRuntime({ items, isRunning: false })}>
+        <ToolRegistryProvider registry={registry}>
+          <Thread virtualize={false} renderPending={() => null} />
+        </ToolRegistryProvider>
+      </RuntimeProvider>,
+    )
+
+    expect(rendererCalls).toBe(0)
+    expect(screen.queryByText('image renderer mounted')).toBeNull()
+    expect(screen.getByText('Denied')).toBeTruthy()
+    expect(container.querySelector('[data-tool-name="generate_image"][data-tool-denied="true"]')).toBeTruthy()
+
+    const disclosure = container.querySelector('[data-tool-name="generate_image"] button')
+    expect(disclosure).toBeTruthy()
+    fireEvent.click(disclosure!)
+    expect(rendererCalls).toBe(0)
+    expect(screen.queryByText('image renderer mounted')).toBeNull()
+  })
+
+  it('mounts a standalone renderer for an option-based allowance without approved', () => {
+    let rendererCalls = 0
+    const registry = createToolRendererRegistry().register('generate_image', () => {
+      rendererCalls += 1
+      return <div>image renderer mounted</div>
+    })
+    const allowedApproval = approval({
+      tool_name: 'generate_image',
+      tool_call_id: 'image-call',
+      resolved: true,
+      options: [{ id: 'allow-option', label: 'Allow once', kind: 'allow_once' }],
+      resolvedOptionId: 'allow-option',
+    })
+    const items: ThreadItem[] = [{
+      kind: 'tool',
+      seq: 1,
+      data: {
+        id: 'image-tool',
+        toolCallID: 'image-call',
+        name: 'generate_image',
+        args: '{}',
+        status: 'done',
+        surface: 'standalone',
+        timestamp: 1_000,
+        approval: allowedApproval,
+      },
+    }]
+    render(
+      <RuntimeProvider runtime={createMockRuntime({ items, isRunning: false })}>
+        <ToolRegistryProvider registry={registry}>
+          <Thread virtualize={false} renderPending={() => null} />
+        </ToolRegistryProvider>
+      </RuntimeProvider>,
+    )
+
+    expect(rendererCalls).toBe(1)
+    expect(screen.getByText('image renderer mounted')).toBeTruthy()
+  })
 })
 
 describe('ToolCallCard approval gate', () => {
@@ -270,6 +397,194 @@ describe('ToolCallCard approval gate', () => {
     expect(screen.getByText('Shell')).toBeTruthy()
     expect(screen.getByText('Allowed')).toBeTruthy()
     expect(container.querySelector('[data-tool-name="execute"]')).toBeTruthy()
+  })
+
+  it('derives allowed and denied receipts from resolved options', () => {
+    const runtime = createMockRuntime()
+    const options: Approval['options'] = [
+      { id: 'allow', label: 'Allow once', kind: 'allow_once' },
+      { id: 'deny', label: 'Deny', kind: 'deny' },
+    ]
+    const { container, rerender } = render(
+      <RuntimeProvider runtime={runtime}>
+        <ToolCallCard tool={executeTool({
+          approval: approval({ resolved: true, options, resolvedOptionId: 'allow' }),
+        })} />
+      </RuntimeProvider>,
+    )
+
+    expect(screen.getByText('Allowed')).toBeTruthy()
+    expect(container.querySelector('[data-tool-denied="true"]')).toBeNull()
+
+    rerender(
+      <RuntimeProvider runtime={runtime}>
+        <ToolCallCard tool={executeTool({
+          approval: approval({ resolved: true, options, resolvedOptionId: 'deny' }),
+        })} />
+      </RuntimeProvider>,
+    )
+    expect(screen.getByText('Denied')).toBeTruthy()
+    expect(container.querySelector('[data-tool-denied="true"]')).toBeTruthy()
+  })
+
+  it('never mounts a custom renderer when a directly denied card is expanded', () => {
+    let rendererCalls = 0
+    const registry = createToolRendererRegistry().register('execute', () => {
+      rendererCalls += 1
+      return <div>execute renderer mounted</div>
+    })
+    const { container } = render(
+      <RuntimeProvider runtime={createMockRuntime()}>
+        <ToolCallCard tool={executeTool({ denied: true })} registry={registry} />
+      </RuntimeProvider>,
+    )
+
+    expect(rendererCalls).toBe(0)
+    const disclosure = container.querySelector('[data-tool-name="execute"] button')
+    expect(disclosure).toBeTruthy()
+    fireEvent.click(disclosure!)
+    expect(container.querySelector('[data-tool-name="execute"]')?.getAttribute('data-expanded')).toBe('true')
+    expect(rendererCalls).toBe(0)
+    expect(screen.queryByText('execute renderer mounted')).toBeNull()
+  })
+})
+
+describe('Headless ToolCallView approval gate', () => {
+  it('normalizes a raw option denial before header, attributes, and renderer', () => {
+    let rendererCalls = 0
+    const registry = createToolRendererRegistry().register('execute', () => {
+      rendererCalls += 1
+      return <div>headless renderer mounted</div>
+    })
+    const options: Approval['options'] = [
+      { id: 'deny', label: 'Deny', kind: 'deny' },
+    ]
+    const rawTool = executeTool({
+      denied: undefined,
+      approval: approval({ resolved: true, options, resolvedOptionId: 'deny' }),
+    })
+    const { container } = render(
+      <ToolCallProvider value={{ registry }}>
+        <ToolCallView
+          tool={rawTool}
+          renderHeader={(renderedTool, expanded, toggle) => (
+            <button type="button" onClick={toggle}>
+              {renderedTool.denied ? 'Denied receipt' : 'Allowed receipt'}
+              {expanded ? ' expanded' : ' collapsed'}
+            </button>
+          )}
+        />
+      </ToolCallProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Denied receipt collapsed' })).toBeTruthy()
+    expect(container.querySelector('[data-tool-name="execute"]')?.getAttribute('data-tool-denied')).toBe('true')
+    expect(rendererCalls).toBe(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Denied receipt collapsed' }))
+    expect(screen.getByRole('button', { name: 'Denied receipt expanded' })).toBeTruthy()
+    expect(rendererCalls).toBe(0)
+    expect(screen.queryByText('headless renderer mounted')).toBeNull()
+  })
+
+  it('does not invoke the ask-user slot for an option-based denial', () => {
+    let askUserCalls = 0
+    const registry = createToolRendererRegistry()
+    const deniedAskUser = executeTool({
+      name: 'ask_user',
+      denied: undefined,
+      approval: approval({
+        tool_name: 'ask_user',
+        resolved: true,
+        options: [{ id: 'deny', label: 'Deny', kind: 'deny' }],
+        resolvedOptionId: 'deny',
+      }),
+    })
+    const { container } = render(
+      <ToolCallProvider value={{
+        registry,
+        renderAskUser: () => {
+          askUserCalls += 1
+          return <div>ask-user slot mounted</div>
+        },
+      }}>
+        <ToolCallView tool={deniedAskUser} />
+      </ToolCallProvider>,
+    )
+
+    expect(askUserCalls).toBe(0)
+    expect(screen.queryByText('ask-user slot mounted')).toBeNull()
+    expect(container.querySelector('[data-tool-name="ask_user"]')?.getAttribute('data-tool-denied')).toBe('true')
+  })
+
+  it('keeps a denied subagent collapsed and never invokes result slots', () => {
+    let outputCalls = 0
+    let childrenCalls = 0
+    const registry = createToolRendererRegistry()
+    const deniedSubagent = executeTool({
+      name: 'subagent',
+      denied: undefined,
+      output: 'private result',
+      children: [executeTool({ id: 'child-tool' })],
+      approval: approval({
+        tool_name: 'subagent',
+        resolved: true,
+        options: [{ id: 'deny', label: 'Deny', kind: 'deny' }],
+        resolvedOptionId: 'deny',
+      }),
+    })
+    const { container } = render(
+      <ToolCallProvider value={{ registry }}>
+        <ToolCallView
+          tool={deniedSubagent}
+          renderHeader={(renderedTool, expanded, toggle) => (
+            <button type="button" onClick={toggle}>
+              {renderedTool.denied ? 'Denied subagent' : 'Allowed subagent'}
+              {expanded ? ' expanded' : ' collapsed'}
+            </button>
+          )}
+          renderSubagentOutput={() => {
+            outputCalls += 1
+            return <div>subagent output mounted</div>
+          }}
+          renderSubagentChildren={() => {
+            childrenCalls += 1
+            return <div>subagent children mounted</div>
+          }}
+        />
+      </ToolCallProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Denied subagent collapsed' })).toBeTruthy()
+    expect(container.querySelector('[data-tool-name="subagent"]')?.getAttribute('data-expanded')).toBe('false')
+    expect(outputCalls).toBe(0)
+    expect(childrenCalls).toBe(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Denied subagent collapsed' }))
+    expect(screen.getByRole('button', { name: 'Denied subagent expanded' })).toBeTruthy()
+    expect(outputCalls).toBe(0)
+    expect(childrenCalls).toBe(0)
+    expect(screen.queryByText('private result')).toBeNull()
+    expect(screen.queryByText('subagent output mounted')).toBeNull()
+    expect(screen.queryByText('subagent children mounted')).toBeNull()
+  })
+})
+
+describe('ToolRowHeader approval receipts', () => {
+  it('derives option-based receipts without relying on a parent card normalization', () => {
+    const options: Approval['options'] = [
+      { id: 'allow', label: 'Allow once', kind: 'allow_once' },
+      { id: 'deny', label: 'Deny', kind: 'deny' },
+    ]
+    const { rerender } = render(<ToolRowHeader tool={executeTool({
+      approval: approval({ resolved: true, options, resolvedOptionId: 'allow' }),
+    })} />)
+    expect(screen.getByText('Allowed')).toBeTruthy()
+
+    rerender(<ToolRowHeader tool={executeTool({
+      approval: approval({ resolved: true, options, resolvedOptionId: 'deny' }),
+    })} />)
+    expect(screen.getByText('Denied')).toBeTruthy()
   })
 })
 

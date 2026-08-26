@@ -248,7 +248,10 @@ export function createWSHandlers(
       applyAgentDoneBackgroundEffects(key, !isForeground)
     },
     onTodoUpdate: () => {
-      void api.todos().then((todos) => dispatch(chatActions.setTodos(todos)))
+      const taskID = getState().session.currentSessionId
+      void api.todos(taskID || undefined).then((todos) => {
+        if (getState().session.currentSessionId === taskID) dispatch(chatActions.setTodos(todos))
+      })
     },
     onGoalUpdate: (d) => dispatch(chatActions.setGoal(d as Goal | null)),
     onApprovalRequest: (d) =>

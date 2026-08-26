@@ -11,7 +11,7 @@ nav_order: 6
 >
 > Human-written guides: [Types](/chat-ui/docs/api/types) · [Runtime](/chat-ui/docs/api/runtime) · [Hooks](/chat-ui/docs/api/hooks) · [Primitives](/chat-ui/docs/api/primitives) · [Components](/chat-ui/docs/api/components).
 
-**362** public symbols extracted.
+**364** public symbols extracted.
 
 ## `jcode-ui`
 
@@ -24,11 +24,11 @@ nav_order: 6
 | [`Attachment`](#jcode-ui-attachment) | const | `packages/jcode-ui/src/components/Attachment.tsx` |
 | [`AttachmentList`](#jcode-ui-attachmentlist) | const | `packages/jcode-ui/src/components/Attachment.tsx` |
 | [`AudioPlayer`](#jcode-ui-audioplayer) | const | `packages/jcode-ui/src/voice/AudioPlayer.tsx` |
-| [`BranchPicker`](#jcode-ui-branchpicker) | const | `packages/jcode-ui/src/components/BranchPicker.tsx` |
+| [`BranchPicker` (const)](#jcode-ui-branchpicker-const) | const | `packages/jcode-ui/src/components/BranchPicker.tsx` |
 | [`BrowserShotRenderer`](#jcode-ui-browsershotrenderer) | const | `packages/jcode-ui/src/toolRenderers/browserShot.tsx` |
 | [`CanvasControls`](#jcode-ui-canvascontrols) | const | `packages/jcode-ui/src/canvas/CanvasControls.tsx` |
 | [`CanvasPanel`](#jcode-ui-canvaspanel) | const | `packages/jcode-ui/src/canvas/CanvasPanel.tsx` |
-| [`ChatInput`](#jcode-ui-chatinput) | const | `packages/jcode-ui/src/components/ChatInput.tsx` |
+| [`ChatInput` (const)](#jcode-ui-chatinput-const) | const | `packages/jcode-ui/src/components/ChatInput.tsx` |
 | [`CompactToolRow`](#jcode-ui-compacttoolrow) | const | `packages/jcode-ui/src/components/CompactToolRow.tsx` |
 | [`CompletedTurnCard`](#jcode-ui-completedturncard) | const | `packages/jcode-ui/src/components/CompletedTurnCard.tsx` |
 | [`ComputerActRenderer`](#jcode-ui-computeractrenderer) | const | `packages/jcode-ui/src/toolRenderers/computerAct.tsx` |
@@ -42,7 +42,7 @@ nav_order: 6
 | [`FileViewerRenderer`](#jcode-ui-fileviewerrenderer) | const | `packages/jcode-ui/src/toolRenderers/fileViewer.tsx` |
 | [`GeneratedImageCard`](#jcode-ui-generatedimagecard) | const | `packages/jcode-ui/src/components/GeneratedImageCard.tsx` |
 | [`GenericRenderer`](#jcode-ui-genericrenderer) | const | `packages/jcode-ui/src/toolRenderers/generic.tsx` |
-| [`Message`](#jcode-ui-message) | const | `packages/jcode-ui/src/components/Message.tsx` |
+| [`Message` (jcode-ui)](#jcode-ui-message) | const | `packages/jcode-ui/src/components/Message.tsx` |
 | [`PendingAttachmentList`](#jcode-ui-pendingattachmentlist) | const | `packages/jcode-ui/src/components/Attachment.tsx` |
 | [`QuoteSelection`](#jcode-ui-quoteselection) | const | `packages/jcode-ui/src/components/QuoteSelection.tsx` |
 | [`RuntimeTaskList`](#jcode-ui-runtimetasklist) | const | `packages/jcode-ui/src/components/TaskList.tsx` |
@@ -73,8 +73,8 @@ nav_order: 6
 | [`balanceEmphasis`](#jcode-ui-balanceemphasis) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`balanceInlineCode`](#jcode-ui-balanceinlinecode) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`bindCodeBlockCopy`](#jcode-ui-bindcodeblockcopy) | function | `packages/jcode-ui/src/lib/markdown.ts` |
-| [`BranchPicker`](#jcode-ui-branchpicker) | function | `packages/jcode-ui/src/product/BranchPicker.tsx` |
-| [`ChatInput`](#jcode-ui-chatinput) | function | `packages/jcode-ui/src/product/ChatInput.tsx` |
+| [`BranchPicker` (function)](#jcode-ui-branchpicker-function) | function | `packages/jcode-ui/src/product/BranchPicker.tsx` |
+| [`ChatInput` (function)](#jcode-ui-chatinput-function) | function | `packages/jcode-ui/src/product/ChatInput.tsx` |
 | [`completeStreamingMarkdown`](#jcode-ui-completestreamingmarkdown) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`completeStreamingMarkdownInfo`](#jcode-ui-completestreamingmarkdowninfo) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`completeTableRow`](#jcode-ui-completetablerow) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
@@ -104,7 +104,7 @@ nav_order: 6
 | [`Sources`](#jcode-ui-sources) | function | `packages/jcode-ui/src/components/Sources.tsx` |
 | [`splitTopLevelBlocks`](#jcode-ui-splittoplevelblocks) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`stripTrailingLink`](#jcode-ui-striptrailinglink) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
-| [`Thread`](#jcode-ui-thread) | function | `packages/jcode-ui/src/components/Thread.tsx` |
+| [`Thread` (jcode-ui)](#jcode-ui-thread) | function | `packages/jcode-ui/src/components/Thread.tsx` |
 | [`ToolIcon`](#jcode-ui-toolicon) | function | `packages/jcode-ui/src/components/toolIcons.tsx` |
 | [`ToolRegistryProvider`](#jcode-ui-toolregistryprovider) | function | `packages/jcode-ui/src/components/ToolRegistryContext.tsx` |
 | [`ToolRow`](#jcode-ui-toolrow) | function | `packages/jcode-ui/src/components/ToolRow.tsx` |
@@ -173,14 +173,14 @@ nav_order: 6
 | [`StackTrace`](#jcode-ui-stacktrace) | interface | `packages/jcode-ui/src/toolRenderers/stackTrace.tsx` |
 | [`SuggestionItem`](#jcode-ui-suggestionitem) | interface | `packages/jcode-ui/src/components/Suggestions.tsx` |
 | [`SuggestionsProps`](#jcode-ui-suggestionsprops) | interface | `packages/jcode-ui/src/components/Suggestions.tsx` |
-| [`TaskContextBreakdown`](#jcode-ui-taskcontextbreakdown) | interface | `packages/jcode-ui/src/product/types.ts` |
+| [`TaskContextBreakdown` (jcode-ui)](#jcode-ui-taskcontextbreakdown) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`TaskListItemProps`](#jcode-ui-tasklistitemprops) | interface | `packages/jcode-ui/src/components/TaskList.tsx` |
 | [`TaskListProps`](#jcode-ui-tasklistprops) | interface | `packages/jcode-ui/src/components/TaskList.tsx` |
 | [`TaskStats`](#jcode-ui-taskstats) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`TestCase`](#jcode-ui-testcase) | interface | `packages/jcode-ui/src/toolRenderers/testResults.tsx` |
 | [`TestSummary`](#jcode-ui-testsummary) | interface | `packages/jcode-ui/src/toolRenderers/testResults.tsx` |
 | [`ThreadListProps`](#jcode-ui-threadlistprops) | interface | `packages/jcode-ui/src/components/ThreadList.tsx` |
-| [`ThreadProps`](#jcode-ui-threadprops) | interface | `packages/jcode-ui/src/components/Thread.tsx` |
+| [`ThreadProps` (jcode-ui)](#jcode-ui-threadprops) | interface | `packages/jcode-ui/src/components/Thread.tsx` |
 | [`ThreadWelcomeProps`](#jcode-ui-threadwelcomeprops) | interface | `packages/jcode-ui/src/components/ThreadWelcome.tsx` |
 | [`ToolBatchGroupCardProps`](#jcode-ui-toolbatchgroupcardprops) | interface | `packages/jcode-ui/src/components/ToolBatchGroup.tsx` |
 | [`ToolCallCardProps`](#jcode-ui-toolcallcardprops) | interface | `packages/jcode-ui/src/components/ToolCallCard.tsx` |
@@ -280,7 +280,9 @@ export const AudioPlayer = …
 
 <a id="jcode-ui-branchpicker"></a>
 
-### `BranchPicker`
+<a id="jcode-ui-branchpicker-const"></a>
+
+### `BranchPicker` (const)
 
 `const` · `packages/jcode-ui/src/components/BranchPicker.tsx`
 
@@ -320,7 +322,9 @@ export const CanvasPanel = …
 
 <a id="jcode-ui-chatinput"></a>
 
-### `ChatInput`
+<a id="jcode-ui-chatinput-const"></a>
+
+### `ChatInput` (const)
 
 `const` · `packages/jcode-ui/src/components/ChatInput.tsx`
 
@@ -463,7 +467,7 @@ export const GenericRenderer = …
 
 <a id="jcode-ui-message"></a>
 
-### `Message`
+### `Message` (jcode-ui)
 
 `const` · `packages/jcode-ui/src/components/Message.tsx`
 
@@ -794,9 +798,9 @@ flips the label to "Copied" for 1.5s.
 export function bindCodeBlockCopy(root: HTMLElement): () => void { … }
 ```
 
-<a id="jcode-ui-branchpicker"></a>
+<a id="jcode-ui-branchpicker-function"></a>
 
-### `BranchPicker`
+### `BranchPicker` (function)
 
 `function` · `packages/jcode-ui/src/product/BranchPicker.tsx`
 
@@ -804,9 +808,9 @@ export function bindCodeBlockCopy(root: HTMLElement): () => void { … }
 export function BranchPicker({ host, placement = 'top' }: { host: ProductComposerHost; placement?: 'top' | 'bottom' }) { … }
 ```
 
-<a id="jcode-ui-chatinput"></a>
+<a id="jcode-ui-chatinput-function"></a>
 
-### `ChatInput`
+### `ChatInput` (function)
 
 `function` · `packages/jcode-ui/src/product/ChatInput.tsx`
 
@@ -1175,7 +1179,7 @@ export function stripTrailingLink(text: string): string { … }
 
 <a id="jcode-ui-thread"></a>
 
-### `Thread`
+### `Thread` (jcode-ui)
 
 `function` · `packages/jcode-ui/src/components/Thread.tsx`
 
@@ -2532,7 +2536,7 @@ export interface SuggestionsProps {
 
 <a id="jcode-ui-taskcontextbreakdown"></a>
 
-### `TaskContextBreakdown`
+### `TaskContextBreakdown` (jcode-ui)
 
 `interface` · `packages/jcode-ui/src/product/types.ts`
 
@@ -2654,7 +2658,7 @@ export interface ThreadListProps {
 
 <a id="jcode-ui-threadprops"></a>
 
-### `ThreadProps`
+### `ThreadProps` (jcode-ui)
 
 `interface` · `packages/jcode-ui/src/components/Thread.tsx`
 
@@ -3081,6 +3085,7 @@ export type WorkspaceKind = 'project' | 'scratch';
 | [`diffStatForTool`](#jcode-ui-core-diffstatfortool) | function | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
 | [`exportThreadMarkdown`](#jcode-ui-core-exportthreadmarkdown) | function | `packages/jcode-ui-core/src/export/markdown.ts` |
 | [`formatElapsed`](#jcode-ui-core-formatelapsed) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
+| [`getApprovalOutcome`](#jcode-ui-core-getapprovaloutcome) | function | `packages/jcode-ui-core/src/types/index.ts` |
 | [`groupActivityTimeline`](#jcode-ui-core-groupactivitytimeline) | function | `packages/jcode-ui-core/src/timeline/groupActivity.ts` |
 | [`groupCompletedTurns`](#jcode-ui-core-groupcompletedturns) | function | `packages/jcode-ui-core/src/timeline/turnGroups.ts` |
 | [`groupExploringTimeline`](#jcode-ui-core-groupexploringtimeline) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
@@ -3105,7 +3110,7 @@ export type WorkspaceKind = 'project' | 'scratch';
 | [`summarizeExploringCounts`](#jcode-ui-core-summarizeexploringcounts) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
 | [`summarizeExploringSteps`](#jcode-ui-core-summarizeexploringsteps) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
 | [`summarizeTurnChanges`](#jcode-ui-core-summarizeturnchanges) | function | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
-| [`Thread`](#jcode-ui-core-thread) | function | `packages/jcode-ui-core/src/primitives/Thread.tsx` |
+| [`Thread` (jcode-ui-core)](#jcode-ui-core-thread) | function | `packages/jcode-ui-core/src/primitives/Thread.tsx` |
 | [`ThreadStoreProvider`](#jcode-ui-core-threadstoreprovider) | function | `packages/jcode-ui-core/src/threads/context.tsx` |
 | [`ToolCallProvider`](#jcode-ui-core-toolcallprovider) | function | `packages/jcode-ui-core/src/primitives/ToolCallView.tsx` |
 | [`toolCallToRendererProps`](#jcode-ui-core-toolcalltorendererprops) | function | `packages/jcode-ui-core/src/adapters/index.ts` |
@@ -3159,7 +3164,7 @@ export type WorkspaceKind = 'project' | 'scratch';
 | [`Goal`](#jcode-ui-core-goal) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`GroupCompletedTurnsOptions`](#jcode-ui-core-groupcompletedturnsoptions) | interface | `packages/jcode-ui-core/src/timeline/turnGroups.ts` |
 | [`InlineImageAdapterOptions`](#jcode-ui-core-inlineimageadapteroptions) | interface | `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts` |
-| [`Message`](#jcode-ui-core-message) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`Message` (jcode-ui-core)](#jcode-ui-core-message) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`MessageActions`](#jcode-ui-core-messageactions) | interface | `packages/jcode-ui-core/src/primitives/MessageView.tsx` |
 | [`MessageSource`](#jcode-ui-core-messagesource) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`MessagesSnapshotEvent`](#jcode-ui-core-messagessnapshotevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
@@ -3187,13 +3192,13 @@ export type WorkspaceKind = 'project' | 'scratch';
 | [`StepFinishedEvent`](#jcode-ui-core-stepfinishedevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`StepStartedEvent`](#jcode-ui-core-stepstartedevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`SummarizeTurnChangesOptions`](#jcode-ui-core-summarizeturnchangesoptions) | interface | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
-| [`TaskContextBreakdown`](#jcode-ui-core-taskcontextbreakdown) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`TaskContextBreakdown` (jcode-ui-core)](#jcode-ui-core-taskcontextbreakdown) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`TextMessageChunkEvent`](#jcode-ui-core-textmessagechunkevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`TextMessageContentEvent`](#jcode-ui-core-textmessagecontentevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`TextMessageEndEvent`](#jcode-ui-core-textmessageendevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`TextMessageStartEvent`](#jcode-ui-core-textmessagestartevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`ThreadListState`](#jcode-ui-core-threadliststate) | interface | `packages/jcode-ui-core/src/threads/store.ts` |
-| [`ThreadProps`](#jcode-ui-core-threadprops) | interface | `packages/jcode-ui-core/src/primitives/Thread.tsx` |
+| [`ThreadProps` (jcode-ui-core)](#jcode-ui-core-threadprops) | interface | `packages/jcode-ui-core/src/primitives/Thread.tsx` |
 | [`ThreadRenderSlots`](#jcode-ui-core-threadrenderslots) | interface | `packages/jcode-ui-core/src/primitives/Thread.tsx` |
 | [`ThreadStore`](#jcode-ui-core-threadstore) | interface | `packages/jcode-ui-core/src/threads/store.ts` |
 | [`ThreadStoreActions`](#jcode-ui-core-threadstoreactions) | interface | `packages/jcode-ui-core/src/threads/store.ts` |
@@ -3221,6 +3226,7 @@ export type WorkspaceKind = 'project' | 'scratch';
 | [`AGUIRole`](#jcode-ui-core-aguirole) | type | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`AGUITransport`](#jcode-ui-core-aguitransport) | type | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`ApprovalOptionKind`](#jcode-ui-core-approvaloptionkind) | type | `packages/jcode-ui-core/src/types/index.ts` |
+| [`ApprovalOutcome`](#jcode-ui-core-approvaloutcome) | type | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ArtifactStorageKind`](#jcode-ui-core-artifactstoragekind) | type | `packages/jcode-ui-core/src/types/index.ts` |
 | [`AskUserSubmitError`](#jcode-ui-core-askusersubmiterror) | type | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
 | [`ConnectionState`](#jcode-ui-core-connectionstate) | type | `packages/jcode-ui-core/src/types/index.ts` |
@@ -3340,12 +3346,12 @@ export function AskUserBlock({ tool, className, renderPending, renderResolved }:
 
 Attach approval items to the concrete tool-call occurrence they gate.
 
-Tool-call ids are model supplied and may be reused across turns, so this does
-not use a session-wide id map. Each approval binds to the nearest unmatched
-occurrence inside the same user turn (normally the preceding tool; the
+Host-generated approval occurrence ids are authoritative across the current
+user turn. Legacy calls without one fall back to the nearest unmatched model
+id + tool-name occurrence in that turn (normally the preceding tool; the
 forward fallback covers transports that deliver approval before tool_call).
-Matched approval items disappear from the projected list; unmatched legacy
-approvals remain standalone so no decision UI is lost.
+Matched approval items disappear from the projected list; ambiguous or
+unmatched approvals remain standalone so no decision UI is lost.
 
 ```ts
 export function bindApprovalsToTools(items: ThreadItem[]): ThreadItem[] { … }
@@ -3503,6 +3509,21 @@ Format elapsed/duration ms as a compact badge: `2s`, `1m 05s`.
 
 ```ts
 export function formatElapsed(ms: number): string { … }
+```
+
+<a id="jcode-ui-core-getapprovaloutcome"></a>
+
+### `getApprovalOutcome`
+
+`function` · `packages/jcode-ui-core/src/types/index.ts`
+
+Resolve the effective approval outcome across the classic boolean contract
+and host-defined option contract. A matching selected option is
+authoritative because option-based hosts are not required to also populate
+the optional `approved` field. Invalid resolved states fail closed.
+
+```ts
+export function getApprovalOutcome(approval: Approval): ApprovalOutcome { … }
 ```
 
 <a id="jcode-ui-core-groupactivitytimeline"></a>
@@ -3837,7 +3858,7 @@ export function summarizeTurnChanges(
 
 <a id="jcode-ui-core-thread"></a>
 
-### `Thread`
+### `Thread` (jcode-ui-core)
 
 `function` · `packages/jcode-ui-core/src/primitives/Thread.tsx`
 
@@ -4338,7 +4359,9 @@ export interface ApprovalDecisionActions {
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
 A host-defined approval decision (e.g. an ACP permission option). The `id`
- is echoed back verbatim via `resolveApprovalOption`.
+is echoed back verbatim via `resolveApprovalOption`. `custom` (and an omitted
+kind) has grant semantics for the legacy boolean fallback; rejection options
+must use `deny` so renderer gating and receipts remain fail-closed.
 
 ```ts
 export interface ApprovalOption {
@@ -4600,14 +4623,18 @@ export interface ChatRuntime {
 
 A completed user turn projected into one collapsible timeline row. The user
 message remains outside this item; `activity` contains the intermediate
-assistant/tool/approval work, while `summary` is the final assistant reply
-that always stays visible. This is UI-only and does not alter transcript or
-model-facing message boundaries.
+assistant/tool/approval work in transcript order and marks durable outcomes
+that stay visible while collapsed. `summary` is the final assistant reply and
+therefore remains the last visible message. This is UI-only and does not
+alter transcript or model-facing message boundaries.
 
 ```ts
 export interface CompletedTurn {
   id: string
-  activity: ThreadItem[]
+  activity: Array<{
+    item: ThreadItem
+    alwaysVisible: boolean
+  }>
   summary: Message
   durationMs: number
 }
@@ -4855,7 +4882,7 @@ export interface InlineImageAdapterOptions {
 
 <a id="jcode-ui-core-message"></a>
 
-### `Message`
+### `Message` (jcode-ui-core)
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -5393,7 +5420,7 @@ export interface SummarizeTurnChangesOptions {
 
 <a id="jcode-ui-core-taskcontextbreakdown"></a>
 
-### `TaskContextBreakdown`
+### `TaskContextBreakdown` (jcode-ui-core)
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -5487,7 +5514,7 @@ export interface ThreadListState {
 
 <a id="jcode-ui-core-threadprops"></a>
 
-### `ThreadProps`
+### `ThreadProps` (jcode-ui-core)
 
 `interface` · `packages/jcode-ui-core/src/primitives/Thread.tsx`
 
@@ -6122,6 +6149,18 @@ Button treatment for a host-defined approval option. `allow_always` keeps
 export type ApprovalOptionKind = 'allow_once' | 'allow_always' | 'deny' | 'custom';
 ```
 
+<a id="jcode-ui-core-approvaloutcome"></a>
+
+### `ApprovalOutcome`
+
+`type` · `packages/jcode-ui-core/src/types/index.ts`
+
+Canonical result of an approval gate for rendering and timeline projection.
+
+```ts
+export type ApprovalOutcome = 'pending' | 'allowed' | 'denied';
+```
+
 <a id="jcode-ui-core-artifactstoragekind"></a>
 
 ### `ArtifactStorageKind`
@@ -6287,8 +6326,7 @@ outcome so reducers can enforce monotonic ordering without guessing whether
 a terminal call succeeded, failed, was cancelled, or became uncertain.
 
 ```ts
-export type ToolPhase = 'queued' | 'generating' | 'saving' | 'terminal'
-export type ToolOutcome = 'succeeded' | 'failed' | 'cancelled' | 'uncertain';
+export type ToolPhase = 'queued' | 'generating' | 'saving' | 'terminal';
 ```
 
 <a id="jcode-ui-core-toolrenderer"></a>

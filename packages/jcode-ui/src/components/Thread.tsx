@@ -25,6 +25,7 @@ import {
   groupCompletedTurns,
   appendTurnChangeSummaries,
   isStandaloneTool,
+  getApprovalOutcome,
 } from 'jcode-ui-core'
 import { toolCallToRendererProps } from 'jcode-ui-core/adapters'
 import type { ThreadItem, ToolCall } from 'jcode-ui-core'
@@ -207,31 +208,36 @@ function renderItem(item: ThreadItem, isRunning: boolean, turnStrings: TurnRende
 
 function StandaloneToolCall({ tool }: { tool: ToolCall }): ReactNode {
   const registry = useToolRegistry()
-  if (tool.approval && !tool.approval.resolved) {
+  const approval = tool.approval
+  const approvalOutcome = approval ? getApprovalOutcome(approval) : undefined
+  if (approval && approvalOutcome === 'pending') {
     return (
       <div className="jcode-gutter jcode-standalone-approval" data-testid="tool-approval">
-        <ApprovalBanner approval={tool.approval} />
+        <ApprovalBanner approval={approval} />
       </div>
     )
   }
-  if (tool.denied) {
+  const effectiveTool = approvalOutcome === 'denied' && !tool.denied
+    ? { ...tool, denied: true }
+    : tool
+  if (effectiveTool.denied) {
     return (
       <div className="jcode-gutter jcode-standalone-tool">
-        <ToolCallCard tool={tool} />
+        <ToolCallCard tool={effectiveTool} />
       </div>
     )
   }
-  const Renderer = registry.has(tool.name) ? registry.get(tool.name) : null
+  const Renderer = registry.has(effectiveTool.name) ? registry.get(effectiveTool.name) : null
   if (!Renderer) {
     return (
-      <div className="jcode-gutter jcode-standalone-tool" data-tool-name={tool.name}>
-        <ToolCallCard tool={tool} />
+      <div className="jcode-gutter jcode-standalone-tool" data-tool-name={effectiveTool.name}>
+        <ToolCallCard tool={effectiveTool} />
       </div>
     )
   }
   return (
-    <div className="jcode-gutter jcode-standalone-tool" data-tool-name={tool.name}>
-      <Renderer {...toolCallToRendererProps(tool)} />
+    <div className="jcode-gutter jcode-standalone-tool" data-tool-name={effectiveTool.name}>
+      <Renderer {...toolCallToRendererProps(effectiveTool)} />
     </div>
   )
 }

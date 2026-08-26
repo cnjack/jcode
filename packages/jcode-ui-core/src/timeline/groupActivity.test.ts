@@ -386,6 +386,23 @@ describe('countActivityFlags', () => {
     assert.deepEqual(flags, { failed: 1, denied: 2 })
   })
 
+  it('counts an embedded option-based denial without an approved boolean', () => {
+    const flags = countActivityFlags([
+      shell('a', {
+        approval: {
+          id: 'gate',
+          tool_name: 'execute',
+          tool_args: '{}',
+          is_external: false,
+          resolved: true,
+          options: [{ id: 'deny', label: 'Deny', kind: 'deny' }],
+          resolvedOptionId: 'deny',
+        },
+      }),
+    ])
+    assert.deepEqual(flags, { failed: 0, denied: 1 })
+  })
+
   it('returns zeros for an all-green group', () => {
     assert.deepEqual(countActivityFlags([read('a'), shell('b')]), { failed: 0, denied: 0 })
   })

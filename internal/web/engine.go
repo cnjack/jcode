@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,6 +51,13 @@ type Engine struct {
 	// client never observes the durable revision between fsync and the prepared
 	// agent/catalog publication.
 	toolOverrideMu sync.Mutex
+	// retired permanently closes this engine to new run/focus claims. Lifecycle
+	// transitions set it while holding Server.tasksMu -> Server.mu; readers use
+	// the atomic fast-path after resolving an engine pointer.
+	retired atomic.Bool
+	// teardownOnce makes resource release idempotent across shutdown, failed
+	// publication, and concurrent cleanup paths.
+	teardownOnce sync.Once
 
 	// taskID is the task identity (== the recorder's session UUID once a message
 	// has been recorded). Empty for a freshly created, not-yet-messaged engine.
@@ -215,6 +223,23 @@ func (s *Server) activeEngine() *Engine {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Engine
+}
+
+// tryStartEngine serializes a task's idle->running claim with foreground
+// changes. Guarded Desktop reopen requests take s.mu exclusively while they
+// verify require_idle and focus their candidate, so a run claim can never land
+// between that final check and the pointer swap.
+func (s *Server) tryStartEngine(eng *Engine) bool {
+	if eng == nil {
+		return false
+	}
+	s.tasksMu.RLock()
+	s.mu.RLock()
+	canonical := !eng.retired.Load() && s.canonicalEngineLocked(eng)
+	started := canonical && eng.running.CompareAndSwap(false, true)
+	s.mu.RUnlock()
+	s.tasksMu.RUnlock()
+	return started
 }
 
 // flowLoaderFor returns the task-scoped workflow loader for eng (so slash
@@ -421,15 +446,22 @@ func (e *Engine) installAgentIfRevision(ag *adk.ChatModelAgent, revision uint64)
 // is empty (legacy / no-task_id callers). Returns nil when taskID is unknown.
 func (s *Server) resolveEngine(taskID string) *Engine {
 	if taskID == "" {
-		return s.activeEngine()
+		eng := s.activeEngine()
+		if eng != nil && eng.retired.Load() {
+			return nil
+		}
+		return eng
 	}
 	s.tasksMu.RLock()
 	eng := s.tasks[taskID]
 	s.tasksMu.RUnlock()
+	if eng != nil && eng.retired.Load() {
+		eng = nil
+	}
 	if eng == nil {
 		// The active engine may not be in the map yet under its session UUID
 		// (a brand-new chat whose recorder UUID the client already knows).
-		if a := s.activeEngine(); a != nil && a.taskID == taskID {
+		if a := s.activeEngine(); a != nil && !a.retired.Load() && a.taskID == taskID {
 			return a
 		}
 	}
@@ -442,6 +474,7 @@ const maxLiveEngines = 64
 
 var errTooManyTasks = fmt.Errorf("too many concurrent tasks")
 var errTaskAlreadyRegistered = fmt.Errorf("task engine is already registered")
+var errEngineRetired = fmt.Errorf("task engine is retired")
 
 // registerEngine adds eng to the tasks map (keyed by task id), publishes its
 // pump-cancel under tasksMu (so teardown observes it), and starts its event
@@ -451,11 +484,18 @@ func (s *Server) registerEngine(eng *Engine) error {
 	if eng == nil {
 		return nil
 	}
+	if eng.retired.Load() {
+		return errEngineRetired
+	}
 	s.prepareEngineRegistration(eng)
 	if eng.taskID == "" {
 		return nil
 	}
 	s.tasksMu.Lock()
+	if eng.retired.Load() {
+		s.tasksMu.Unlock()
+		return errEngineRetired
+	}
 	existing, existed := s.tasks[eng.taskID]
 	if existed {
 		s.tasksMu.Unlock()
@@ -527,6 +567,9 @@ func (s *Server) publishEngineCandidate(eng, expected *Engine) error {
 	if eng == nil || eng.taskID == "" {
 		return fmt.Errorf("cannot publish an engine without a task id")
 	}
+	if eng.retired.Load() {
+		return errEngineRetired
+	}
 	s.prepareEngineRegistration(eng)
 
 	base := s.rootCtx()
@@ -539,6 +582,12 @@ func (s *Server) publishEngineCandidate(eng, expected *Engine) error {
 	s.tasksMu.Lock()
 	existing, exists := s.tasks[eng.taskID]
 	s.mu.Lock()
+	if eng.retired.Load() {
+		s.mu.Unlock()
+		s.tasksMu.Unlock()
+		cancel()
+		return errEngineRetired
+	}
 	activeMatchesExpected := expected != nil && s.Engine == expected
 	if expected == nil {
 		if exists {
@@ -566,12 +615,19 @@ func (s *Server) publishEngineCandidate(eng, expected *Engine) error {
 			cancel()
 			return fmt.Errorf("task engine changed during activation")
 		}
+		if expected.retired.Load() {
+			s.mu.Unlock()
+			s.tasksMu.Unlock()
+			cancel()
+			return fmt.Errorf("conversation %s runtime is retired", eng.taskID)
+		}
 		if expected.running.Load() {
 			s.mu.Unlock()
 			s.tasksMu.Unlock()
 			cancel()
 			return fmt.Errorf("conversation %s is running; refusing to replace its runtime", eng.taskID)
 		}
+		expected.retired.Store(true)
 	}
 	s.tasks[eng.taskID] = eng
 	if activeMatchesExpected {
@@ -691,30 +747,223 @@ func (s *Server) setActiveEngine(eng *Engine) {
 	}
 	if err := s.registerEngine(eng); err != nil {
 		if canonical := s.resolveEngine(eng.taskID); canonical != nil {
+			if canonical != eng {
+				eng.teardown()
+			}
 			eng = canonical
 		} else {
 			eng.teardown()
 			return
 		}
 	}
+	prev, ok := s.swapActiveEngine(eng, nil, false, false)
+	if !ok {
+		return
+	}
+	s.finishActiveEngineSwap(prev, eng)
+}
+
+// canonicalEngineLocked reports whether eng is still the live registry
+// occurrence. The caller holds tasksMu and s.mu (read or write).
+func (s *Server) canonicalEngineLocked(eng *Engine) bool {
+	if eng == nil || eng.retired.Load() {
+		return false
+	}
+	if eng.taskID == "" {
+		return s.Engine == eng
+	}
+	return s.tasks[eng.taskID] == eng
+}
+
+// swapActiveEngine validates the target and commits one foreground pointer
+// update under the global lifecycle lock order: tasksMu -> s.mu. When guarded,
+// expectedSessionID/requireIdle are revalidated in the same critical section.
+func (s *Server) swapActiveEngine(
+	eng *Engine,
+	expectedSessionID *string,
+	requireIdle bool,
+	guarded bool,
+) (*Engine, bool) {
+	if eng == nil {
+		return nil, false
+	}
+	s.tasksMu.RLock()
 	s.mu.Lock()
+	if !s.canonicalEngineLocked(eng) {
+		s.mu.Unlock()
+		s.tasksMu.RUnlock()
+		return nil, false
+	}
+	if guarded && s.activeEngineGuardFailureLocked(expectedSessionID, requireIdle) != "" {
+		s.mu.Unlock()
+		s.tasksMu.RUnlock()
+		return nil, false
+	}
 	prev := s.Engine
 	s.Engine = eng
 	s.mu.Unlock()
-	if prev != nil && prev != eng {
-		// Re-check running INSIDE emu, together with the recorder check, rather
-		// than via an unlocked pre-check: a run starting on prev concurrently
-		// (running flips true, runCancel set under emu) must not be torn down. The
-		// folded check only ever makes reclaim more conservative — at worst it
-		// leaks an idle throwaway engine, never cancels a live run.
-		reclaim := false
-		prev.emu.Lock()
-		if !prev.running.Load() && (prev.recorder == nil || !prev.recorder.HasRecording()) {
-			reclaim = true
+	s.tasksMu.RUnlock()
+	return prev, true
+}
+
+type activeEngineGuardFailure string
+
+const (
+	activeEngineChanged activeEngineGuardFailure = "session_changed"
+	activeEngineBusy    activeEngineGuardFailure = "session_running"
+)
+
+// activeEngineGuardFailureLocked checks a conditional foreground update. The
+// caller holds s.mu for reading or writing. A pointer distinguishes an omitted
+// expected_session_id from an explicitly expected empty id.
+func (s *Server) activeEngineGuardFailureLocked(expectedSessionID *string, requireIdle bool) activeEngineGuardFailure {
+	current := s.Engine
+	currentID := ""
+	if current != nil {
+		currentID = current.taskID
+	}
+	if expectedSessionID != nil && currentID != *expectedSessionID {
+		return activeEngineChanged
+	}
+	if requireIdle && current != nil && current.running.Load() {
+		return activeEngineBusy
+	}
+	return ""
+}
+
+// snapshotActiveEngineGuard turns require_idle-only into an identity guard by
+// capturing the current task id in the same read section as the preflight.
+// This prevents a slow fresh-task build started on A from overwriting a later
+// idle navigation to B.
+func (s *Server) snapshotActiveEngineGuard(
+	expectedSessionID *string,
+	requireIdle bool,
+) (*string, activeEngineGuardFailure) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if expectedSessionID == nil && requireIdle {
+		currentID := ""
+		if current := s.Engine; current != nil {
+			currentID = current.taskID
 		}
-		prev.emu.Unlock()
-		if reclaim {
-			s.deleteEngine(prev.taskID)
+		expectedSessionID = &currentID
+	}
+	return expectedSessionID, s.activeEngineGuardFailureLocked(expectedSessionID, requireIdle)
+}
+
+// focusEngineGuarded atomically revalidates the Desktop reopen preconditions
+// and focuses eng. Run starts take s.mu for reading via tryStartEngine, while
+// every foreground navigation takes it for writing, so neither can cross the
+// final guard/swap boundary.
+func (s *Server) focusEngineGuarded(
+	eng *Engine,
+	expectedSessionID *string,
+	requireIdle bool,
+) activeEngineGuardFailure {
+	if eng == nil {
+		return activeEngineChanged
+	}
+	s.tasksMu.RLock()
+	s.mu.Lock()
+	if !s.canonicalEngineLocked(eng) {
+		s.mu.Unlock()
+		s.tasksMu.RUnlock()
+		return activeEngineChanged
+	}
+	if failure := s.activeEngineGuardFailureLocked(expectedSessionID, requireIdle); failure != "" {
+		s.mu.Unlock()
+		s.tasksMu.RUnlock()
+		return failure
+	}
+	prev := s.Engine
+	s.Engine = eng
+	s.mu.Unlock()
+	s.tasksMu.RUnlock()
+	s.finishActiveEngineSwap(prev, eng)
+	return ""
+}
+
+type engineRetirePolicy struct {
+	requireInactive   bool
+	requireIdle       bool
+	requireUnrecorded bool
+}
+
+// retireEngine atomically validates and detaches one exact engine occurrence.
+// Resource teardown happens later, outside all server locks. All lifecycle
+// mutations follow tasksMu -> s.mu -> emu, matching tryStart/focus/publish.
+func (s *Server) retireEngine(eng *Engine, policy engineRetirePolicy) bool {
+	if eng == nil {
+		return false
+	}
+	s.tasksMu.Lock()
+	s.mu.Lock()
+	if eng.retired.Load() {
+		s.mu.Unlock()
+		s.tasksMu.Unlock()
+		return false
+	}
+	if eng.taskID != "" && s.tasks[eng.taskID] != eng {
+		s.mu.Unlock()
+		s.tasksMu.Unlock()
+		return false
+	}
+	if policy.requireInactive && s.Engine == eng {
+		s.mu.Unlock()
+		s.tasksMu.Unlock()
+		return false
+	}
+	if policy.requireIdle && eng.running.Load() {
+		s.mu.Unlock()
+		s.tasksMu.Unlock()
+		return false
+	}
+	if policy.requireUnrecorded {
+		eng.emu.Lock()
+		recorded := eng.recorder != nil && eng.recorder.HasRecording()
+		eng.emu.Unlock()
+		if recorded {
+			s.mu.Unlock()
+			s.tasksMu.Unlock()
+			return false
+		}
+	}
+	eng.retired.Store(true)
+	if eng.taskID != "" {
+		delete(s.tasks, eng.taskID)
+	}
+	s.mu.Unlock()
+	s.tasksMu.Unlock()
+	return true
+}
+
+// discardEngineCandidate removes exactly the unpublished candidate pointer
+// produced by a failed guarded request. It never deletes a replacement with
+// the same id or an engine another request already focused. A freshly-created
+// managed scratch directory is removed only with os.Remove, which fails closed
+// if anything wrote into it while the request was in flight.
+func (s *Server) discardEngineCandidate(eng *Engine, removeScratch bool) {
+	if eng == nil || eng.taskID == "" {
+		return
+	}
+	if !s.retireEngine(eng, engineRetirePolicy{requireInactive: true, requireIdle: true}) {
+		return
+	}
+	eng.teardown()
+	if removeScratch {
+		_ = os.Remove(eng.pwd)
+	}
+}
+
+func (s *Server) finishActiveEngineSwap(prev, eng *Engine) {
+	if prev != nil && prev != eng {
+		if s.retireEngine(prev, engineRetirePolicy{
+			requireInactive: true, requireIdle: true, requireUnrecorded: true,
+		}) {
+			prev.teardown()
+			if prev.workspaceKind == session.WorkspaceScratch {
+				_ = os.Remove(prev.pwd)
+			}
 		}
 	}
 	// Remember the foregrounded session per project (keyed by the engine's own
@@ -728,11 +977,10 @@ func (s *Server) setActiveEngine(eng *Engine) {
 // pump, cancels its run, closes its recorder). The active engine is never
 // deleted out from under the foreground; callers guard against that.
 func (s *Server) deleteEngine(taskID string) {
-	s.tasksMu.Lock()
+	s.tasksMu.RLock()
 	eng := s.tasks[taskID]
-	delete(s.tasks, taskID)
-	s.tasksMu.Unlock()
-	if eng != nil {
+	s.tasksMu.RUnlock()
+	if eng != nil && s.retireEngine(eng, engineRetirePolicy{requireInactive: true}) {
 		eng.teardown()
 	}
 }
@@ -745,41 +993,44 @@ func (s *Server) deleteEngine(taskID string) {
 // acquisition (deleteEngine/CloseAllEngines), which establishes happens-before
 // with registerEngine's pumpCancel publication.
 func (e *Engine) teardown() {
-	if e.pumpCancel != nil {
-		e.pumpCancel()
-	}
-	e.emu.Lock()
-	c := e.runCancel
-	e.emu.Unlock()
-	if c != nil {
-		c()
-	}
-	// Best-effort wait for the run goroutine to flip running=false so its final
-	// RecordAssistant lands before we close.
-	for i := 0; i < 200 && e.running.Load(); i++ {
-		time.Sleep(5 * time.Millisecond)
-	}
-	e.toolOverrideMu.Lock()
-	e.emu.Lock()
-	recorder := e.recorder
-	e.emu.Unlock()
-	if recorder != nil {
-		recorder.Close()
-	}
-	e.toolOverrideMu.Unlock()
-	// Release the remote target, if any: closes the SSH connection or
-	// decrements the Docker container ref-count (stopping it on last release).
-	// No-op for local engines.
-	if e.env != nil {
-		_ = e.env.CloseRemote()
-		// Close this task's browser session (managed tabs close; extension tabs
-		// are detached back to the user). No-op if the task never used browser.
-		e.env.CloseBrowser()
-		// Same for computer use. This matters more than the browser case: the
-		// session holds the app allowlist, so leaving it open would carry a grant
-		// the user gave one task into the next one. No-op if unused.
-		e.env.CloseComputer()
-	}
+	e.teardownOnce.Do(func() {
+		e.retired.Store(true)
+		if e.pumpCancel != nil {
+			e.pumpCancel()
+		}
+		e.emu.Lock()
+		c := e.runCancel
+		e.emu.Unlock()
+		if c != nil {
+			c()
+		}
+		// Best-effort wait for the run goroutine to flip running=false so its final
+		// RecordAssistant lands before we close.
+		for i := 0; i < 200 && e.running.Load(); i++ {
+			time.Sleep(5 * time.Millisecond)
+		}
+		e.toolOverrideMu.Lock()
+		e.emu.Lock()
+		recorder := e.recorder
+		e.emu.Unlock()
+		if recorder != nil {
+			recorder.Close()
+		}
+		e.toolOverrideMu.Unlock()
+		// Release the remote target, if any: closes the SSH connection or
+		// decrements the Docker container ref-count (stopping it on last release).
+		// No-op for local engines.
+		if e.env != nil {
+			_ = e.env.CloseRemote()
+			// Close this task's browser session (managed tabs close; extension tabs
+			// are detached back to the user). No-op if the task never used browser.
+			e.env.CloseBrowser()
+			// Same for computer use. This matters more than the browser case: the
+			// session holds the app allowlist, so leaving it open would carry a grant
+			// the user gave one task into the next one. No-op if unused.
+			e.env.CloseComputer()
+		}
+	})
 }
 
 // setTaskStatus broadcasts a global task_status event (so every client's sidebar
@@ -820,11 +1071,26 @@ func (s *Server) CloseAllEngines() {
 		s.remoteConns.closeAll()
 	}
 	s.tasksMu.Lock()
+	s.mu.Lock()
 	engines := make([]*Engine, 0, len(s.tasks))
+	seen := make(map[*Engine]struct{}, len(s.tasks)+1)
 	for _, e := range s.tasks {
+		if e == nil {
+			continue
+		}
+		e.retired.Store(true)
 		engines = append(engines, e)
+		seen[e] = struct{}{}
+	}
+	if active := s.Engine; active != nil {
+		if _, ok := seen[active]; !ok {
+			active.retired.Store(true)
+			engines = append(engines, active)
+		}
 	}
 	s.tasks = make(map[string]*Engine)
+	s.Engine = nil
+	s.mu.Unlock()
 	s.tasksMu.Unlock()
 	for _, e := range engines {
 		e.teardown()

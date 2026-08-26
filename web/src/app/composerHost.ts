@@ -151,10 +151,19 @@ function buildStrings(t: (key: string, opts?: Record<string, unknown>) => string
 }
 
 /** Stable action bag — closes over the store singleton, so it never changes. */
-const actions = {
+function assertForegroundTask(taskID: string): void {
+  if (store.getState().session.currentSessionId === taskID) return
+  const error = new Error('Task changed while the request was in flight')
+  error.name = 'AbortError'
+  throw error
+}
+
+export const productComposerActions = {
   async selectModel(provider: string, model: string) {
+    const taskID = store.getState().session.currentSessionId || undefined
     try {
-      await api.switchModel(provider, model)
+      await api.switchModel(provider, model, taskID)
+      if (store.getState().session.currentSessionId !== (taskID || '')) return
       store.dispatch(modelActions.setProvider(provider))
       store.dispatch(modelActions.setModel(model))
     } catch {
@@ -163,17 +172,21 @@ const actions = {
   },
 
   async selectMode(next: AgentMode) {
+    const taskID = store.getState().session.currentSessionId || undefined
     try {
-      await api.switchMode(next)
+      await api.switchMode(next, taskID)
     } catch {
       /* ignore */
     }
+    if (store.getState().session.currentSessionId !== (taskID || '')) return
     store.dispatch(modelActions.setMode(next))
   },
 
   async selectAgent(name: string) {
+    const taskID = store.getState().session.currentSessionId || undefined
     try {
-      const result = await api.switchAgent(name)
+      const result = await api.switchAgent(name, taskID)
+      if (store.getState().session.currentSessionId !== (taskID || '')) return
       store.dispatch(modelActions.setAgent(result.agent || ''))
       if (result.provider) store.dispatch(modelActions.setProvider(result.provider))
       if (result.model) store.dispatch(modelActions.setModel(result.model))
@@ -219,8 +232,10 @@ const actions = {
   },
 
   async refreshModels() {
+    const taskID = store.getState().session.currentSessionId || undefined
     try {
-      const resp = await api.models()
+      const resp = await api.models(taskID)
+      if (store.getState().session.currentSessionId !== (taskID || '')) return
       store.dispatch(modelActions.setProviders(resp.providers))
     } catch {
       /* ignore */
@@ -273,26 +288,36 @@ const actions = {
 
   openRemoteConnect,
 
-  fetchBranches() {
-    return api.gitBranches()
+  async fetchBranches() {
+    const taskID = store.getState().session.currentSessionId
+    const result = await api.gitBranches(taskID || undefined)
+    assertForegroundTask(taskID)
+    return result
   },
 
-  checkoutBranch(branch: string, create: boolean, strategy: '' | 'stash' | 'force') {
-    return api.gitCheckout(branch, create, strategy)
+  async checkoutBranch(branch: string, create: boolean, strategy: '' | 'stash' | 'force') {
+    const taskID = store.getState().session.currentSessionId
+    const result = await api.gitCheckout(branch, create, strategy, taskID || undefined)
+    assertForegroundTask(taskID)
+    return result
   },
 
   async setGoal(objective: string, start: boolean) {
-    const goal = await api.setGoal(objective, start)
+    const taskID = store.getState().session.currentSessionId || undefined
+    const goal = await api.setGoal(objective, start, taskID)
+    if (store.getState().session.currentSessionId !== (taskID || '')) return goal
     store.dispatch(chatActions.setGoal(goal))
     return goal
   },
 
   async clearGoal() {
+    const taskID = store.getState().session.currentSessionId || undefined
     try {
-      await api.clearGoal()
+      await api.clearGoal(taskID)
     } catch {
       // still clear local so the banner dismisses
     }
+    if (store.getState().session.currentSessionId !== (taskID || '')) return
     store.dispatch(chatActions.setGoal(null))
   },
 }
@@ -347,7 +372,7 @@ export function useProductComposerHost(): ProductComposerHost {
       strings,
       resolveProviderIcon: iconForProvider,
       pickFolder: isTauri ? pickFolder : undefined,
-      ...actions,
+      ...productComposerActions,
     }),
     [
       providerName, modelName, mode, providers, favoriteModels, recentModels,

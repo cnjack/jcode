@@ -13,6 +13,7 @@
  * Isolated single tools stay plain `tool` cards (no noisy group of 1).
  */
 
+import { getApprovalOutcome } from '../types/index.ts'
 import type { ActivityGroup, ThreadItem, ToolCall, ToolStatus } from '../types/index.js'
 // NOTE: runtime import uses the .ts extension so `node --experimental-strip-types
 // --test` resolves it directly; tsc rewrites it to .js on emit
@@ -124,7 +125,7 @@ export function countActivityFlags(tools: ToolCall[]): { failed: number; denied:
   let failed = 0
   let denied = 0
   for (const t of tools) {
-    if (t.denied) {
+    if (t.denied || (t.approval && getApprovalOutcome(t.approval) === 'denied')) {
       denied += 1
       continue
     }

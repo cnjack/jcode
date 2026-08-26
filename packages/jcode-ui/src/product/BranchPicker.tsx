@@ -24,6 +24,10 @@ interface PendingSwitch {
 
 const MAX_FILES = 8
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 export function BranchPicker({ host, placement = 'top' }: { host: ProductComposerHost; placement?: 'top' | 'bottom' }) {
   const strings = useComposerStrings(host)
   const projectPath = host.projectPath
@@ -44,7 +48,8 @@ export function BranchPicker({ host, placement = 'top' }: { host: ProductCompose
       const res = await host.fetchBranches()
       setCurrent(res.current || '')
       setBranches(res.branches || [])
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) return
       setCurrent('')
       setBranches([])
     }
@@ -53,6 +58,21 @@ export function BranchPicker({ host, placement = 'top' }: { host: ProductCompose
   useEffect(() => {
     void refresh()
   }, [refresh, projectPath])
+
+  useEffect(() => {
+    // The component instance survives foreground-task switches. Clear every
+    // task-owned branch state immediately; stale host promises reject with
+    // AbortError and are ignored by the handlers below.
+    setCurrent('')
+    setBranches([])
+    setOpen(false)
+    setQuery('')
+    setCreating(false)
+    setNewName('')
+    setSwitching(false)
+    setError('')
+    setPending(null)
+  }, [host.sessionId])
 
   useEffect(() => {
     function onFocus() {
@@ -121,6 +141,7 @@ export function BranchPicker({ host, placement = 'top' }: { host: ProductCompose
       await refresh()
       reset()
     } catch (e) {
+      if (isAbortError(e)) return
       setError(e instanceof Error ? e.message : strings.branchSwitchError)
     } finally {
       setSwitching(false)

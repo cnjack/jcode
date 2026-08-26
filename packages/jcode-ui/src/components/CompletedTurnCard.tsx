@@ -5,7 +5,7 @@
  * duration row. The final assistant message remains visible at all times.
  */
 
-import { memo, useId, useState, type ReactNode } from 'react'
+import { Fragment, memo, useId, useState, type ReactNode } from 'react'
 import { ChevronRightIcon } from '@heroicons/react/24/outline'
 import type { CompletedTurn, ThreadItem } from 'jcode-ui-core'
 import { Message } from './Message.js'
@@ -27,7 +27,8 @@ export const CompletedTurnCard = memo(function CompletedTurnCard({
 }: CompletedTurnCardProps) {
   const [expanded, setExpanded] = useState(false)
   const regionId = useId()
-  const hasActivity = turn.activity.length > 0
+  const hasCollapsibleActivity = turn.activity.some((entry) => !entry.alwaysVisible)
+  const visibleReceipts = turn.activity.filter((entry) => entry.alwaysVisible)
   const label = durationLabel(turn.durationMs)
 
   return (
@@ -38,7 +39,7 @@ export const CompletedTurnCard = memo(function CompletedTurnCard({
       data-testid="completed-turn"
     >
       <div className="jcode-chat-col">
-        {hasActivity ? (
+        {hasCollapsibleActivity ? (
           <button
             type="button"
             className="jcode-turn-disclosure jcode-gutter"
@@ -62,13 +63,21 @@ export const CompletedTurnCard = memo(function CompletedTurnCard({
         )}
       </div>
 
-      {hasActivity && expanded ? (
+      {hasCollapsibleActivity && expanded ? (
         <div id={regionId} className="jcode-turn-activity" data-testid="turn-activity">
-          {turn.activity.map((item) => (
-            <div key={`${item.kind}-${item.seq}`}>{renderActivity(item)}</div>
+          {turn.activity.map((entry) => (
+            <Fragment key={`${entry.item.kind}-${entry.item.seq}`}>
+              {renderActivity(entry.item)}
+            </Fragment>
           ))}
         </div>
-      ) : null}
+      ) : (
+        visibleReceipts.map((entry) => (
+          <Fragment key={`${entry.item.kind}-${entry.item.seq}`}>
+            {renderActivity(entry.item)}
+          </Fragment>
+        ))
+      )}
 
       <Message message={turn.summary} showDuration={false} />
     </section>

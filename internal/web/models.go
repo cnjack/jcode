@@ -102,7 +102,13 @@ func imageModelSelectable(cfg *config.Config, providerID, modelID string) bool {
 
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	curProvider, curModel := "", ""
-	if eng := s.activeEngine(); eng != nil {
+	taskID := r.URL.Query().Get("task_id")
+	eng := s.resolveEngine(taskID)
+	if taskID != "" && eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	if eng != nil {
 		curProvider, curModel, _ = eng.modelSnapshot()
 	}
 	// Snapshot pointers under cfgMu — setup/provider handlers reassign s.cfg and

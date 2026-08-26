@@ -48,9 +48,11 @@ import { useChatRuntime } from './app/runtime'
 import { selectShowSessionChrome } from './app/selectors'
 import {
   coldDesktopFreshTarget,
+  initializePageBootState,
   markPageBootComplete,
-  pageBootCompleted,
+  shouldBlockAppShortcut,
   shouldStartFreshOnWindowReopen,
+  shouldShowBootScreen,
   startupLanding,
   type FreshTaskTarget,
 } from './app/startup'
@@ -76,7 +78,7 @@ import type { RemotePrefill } from './lib/remote'
 import { isTauri } from './lib/useDesktop'
 import { AppUpdateProvider } from './lib/useAppUpdate'
 
-let pageHasBooted = pageBootCompleted()
+let pageHasBooted = initializePageBootState()
 
 export default function App() {
   const dispatch = useAppDispatch()
@@ -86,13 +88,17 @@ export default function App() {
   const connectionError = useAppSelector((s) => s.ui.connectionError)
   const wsRef = useRef<WSClient | null>(null)
   const freshTaskRef = useRef<Promise<void> | null>(null)
+  const [bootPending, setBootPending] = useState(true)
+  const [freshTaskPending, setFreshTaskPending] = useState(false)
   const openFreshTask = useCallback((target?: FreshTaskTarget) => {
     if (freshTaskRef.current) return freshTaskRef.current
+    setFreshTaskPending(true)
     const pending = (async () => {
       try {
         await dispatch(startFreshChat(target)).unwrap()
       } finally {
         freshTaskRef.current = null
+        setFreshTaskPending(false)
       }
     })()
     freshTaskRef.current = pending
@@ -169,7 +175,10 @@ export default function App() {
             dispatch(sessionActions.setCurrentSession(activeSessionId))
             dispatch(chatActions.clearChat())
           } else {
-            await openFreshTask(freshTarget)
+            await openFreshTask({
+              ...(freshTarget || {}),
+              expectedSessionId: activeSessionId,
+            })
           }
           pageHasBooted = true
           markPageBootComplete()
@@ -178,6 +187,8 @@ export default function App() {
         if (!cancelled) {
           dispatch(uiActions.setConnectionError(err instanceof Error ? err.message : String(err)))
         }
+      } finally {
+        if (!cancelled) setBootPending(false)
       }
     }
     void boot()
@@ -259,6 +270,10 @@ export default function App() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey
+      if (bootPending || freshTaskRef.current) {
+        if (shouldBlockAppShortcut(true, meta, e.key, e.shiftKey)) e.preventDefault()
+        return
+      }
       if (meta && e.key === 'k' && !e.shiftKey) {
         e.preventDefault()
         dispatch(uiActions.setPaletteOpen(true))
@@ -278,11 +293,14 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dispatch, activeView])
+  }, [dispatch, activeView, bootPending])
 
   // Gate screens take precedence.
   if (connectionError) {
     return <ErrorScreen message={connectionError} />
+  }
+  if (shouldShowBootScreen(bootPending, freshTaskPending)) {
+    return <BootScreen />
   }
   if (needsSetup) {
     return <SetupView />
@@ -639,6 +657,24 @@ function ErrorScreen({ message }: { message: string }) {
       >
         {t('common.retry')}
       </button>
+    </div>
+  )
+}
+
+function BootScreen() {
+  const { t } = useTranslation()
+  return (
+    <div
+      className="flex h-screen items-center justify-center gap-2 bg-[var(--color-background)] text-sm text-[var(--color-muted-foreground)]"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <span
+        className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]"
+        aria-hidden="true"
+      />
+      <span>{t('common.loading')}</span>
     </div>
   )
 }

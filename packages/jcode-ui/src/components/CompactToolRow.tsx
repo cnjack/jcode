@@ -5,6 +5,7 @@
 
 import { memo } from 'react'
 import type { ToolCall } from 'jcode-ui-core'
+import { getApprovalOutcome } from 'jcode-ui-core'
 
 export interface CompactToolRowProps {
   tool: ToolCall
@@ -14,7 +15,8 @@ export const CompactToolRow = memo(function CompactToolRow({ tool }: CompactTool
   const title = tool.displayInfo?.title ?? tool.name
   const subtitle = tool.displayInfo?.subtitle ?? ''
   // Denied ≠ error: muted strikethrough. Awaiting approval = warning color.
-  const isDenied = !!tool.denied
+  const approvalOutcome = tool.approval ? getApprovalOutcome(tool.approval) : undefined
+  const isDenied = !!tool.denied || approvalOutcome === 'denied'
   const isAwaiting = !isDenied && !!tool.awaitingApproval && tool.status === 'running'
   const statusColor = isAwaiting
     ? 'var(--jcode-color-warning-fg)'

@@ -49,7 +49,7 @@ function walk(dir) {
  * @param {string} src
  * @returns {Symbol[]}
  */
-function extractSymbols(file, src) {
+export function extractSymbols(file, src) {
   const rel = path.relative(root, file)
   const pkg = rel.startsWith('packages/jcode-ui-core') ? 'jcode-ui-core' : 'jcode-ui'
   /** @type {Symbol[]} */
@@ -95,7 +95,7 @@ function extractSymbols(file, src) {
       const expIdx = src.lastIndexOf('export', braceStart)
       signature = src.slice(expIdx, i).trim()
     } else if (kind === 'type') {
-      // type Foo = ... until unbracketed semicolon or newline-double
+      // type Foo = ... until an unbracketed semicolon or declaration boundary
       let i = start
       let depth = 0
       let angle = 0
@@ -109,7 +109,13 @@ function extractSymbols(file, src) {
           i++
           break
         }
-        else if (ch === '\n' && depth <= 0 && angle <= 0 && src[i + 1] === '\n') break
+        else if (ch === '\n' && depth <= 0 && angle <= 0) {
+          const nextLine = src.slice(i + 1)
+          // Semicolon-free aliases end at the next top-level declaration (or
+          // its JSDoc). Only skip horizontal whitespace here: consuming
+          // newlines would make a multiline union look like it had ended.
+          if (/^[\t ]*(?:\r?\n|export\b|\/\*\*)/.test(nextLine)) break
+        }
       }
       const expIdx = src.lastIndexOf('export', start)
       signature = src.slice(expIdx, i).trim()
@@ -177,6 +183,92 @@ function esc(s) {
   return s.replace(/\|/g, '\\|')
 }
 
+/** @param {string} value */
+function slug(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+}
+
+/**
+ * @param {Symbol[]} symbols
+ * @param {string} generatedAt
+ */
+export function renderMarkdown(symbols, generatedAt = new Date().toISOString().slice(0, 10)) {
+  const globalNameCounts = new Map()
+  for (const s of symbols) globalNameCounts.set(s.name, (globalNameCounts.get(s.name) ?? 0) + 1)
+
+  const byPkg = {
+    'jcode-ui': symbols.filter((s) => s.pkg === 'jcode-ui'),
+    'jcode-ui-core': symbols.filter((s) => s.pkg === 'jcode-ui-core'),
+  }
+
+  let md = `---
+title: Generated API
+parent: API Reference
+nav_order: 6
+---
+
+# Generated API
+
+> Auto-generated from TypeScript sources on **${generatedAt}**.
+> Do not edit by hand — run \`node script/generate_jcode_ui_api_docs.mjs\`.
+>
+> Human-written guides: [Types](/chat-ui/docs/api/types) · [Runtime](/chat-ui/docs/api/runtime) · [Hooks](/chat-ui/docs/api/hooks) · [Primitives](/chat-ui/docs/api/primitives) · [Components](/chat-ui/docs/api/components).
+
+**${symbols.length}** public symbols extracted.
+
+`
+
+  for (const [pkg, list] of Object.entries(byPkg)) {
+    const nameCounts = new Map()
+    for (const s of list) nameCounts.set(s.name, (nameCounts.get(s.name) ?? 0) + 1)
+
+    const presentation = list.map((s) => {
+      const baseId = slug(`${pkg}-${s.name}`)
+      const collided = (nameCounts.get(s.name) ?? 0) > 1
+      const headingQualifier = collided
+        ? s.kind
+        : (globalNameCounts.get(s.name) ?? 0) > 1
+          ? pkg
+          : ''
+      return {
+        symbol: s,
+        baseId,
+        collided,
+        headingId: collided ? slug(`${pkg}-${s.name}-${s.kind}`) : baseId,
+        heading: headingQualifier ? `\`${s.name}\` (${headingQualifier})` : `\`${s.name}\``,
+      }
+    })
+
+    md += `## \`${pkg}\`\n\n`
+    md += `| Symbol | Kind | Source |\n|--------|------|--------|\n`
+    for (const item of presentation) {
+      const { symbol: s } = item
+      md += `| [${item.heading}](#${item.headingId}) | ${s.kind} | \`${esc(s.file)}\` |\n`
+    }
+    md += `\n`
+
+    const emittedLegacyAnchors = new Set()
+    for (const item of presentation) {
+      const { symbol: s } = item
+      // Existing links used pkg+name. Keep that legacy alias once for a
+      // collision while each concrete symbol gets a unique pkg+name+kind ID.
+      if (item.collided && !emittedLegacyAnchors.has(item.baseId)) {
+        md += `<a id="${item.baseId}"></a>\n\n`
+        emittedLegacyAnchors.add(item.baseId)
+      }
+      md += `<a id="${item.headingId}"></a>\n\n`
+      md += `### ${item.heading}\n\n`
+      md += `\`${s.kind}\` · \`${s.file}\`\n\n`
+      if (s.doc) {
+        md += `${s.doc}\n\n`
+      }
+      md += '```ts\n' + s.signature + '\n```\n\n'
+    }
+  }
+
+  return md
+}
+
 function main() {
   /** @type {Symbol[]} */
   const all = []
@@ -203,57 +295,11 @@ function main() {
     return a.name.localeCompare(b.name)
   })
 
-  const byPkg = {
-    'jcode-ui': symbols.filter((s) => s.pkg === 'jcode-ui'),
-    'jcode-ui-core': symbols.filter((s) => s.pkg === 'jcode-ui-core'),
-  }
-
-  const generatedAt = new Date().toISOString().slice(0, 10)
-
-  let md = `---
-title: Generated API
-parent: API Reference
-nav_order: 6
----
-
-# Generated API
-
-> Auto-generated from TypeScript sources on **${generatedAt}**.
-> Do not edit by hand — run \`node script/generate_jcode_ui_api_docs.mjs\`.
->
-> Human-written guides: [Types](/chat-ui/docs/api/types) · [Runtime](/chat-ui/docs/api/runtime) · [Hooks](/chat-ui/docs/api/hooks) · [Primitives](/chat-ui/docs/api/primitives) · [Components](/chat-ui/docs/api/components).
-
-**${symbols.length}** public symbols extracted.
-
-`
-
-  for (const [pkg, list] of Object.entries(byPkg)) {
-    md += `## \`${pkg}\`\n\n`
-    md += `| Symbol | Kind | Source |\n|--------|------|--------|\n`
-    for (const s of list) {
-      const anchor = s.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-      md += `| [\`${esc(s.name)}\`](#${pkg.replace(/[^a-z0-9]+/g, '-')}-${anchor}) | ${s.kind} | \`${esc(s.file)}\` |\n`
-    }
-    md += `\n`
-
-    for (const s of list) {
-      const headingId = `${pkg}-${s.name}`.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-      // Standalone anchor (raw HTML passes through the docs renderer) so the
-      // index table's #pkg-name links land here; the heading's auto-slug is
-      // just the bare symbol name and collides across packages.
-      md += `<a id="${headingId}"></a>\n\n`
-      md += `### \`${s.name}\`\n\n`
-      md += `\`${s.kind}\` · \`${s.file}\`\n\n`
-      if (s.doc) {
-        md += `${s.doc}\n\n`
-      }
-      md += '```ts\n' + s.signature + '\n```\n\n'
-    }
-  }
+  const md = renderMarkdown(symbols)
 
   fs.mkdirSync(path.dirname(outFile), { recursive: true })
   fs.writeFileSync(outFile, md)
   console.log(`Wrote ${symbols.length} symbols → ${path.relative(root, outFile)}`)
 }
 
-main()
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()
