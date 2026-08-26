@@ -141,7 +141,7 @@ setup-hooks:
 	@git config core.hooksPath .githooks
 	@echo "Git hooks installed (core.hooksPath = .githooks):"
 	@echo "  pre-commit  fast gofmt/goimports gate on staged Go files"
-	@echo "  pre-push    CI mirror: build + vet + golangci-lint (new issues) + test"
+	@echo "  pre-push    CI mirror: build + vet + golangci-lint (main: full; branches: new issues) + test"
 	@echo "Bypass with --no-verify; skip only tests via 'SKIP_TESTS=1 git push'."
 
 # ─── Desktop app (Tauri) ───

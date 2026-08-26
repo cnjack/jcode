@@ -863,7 +863,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 
 					if prompt == "/goal" || strings.HasPrefix(prompt, "/goal ") {
-						return m.handleGoalInput(prompt, cmds)
+						return m.handleGoalInput(prompt)
 					}
 
 					if prompt == "/channel" {

@@ -348,7 +348,8 @@ func (m *Model) handleCompactInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 
 // handleGoalInput handles `/goal` (status), `/goal clear`, and
 // `/goal <objective>` (set + start working toward it).
-func (m *Model) handleGoalInput(prompt string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleGoalInput(prompt string) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
 	refresh := func() {
 		if m.ready {
 			m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))

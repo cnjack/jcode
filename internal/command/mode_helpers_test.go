@@ -22,8 +22,8 @@ func TestResolveStartupMode(t *testing.T) {
 		{"default_mode plan", &config.Config{DefaultMode: "plan"}, false, mode.Plan},
 		{"default_mode auto", &config.Config{DefaultMode: "auto"}, false, mode.Auto},
 		{"default_mode full access", &config.Config{DefaultMode: "full_access"}, false, mode.FullAccess},
-		{"default_mode wins over auto_approve", &config.Config{DefaultMode: "approval", AutoApprove: true}, false, mode.Approval},
-		{"legacy auto_approve fallback", &config.Config{AutoApprove: true}, false, mode.FullAccess},
+		{"default_mode wins over auto_approve", &config.Config{DefaultMode: "approval", AutoApprove: true}, false, mode.Approval}, //nolint:staticcheck // compatibility precedence test
+		{"legacy auto_approve fallback", &config.Config{AutoApprove: true}, false, mode.FullAccess},                               //nolint:staticcheck // compatibility fallback test
 		{"empty defaults to approval", &config.Config{}, false, mode.Approval},
 		{"nil cfg defaults to approval", nil, false, mode.Approval},
 	}

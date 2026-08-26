@@ -26,7 +26,7 @@ func TestComputerScreenshotToolReturnsTextAndPNG(t *testing.T) {
 		PNG: png, X: 120, Y: 80, Width: 900, Height: 600, PixelWidth: 1800, PixelHeight: 1200,
 	})
 
-	mgr := computer.NewManager(computer.Config{Enabled: true, Backend: "fake"}, home)
+	mgr := computer.NewManager(computer.Config{Enabled: true}, home)
 	mgr.SetFakeBackend(fake)
 	env := NewEnv(t.TempDir(), "darwin")
 	env.Computer = mgr
@@ -105,7 +105,8 @@ func TestComputerScreenshotToolReturnsTextAndPNG(t *testing.T) {
 
 func TestComputerPlanScreenshotIsEnhanced(t *testing.T) {
 	env := NewEnv(t.TempDir(), "darwin")
-	env.Computer = computer.NewManager(computer.Config{Enabled: true, Backend: "fake"}, t.TempDir())
+	env.Computer = computer.NewManager(computer.Config{Enabled: true}, t.TempDir())
+	env.Computer.SetFakeBackend(computer.NewFake())
 	for _, candidate := range env.NewComputerPlanTools() {
 		info, err := candidate.Info(context.Background())
 		if err != nil {
