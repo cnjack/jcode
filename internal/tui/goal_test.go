@@ -14,7 +14,7 @@ import (
 func TestHandleGoalInput(t *testing.T) {
 	// Set with a plain objective.
 	m := Model{goalStore: tools.NewGoalStore()}
-	m.handleGoalInput("/goal Build the feature", nil)
+	m.handleGoalInput("/goal Build the feature")
 	if !m.goalStore.IsActive() {
 		t.Fatal("/goal <obj> should create an active goal")
 	}
@@ -26,21 +26,21 @@ func TestHandleGoalInput(t *testing.T) {
 	}
 
 	m2 := Model{goalStore: tools.NewGoalStore()}
-	m2.handleGoalInput("/goal Migrate DB", nil)
+	m2.handleGoalInput("/goal Migrate DB")
 	g := m2.goalStore.Get()
 	if g == nil || g.Objective != "Migrate DB" {
 		t.Fatalf("goal = %+v", g)
 	}
 
 	// Clear.
-	m2.handleGoalInput("/goal clear", nil)
+	m2.handleGoalInput("/goal clear")
 	if m2.goalStore.Has() {
 		t.Fatal("/goal clear should remove the goal")
 	}
 
 	// Status on an empty store must not panic and must not set a goal.
 	m3 := Model{goalStore: tools.NewGoalStore()}
-	m3.handleGoalInput("/goal", nil)
+	m3.handleGoalInput("/goal")
 	if m3.goalStore.Has() {
 		t.Fatal("/goal status should not create a goal")
 	}
@@ -49,7 +49,7 @@ func TestHandleGoalInput(t *testing.T) {
 	// kickoff prompt (the in-flight run's continuation guard picks it up);
 	// a blocking channel send here would freeze the UI.
 	m4 := Model{goalStore: tools.NewGoalStore(), thinking: true, agentDone: false}
-	_, cmd := m4.handleGoalInput("/goal Fix the tests", nil)
+	_, cmd := m4.handleGoalInput("/goal Fix the tests")
 	if !m4.goalStore.IsActive() {
 		t.Fatal("/goal while running should still set the goal")
 	}

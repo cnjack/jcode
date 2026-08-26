@@ -212,6 +212,11 @@ export default {
     thinking: '考え中…',
     loadingConversation: '会話を読み込み中…',
     attachFiles: 'ファイルを添付',
+    fileUpload: {
+      failed: 'ファイルのアップロードに失敗しました',
+      unavailable: 'このタスクではファイルをアップロードできません',
+      tooLarge: 'ファイルが 100MB のアップロード上限を超えています',
+    },
     goal: '目標',
     add: '追加',
     copilotHint: 'Enter で送信 · Shift+Enter で改行 · Esc でキャンセル',

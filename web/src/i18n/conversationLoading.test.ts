@@ -26,4 +26,11 @@ describe('conversation-loading translations', () => {
       expect(leafKeys(locale.remoteConnection)).toEqual(expected)
     }
   })
+
+  it('keeps browser file-upload errors complete in all five locales', () => {
+    const expected = leafKeys(en.chat.fileUpload)
+    for (const locale of [zhHans, zhHant, ja, ko]) {
+      expect(leafKeys(locale.chat.fileUpload)).toEqual(expected)
+    }
+  })
 })

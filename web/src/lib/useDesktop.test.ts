@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { isAbsoluteLocalWorkspacePath } from './useDesktop'
+import { isAbsoluteLocalWorkspacePath, normalizeFileDropPosition } from './useDesktop'
 
 const mocks = vi.hoisted(() => ({
   openUrl: vi.fn<() => Promise<void>>(),
@@ -25,6 +25,20 @@ describe('isAbsoluteLocalWorkspacePath', () => {
     expect(isAbsoluteLocalWorkspacePath('\\\\server\\share\\jcode')).toBe(false)
     expect(isAbsoluteLocalWorkspacePath('ssh://host/work/jcode')).toBe(false)
     expect(isAbsoluteLocalWorkspacePath('docker://container/work/jcode')).toBe(false)
+  })
+})
+
+describe('normalizeFileDropPosition', () => {
+  it('keeps macOS Cocoa points unchanged on Retina displays', () => {
+    expect(normalizeFileDropPosition({ x: 960, y: 430 }, 2, 'MacIntel')).toEqual({ x: 960, y: 430 })
+  })
+
+  it('converts Windows physical pixels into CSS pixels', () => {
+    expect(normalizeFileDropPosition({ x: 960, y: 430 }, 2, 'Win32')).toEqual({ x: 480, y: 215 })
+  })
+
+  it('keeps Linux GTK coordinates unchanged', () => {
+    expect(normalizeFileDropPosition({ x: 960, y: 430 }, 1.5, 'Linux x86_64')).toEqual({ x: 960, y: 430 })
   })
 })
 

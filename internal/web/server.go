@@ -467,6 +467,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/content", s.handleReadFile)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts", s.handleListArtifacts)
+	mux.HandleFunc("POST /api/tasks/{id}/uploads", s.handleTaskUpload)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/content", s.handleArtifactContent)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/download", s.handleArtifactDownload)
 	mux.HandleFunc("PATCH /api/tasks/{id}/artifacts/viewed", s.handleArtifactsViewed)

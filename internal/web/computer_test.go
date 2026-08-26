@@ -21,7 +21,7 @@ import (
 func TestComputerStatusReturnsCanonicalGrantConfig(t *testing.T) {
 	cfg := &config.Config{Computer: &config.ComputerConfig{
 		Enabled:         false,
-		Backend:         "fake", // migration-only field must never reach REST
+		Backend:         "fake", //nolint:staticcheck // migration-only field must never reach REST
 		ClipboardRead:   true,
 		ClipboardWrite:  true,
 		SystemKeyCombos: true,

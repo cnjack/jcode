@@ -34,6 +34,23 @@ import type {
 } from './types.js'
 import type { ProductComposerStrings } from './strings.js'
 
+export type FileDropEvent =
+  | { type: 'enter' | 'over'; x: number; y: number }
+  | { type: 'drop'; paths: string[]; x: number; y: number }
+  | { type: 'leave' }
+
+export interface DroppedImage {
+  data: string
+  media_type: string
+  name: string
+}
+
+export interface UploadedFile {
+  path: string
+  name: string
+  size: number
+}
+
 export interface ProductComposerHost {
   // ── Model catalog state ───────────────────────────────────────────────────
   providerName: string
@@ -121,6 +138,23 @@ export interface ProductComposerHost {
   pickFolder?: (defaultPath?: string) => Promise<string | null>
   /** Open the host's remote-connect wizard (ssh:// and docker:// workspaces). */
   openRemoteConnect?: (prefill?: RemotePrefill | null) => void
+
+  // ── Native file drops ─────────────────────────────────────────────────────
+  /**
+   * Subscribe to native file drag/drop events. Desktop hosts use this to keep
+   * the absolute paths that browser `File` objects intentionally hide.
+   */
+  listenForFileDrops?: (listener: (event: FileDropEvent) => void) => Promise<() => void>
+  /**
+   * Load a supported, size-bounded local image selected by a native file drop.
+   * Returning null leaves the file on the path-prompt fallback.
+   */
+  readDroppedImage?: (path: string) => Promise<DroppedImage | null>
+  /**
+   * Copy a browser-sandboxed File into the task's execution environment and
+   * return the absolute path the agent can read.
+   */
+  uploadDroppedFile?: (taskID: string, file: File) => Promise<UploadedFile>
 
   // ── Branch actions ────────────────────────────────────────────────────────
   fetchBranches: () => Promise<GitBranchesResult>

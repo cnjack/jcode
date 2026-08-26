@@ -25,7 +25,7 @@ export { BranchPicker } from './BranchPicker.js'
 export { GoalBanner } from './GoalBanner.js'
 export { ProviderIcon } from './ProviderIcon.js'
 
-export type { ProductComposerHost } from './host.js'
+export type { DroppedImage, FileDropEvent, ProductComposerHost, UploadedFile } from './host.js'
 export type { ProductComposerStrings } from './strings.js'
 export { defaultProductComposerStrings, resolveProductComposerStrings } from './strings.js'
 export { readDraft, writeDraft } from './drafts.js'

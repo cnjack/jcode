@@ -245,6 +245,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
 		return
 	}
+	uploadLocked := eng != nil
+	if uploadLocked {
+		eng.uploadMu.Lock()
+		eng.uploadGeneration++
+	}
 	var teardown *Engine
 	if eng != nil && !eng.retired.Load() {
 		if s.Engine == eng {
@@ -271,6 +276,12 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	s.taskCreateMu.Unlock()
 	if teardown != nil {
 		teardown.teardown()
+	}
+	if deleteErr == nil {
+		removeLocalTaskUploads(id)
+	}
+	if uploadLocked {
+		eng.uploadMu.Unlock()
 	}
 	if deleteErr != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": deleteErr.Error()})

@@ -16,6 +16,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -32,18 +33,15 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-base64 = "0.22"
 icns = { version = "0.4", default-features = false, features = ["pngio"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
 plist = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-base64 = "0.22"
 shlex = "1.3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-base64 = "0.22"
 png = "0.18"
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",

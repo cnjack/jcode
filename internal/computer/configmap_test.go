@@ -9,7 +9,7 @@ import (
 func TestFromConfigIgnoresSafeLegacyBackend(t *testing.T) {
 	for _, backend := range []string{"", "auto", " helper "} {
 		c := &config.ComputerConfig{
-			Enabled: true, Backend: backend,
+			Enabled: true, Backend: backend, //nolint:staticcheck // compatibility migration input
 			Approval:        map[string]string{"launch": "always_allow"},
 			AppPermissions:  []config.ComputerAppPermission{{BundleID: notesID, Tier: "read"}},
 			ClipboardRead:   true,
@@ -27,7 +27,7 @@ func TestFromConfigIgnoresSafeLegacyBackend(t *testing.T) {
 func TestFromConfigFailsClosedForUnsafeLegacyBackend(t *testing.T) {
 	for _, backend := range []string{"fake", "osa", "unknown"} {
 		c := &config.ComputerConfig{
-			Enabled: true, Backend: backend,
+			Enabled: true, Backend: backend, //nolint:staticcheck // compatibility migration input
 			Approval:        map[string]string{"launch": "always_allow"},
 			AppPermissions:  []config.ComputerAppPermission{{BundleID: notesID, Tier: "read", Launch: "allow"}},
 			ClipboardRead:   true,

@@ -52,6 +52,17 @@ export interface WorkspaceApplication {
   iconDataUrl?: string
 }
 
+export type DesktopFileDropEvent =
+  | { type: 'enter' | 'over'; x: number; y: number }
+  | { type: 'drop'; paths: string[]; x: number; y: number }
+  | { type: 'leave' }
+
+export interface DroppedImage {
+  data: string
+  media_type: string
+  name: string
+}
+
 let workspaceApplicationsPromise: Promise<WorkspaceApplication[]> | null = null
 
 /**
@@ -161,4 +172,46 @@ export async function pickFolder(defaultPath?: string): Promise<string | null> {
   const { open } = await import('@tauri-apps/plugin-dialog')
   const res = await open({ directory: true, multiple: false, defaultPath })
   return typeof res === 'string' ? res : null
+}
+
+/**
+ * Normalize Tauri drag coordinates to the CSS-pixel coordinate space used by
+ * getBoundingClientRect(). Wry reports Cocoa/GTK points on macOS/Linux even
+ * though Tauri types them as PhysicalPosition; Windows WebView2 reports real
+ * physical pixels and needs the scale-factor conversion.
+ */
+export function normalizeFileDropPosition(
+  position: { x: number; y: number },
+  scaleFactor: number,
+  platform = typeof navigator === 'undefined' ? '' : navigator.platform,
+): { x: number; y: number } {
+  const divisor = /Win/i.test(platform) && scaleFactor > 0 ? scaleFactor : 1
+  return { x: position.x / divisor, y: position.y / divisor }
+}
+
+/** Listen for Tauri's native drag/drop stream in CSS-pixel coordinates. */
+export async function listenForFileDrops(
+  listener: (event: DesktopFileDropEvent) => void,
+): Promise<() => void> {
+  if (!isTauri) throw new Error('native file drop unavailable')
+  const { getCurrentWebview } = await import('@tauri-apps/api/webview')
+  const webview = getCurrentWebview()
+  const scaleFactor = await webview.window.scaleFactor()
+  return webview.onDragDropEvent(({ payload }) => {
+    if (payload.type === 'leave') {
+      listener({ type: 'leave' })
+      return
+    }
+    const position = normalizeFileDropPosition(payload.position, scaleFactor)
+    if (payload.type === 'drop') {
+      listener({ type: 'drop', paths: payload.paths, ...position })
+      return
+    }
+    listener({ type: payload.type, ...position })
+  })
+}
+
+/** Read a supported image after the native drop supplied its absolute path. */
+export function readDroppedImage(path: string): Promise<DroppedImage | null> {
+  return invoke<DroppedImage | null>('read_dropped_image', { path })
 }

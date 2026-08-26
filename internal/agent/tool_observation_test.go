@@ -101,7 +101,7 @@ func TestToolObservationTracksVisibilitySearchAndBypassWithoutPayloads(t *testin
 	directInfo, _ := direct.Info(ctx)
 	searchInfo := &schema.ToolInfo{Name: ToolSearchReservedName, Desc: "search"}
 	if _, err := middleware.WrapModel(ctx, nil, &adk.ModelContext{
-		Tools: []*schema.ToolInfo{directInfo, searchInfo},
+		Tools: []*schema.ToolInfo{directInfo, searchInfo}, //nolint:staticcheck // exercise the intentional final-attempt compatibility hook
 	}); err != nil {
 		t.Fatalf("WrapModel() error = %v", err)
 	}
@@ -137,7 +137,7 @@ func TestToolObservationTracksVisibilitySearchAndBypassWithoutPayloads(t *testin
 
 	deferredInfo, _ := deferred.Info(ctx)
 	if _, err := middleware.WrapModel(ctx, nil, &adk.ModelContext{
-		Tools: []*schema.ToolInfo{directInfo, searchInfo, deferredInfo},
+		Tools: []*schema.ToolInfo{directInfo, searchInfo, deferredInfo}, //nolint:staticcheck // exercise the intentional final-attempt compatibility hook
 	}); err != nil {
 		t.Fatalf("second WrapModel() error = %v", err)
 	}

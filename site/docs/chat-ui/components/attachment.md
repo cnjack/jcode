@@ -19,7 +19,12 @@ Image attachment tiles for the composer and user messages — thumbnails, remove
 | `ChatInput` + `allowImages` | Paste + paperclip picker + strip above the input |
 | `Message` | Renders `message.images` with the same tiles |
 
-**Not included (by design):** PDF / arbitrary file adapters, upload progress, cloud storage. Those stay host concerns — attach your own chips next to the composer if needed. Most agent models only accept images today.
+The generic `Attachment` / `AttachmentList` API remains image-oriented. The
+generic `ChatInput` can accept arbitrary files only when an integrator supplies
+an `AttachmentAdapter`; storage and Agent context remain that host's concern.
+JCode's built-in product composer is a separate host integration: it ships the
+managed arbitrary-file drag/drop and browser-upload path described below for
+`jcode web` and Desktop.
 
 ## Usage
 
@@ -85,6 +90,13 @@ This keeps **library demos**, **docs**, and the **jcode product** (`web/src/comp
 ## Product (jcode web / desktop)
 
 - Attach entry: **+ menu → Image** (and paste into the textarea).
+- Drag/drop accepts any file. Supported images keep the base64 `ChatImage`
+  path; every other file is inserted into the draft as explicit agent context
+  saying that it was dropped and naming its path. Desktop preserves the Tauri
+  absolute path. Browser Web uploads a managed copy into the current task's
+  local, SSH, or Docker execution environment, then injects that returned
+  Agent-readable path. The model-facing block is fixed English, matching JCode
+  system reminders; visible composer chrome and errors follow the UI locale.
 - Capability gate: model `image_support` / settings “Allow image attachments”.
 - Thumbnails: shared `AttachmentList` (preview + remove).
 - Backend contract remains base64 `ChatImage[]` on the user message.

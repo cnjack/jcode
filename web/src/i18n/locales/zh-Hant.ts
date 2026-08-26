@@ -213,6 +213,11 @@ export default {
     thinking: '思考中…',
     loadingConversation: '載入對話中…',
     attachFiles: '附加檔案',
+    fileUpload: {
+      failed: '檔案上傳失敗',
+      unavailable: '目前任務無法上傳檔案',
+      tooLarge: '檔案超過 100MB 上傳限制',
+    },
     goal: '目標',
     add: '新增',
     copilotHint: 'Enter 傳送 · Shift+Enter 換行 · Esc 取消',

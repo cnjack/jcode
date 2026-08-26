@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Any-file composer drops.** The product composer now accepts file drops
+  across Browser Web and Tauri Desktop. Supported images keep the existing
+  visual attachment path; other files become explicit agent prompt context.
+  Desktop hosts preserve the absolute path supplied by Tauri. Browser hosts
+  can upload sandboxed `File` objects into the task execution environment and
+  inject the returned Agent-readable absolute path. This model-facing context
+  stays fixed English like JCode's system reminders; visible drag/drop chrome
+  and upload errors remain localized.
 - **Generated-image surface.** New public `GeneratedImageCard` component and
   `GeneratedImageState` / `GeneratedImageCardProps` /
   `GeneratedImageCardStrings` types render the complete generated-media
@@ -44,6 +52,10 @@
 
 ### Fixed
 
+- Tauri Desktop file drops now use the platform's real coordinate space:
+  macOS Cocoa and Linux GTK points remain logical pixels, while Windows
+  WebView2 physical pixels are scaled before composer hit-testing. This fixes
+  welcome-screen drops being rejected on Retina displays.
 - Ask User submission now disables duplicate actions while pending, surfaces a
   localized inline error when the host rejects the request, and lets the user
   retry without losing answers. Option and custom-text answers are mutually

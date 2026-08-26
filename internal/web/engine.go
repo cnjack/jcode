@@ -51,6 +51,11 @@ type Engine struct {
 	// client never observes the durable revision between fsync and the prepared
 	// agent/catalog publication.
 	toolOverrideMu sync.Mutex
+	// uploadMu serializes task-scoped file persistence with session deletion.
+	// uploadGeneration invalidates a request that finished reading its multipart
+	// body after the owning session was deleted or reset.
+	uploadMu         sync.Mutex
+	uploadGeneration uint64
 	// retired permanently closes this engine to new run/focus claims. Lifecycle
 	// transitions set it while holding Server.tasksMu -> Server.mu; readers use
 	// the atomic fast-path after resolving an engine pointer.

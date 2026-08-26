@@ -219,6 +219,11 @@ export default {
     thinking: 'Thinking…',
     loadingConversation: 'Loading conversation…',
     attachFiles: 'Attach files',
+    fileUpload: {
+      failed: 'File upload failed',
+      unavailable: 'File upload is unavailable for this task',
+      tooLarge: 'File exceeds the 100MB upload limit',
+    },
     goal: 'Goal',
     add: 'Add',
     generatedImage: {

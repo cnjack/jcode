@@ -84,4 +84,29 @@ describe('task-scoped API contracts', () => {
       require_idle: true,
     })
   })
+
+  it('uploads browser files as multipart data to the encoded task route', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      path: '/tmp/.jcode-uploads-task/notes-a1b2c3.pdf',
+      name: 'notes-a1b2c3.pdf',
+      size: 3,
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const file = new File(['pdf'], 'notes.pdf', { type: 'application/pdf' })
+
+    const result = await api.uploadTaskFile('task/one', file)
+
+    expect(result.path).toContain('notes-a1b2c3.pdf')
+    const [input, init] = fetchMock.mock.calls[0] ?? []
+    expect(String(input)).toContain('/api/tasks/task%2Fone/uploads')
+    expect(init?.method).toBe('POST')
+    expect(init?.body).toBeInstanceOf(FormData)
+    const uploaded = (init?.body as FormData).get('file') as File
+    expect(uploaded.name).toBe('notes.pdf')
+    expect(uploaded.size).toBe(file.size)
+    expect(new Headers(init?.headers).has('Content-Type')).toBe(false)
+  })
 })

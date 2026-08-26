@@ -24,7 +24,7 @@ import {
 import { api } from '../lib/api'
 import { iconForProvider } from '../lib/providerIcons'
 import { openRemoteConnect } from '../lib/remote'
-import { isTauri, pickFolder } from '../lib/useDesktop'
+import { isTauri, listenForFileDrops, pickFolder, readDroppedImage } from '../lib/useDesktop'
 import type { AgentMode } from '../lib/types'
 
 function buildStrings(t: (key: string, opts?: Record<string, unknown>) => string): ProductComposerStrings {
@@ -50,6 +50,9 @@ function buildStrings(t: (key: string, opts?: Record<string, unknown>) => string
     goalHintRemove: t('chat.goalHint.remove'),
     goalHintReplace: t('chat.goalHint.replace'),
     modelNoImages: t('chat.model.noImages'),
+    fileUploadFailed: t('chat.fileUpload.failed'),
+    fileUploadUnavailable: t('chat.fileUpload.unavailable'),
+    fileTooLarge: t('chat.fileUpload.tooLarge'),
 
     modeApproval: t('chat.modes.approval'),
     modeApprovalSub: t('chat.modes.approvalSub'),
@@ -254,6 +257,10 @@ export const productComposerActions = {
     }
   },
 
+  uploadDroppedFile(taskID: string, file: File) {
+    return api.uploadTaskFile(taskID, file)
+  },
+
   async validateWorkspacePaths(paths: string[]) {
     const res = await api.validatePaths(paths)
     return res.missing || []
@@ -372,6 +379,8 @@ export function useProductComposerHost(): ProductComposerHost {
       strings,
       resolveProviderIcon: iconForProvider,
       pickFolder: isTauri ? pickFolder : undefined,
+      listenForFileDrops: isTauri ? listenForFileDrops : undefined,
+      readDroppedImage: isTauri ? readDroppedImage : undefined,
       ...productComposerActions,
     }),
     [
