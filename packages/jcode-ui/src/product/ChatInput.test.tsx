@@ -8,12 +8,13 @@
  *   - image attachment limits (10MB cap, image/* only)
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RuntimeProvider, createMockRuntime } from 'jcode-ui-core/runtime'
 import type { ChatRuntime } from 'jcode-ui-core/runtime'
 import { ChatInput } from './ChatInput.js'
 import type { ProductComposerHost } from './host.js'
+import type { FileDropEvent } from './host.js'
 import type { ProviderInfo } from './types.js'
 
 const PROVIDERS: ProviderInfo[] = [
@@ -480,14 +481,14 @@ describe('compact picker anchors', () => {
   })
 })
 
-describe('image attachments', () => {
+describe('file attachments', () => {
   function fileInput(container: HTMLElement): HTMLInputElement {
     const el = container.querySelector('input[type="file"]')
     if (!el) throw new Error('file input not found')
     return el as HTMLInputElement
   }
 
-  it('accepts images under 10MB and skips larger/non-image files', async () => {
+  it('keeps small images inline and stages other selected files for upload', async () => {
     const host = makeHost()
     const { container } = renderComposer(host)
     const input = fileInput(container)
@@ -497,10 +498,9 @@ describe('image attachments', () => {
     const doc = new File([new Uint8Array(128)], 'notes.txt', { type: 'text/plain' })
     fireEvent.change(input, { target: { files: [small, big, doc] } })
 
-    // Only the small image makes it into the pending list.
     await waitFor(() => {
-      const list = container.querySelector('.jcode-attachment-list')
-      expect(list?.getAttribute('data-count')).toBe('1')
+      expect(container.querySelector('.jcode-attachment-list')?.getAttribute('data-count')).toBe('1')
+      expect(container.querySelector('.jcode-pending-attachments')?.getAttribute('data-count')).toBe('2')
     })
   })
 
@@ -528,5 +528,113 @@ describe('image attachments', () => {
       expect(images[0].media_type).toBe('image/png')
       expect(images[0].name).toBe('a.png')
     })
+  })
+
+  it('accepts browser file drops and turns unsupported files into prompt context', async () => {
+    const runtime = createMockRuntime()
+    const uploadDroppedFile = vi.fn(async () => ({
+      path: '/Users/jack/.jcode/uploads/s1/notes-a1b2c3.pdf',
+      name: 'notes-a1b2c3.pdf',
+      size: 128,
+    }))
+    const { container } = renderComposer(makeHost({
+      strings: { attachFiles: '添加附件' },
+      uploadDroppedFile,
+    }), runtime)
+    const composer = container.querySelector('.jcode-product-composer') as HTMLDivElement
+    const doc = new File([new Uint8Array(128)], 'notes.pdf', { type: 'application/pdf' })
+    const dataTransfer = { types: ['Files'], files: [doc], dropEffect: 'none' }
+
+    fireEvent.dragEnter(composer, { dataTransfer })
+    expect(composer.textContent).toContain('添加附件')
+    fireEvent.drop(composer, { dataTransfer })
+
+    const ta = textarea(container)
+    expect(ta.value).toBe('')
+    expect(container.querySelector('.jcode-pending-attachments')?.getAttribute('data-count')).toBe('1')
+    fireEvent.click(screen.getByLabelText('Send'))
+    await waitFor(() => {
+      const send = (runtime as ReturnType<typeof createMockRuntime>).calls.find((call) => call.action === 'sendMessage')
+      expect(send?.args[0]).toContain('[File Drop]')
+      expect(send?.args[0]).toContain('/Users/jack/.jcode/uploads/s1/notes-a1b2c3.pdf')
+    })
+    expect(uploadDroppedFile).toHaveBeenCalledWith('s1', doc)
+  })
+
+  it('keeps a browser file pending when upload fails', async () => {
+    const runtime = createMockRuntime()
+    const uploadDroppedFile = vi.fn(async () => { throw new Error('offline') })
+    const { container } = renderComposer(makeHost({ uploadDroppedFile }), runtime)
+    const composer = container.querySelector('.jcode-product-composer') as HTMLDivElement
+    fireEvent.drop(composer, {
+      dataTransfer: {
+        types: ['Files'],
+        files: [new File([new Uint8Array(8)], 'notes.pdf', { type: 'application/pdf' })],
+        dropEffect: 'none',
+      },
+    })
+
+    fireEvent.click(screen.getByLabelText('Send'))
+    await waitFor(() => expect(container.textContent).toContain('File upload failed'))
+    expect((runtime as ReturnType<typeof createMockRuntime>).calls.some((call) => call.action === 'sendMessage')).toBe(false)
+    expect(container.querySelector('.jcode-pending-attachments')?.getAttribute('data-count')).toBe('1')
+  })
+
+  it('keeps supported browser-dropped images on the image attachment path', async () => {
+    const { container } = renderComposer(makeHost())
+    const composer = container.querySelector('.jcode-product-composer') as HTMLDivElement
+    const image = new File([new Uint8Array(16)], 'drop.png', { type: 'image/png' })
+
+    fireEvent.drop(composer, {
+      dataTransfer: { types: ['Files'], files: [image], dropEffect: 'none' },
+    })
+
+    await waitFor(() => {
+      expect(container.querySelector('.jcode-attachment-list')?.getAttribute('data-count')).toBe('1')
+    })
+    expect(textarea(container).value).toBe('')
+  })
+
+  it('uses native absolute paths and only loads supported dropped images', async () => {
+    let onFileDrop: ((event: FileDropEvent) => void) | undefined
+    const unlisten = vi.fn()
+    const readDroppedImage = vi.fn(async (path: string) => path.endsWith('.png') ? {
+      data: 'cG5n',
+      media_type: 'image/png',
+      name: 'screen.png',
+    } : null)
+    const host = makeHost({
+      listenForFileDrops: vi.fn(async (listener) => {
+        onFileDrop = listener
+        return unlisten
+      }),
+      readDroppedImage,
+    })
+    const { container } = renderComposer(host)
+    const composer = container.querySelector('.jcode-product-composer') as HTMLDivElement
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({
+      left: 10,
+      top: 20,
+      right: 510,
+      bottom: 220,
+      width: 500,
+      height: 200,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    })
+    await waitFor(() => expect(onFileDrop).toBeTypeOf('function'))
+
+    act(() => onFileDrop?.({ type: 'drop', paths: [
+      '/Users/jack/Documents/report.pdf',
+      '/Users/jack/Documents/screen.png',
+    ], x: 100, y: 100 }))
+
+    await waitFor(() => {
+      expect(textarea(container).value).toContain('/Users/jack/Documents/report.pdf')
+      expect(container.querySelector('.jcode-attachment-list')?.getAttribute('data-count')).toBe('1')
+    })
+    expect(readDroppedImage).toHaveBeenCalledTimes(2)
+    expect(textarea(container).value).toContain('dragged a file into the input')
   })
 })

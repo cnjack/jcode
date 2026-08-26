@@ -9,7 +9,8 @@
  *     context-limit subline, and a Manage Models dialog)
  *   - EFFORT picker (per-model reasoning effort)
  *   - "+" menu (attach images, slash insert, Goal arming)
- *   - image attachments (paste + file picker + thumbnails)
+ *   - image attachments (paste + picker + drag/drop thumbnails)
+ *   - generic file drops as explicit path context for the agent
  *   - type-ahead queue chips
  *   - keyboard shortcuts (⌘L focus, Esc to close dialogs)
  *   - click-outside handling
@@ -49,11 +50,13 @@ import {
   StarIcon,
   SparklesIcon,
   CpuChipIcon,
+  ArrowUpTrayIcon,
 } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid, CheckCircleIcon } from '@heroicons/react/24/solid'
 import { useRuntimeActions, useRuntimeState } from 'jcode-ui-core/runtime'
 import type { ChatImage as RuntimeChatImage } from 'jcode-ui-core'
-import { AttachmentList } from '../components/Attachment.js'
+import type { PendingAttachmentItem } from 'jcode-ui-core/primitives'
+import { AttachmentList, PendingAttachmentList } from '../components/Attachment.js'
 import type { ProductComposerHost } from './host.js'
 import type { ProductComposerStrings } from './strings.js'
 import { useComposerStrings } from './useComposerStrings.js'
@@ -180,6 +183,31 @@ const MODE_DEFS: ModeDef[] = [
 ]
 
 const STANDARD_EFFORT_OPTIONS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
+interface PendingBrowserFile {
+  id: string
+  file: File
+  uploadedPath?: string
+  uploading?: boolean
+  error?: string
+}
+
+let browserFileID = 0
+
+function nextBrowserFileID(): string {
+  browserFileID += 1
+  return `browser_file_${Date.now().toString(36)}_${browserFileID.toString(36)}`
+}
+
+/**
+ * Model-facing metadata stays fixed English, matching JCode's system/reminder
+ * prompts. Only visible composer chrome follows the selected UI locale.
+ */
+function droppedFilePrompt(path: string): string {
+  return `[File Drop]\nThe user dragged a file into the input.\nPath: ${JSON.stringify(path)}`
+}
 
 function modeLabel(strings: ProductComposerStrings, m: string): string {
   const def = MODE_DEFS.find((d) => d.value === m)
@@ -278,6 +306,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const [input, setInput] = useState(() => readDraft(currentSessionId))
   /** Pending vision images — same shape as the ChatRuntime `ChatImage` / AttachmentList. */
   const [pendingImages, setPendingImages] = useState<RuntimeChatImage[]>([])
+  const [pendingBrowserFiles, setPendingBrowserFiles] = useState<PendingBrowserFile[]>([])
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false)
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
   const [selectedSlashIdx, setSelectedSlashIdx] = useState(0)
@@ -291,10 +321,14 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const [taskStats, setTaskStats] = useState<TaskStats | null>(null)
   const [taskStatsLoading, setTaskStatsLoading] = useState(false)
   const [modelFilter, setModelFilter] = useState('')
+  const [isDroppingFiles, setIsDroppingFiles] = useState(false)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const dragDepthRef = useRef(0)
+  const currentSessionRef = useRef(currentSessionId)
+  currentSessionRef.current = currentSessionId
   const addPopup = useViewportPopup(showAddMenu)
   const modePopup = useViewportPopup(showModePicker)
   const modelPopup = useViewportPopup(showModelPicker)
@@ -467,6 +501,9 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     writeDraft(prevId, draftLiveRef.current.text)
     draftSessionRef.current = currentSessionId
     setInput(readDraft(currentSessionId))
+    setPendingImages([])
+    setPendingBrowserFiles([])
+    setIsUploadingFiles(false)
   }, [currentSessionId])
 
   // Flush on unmount (app close / panel teardown).
@@ -478,14 +515,63 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
 
   // ─── Send / queue ─────────────────────────────────────────────────────────
 
-  const send = useCallback(() => {
+  const send = useCallback(async () => {
     const text = input.trim()
-    if (!text && pendingImages.length === 0) return
+    if (!text && pendingImages.length === 0 && pendingBrowserFiles.length === 0) return
+    if (isUploadingFiles || (isRunning && pendingBrowserFiles.length > 0)) return
+
+    let uploadedFiles = pendingBrowserFiles
+    if (uploadedFiles.length > 0) {
+      if (!currentSessionId || !host.uploadDroppedFile) {
+        setPendingBrowserFiles((current) => current.map((item) => ({
+          ...item,
+          uploading: false,
+          error: strings.fileUploadUnavailable,
+        })))
+        return
+      }
+      const targetSessionID = currentSessionId
+      setIsUploadingFiles(true)
+      uploadedFiles = uploadedFiles.map((item) => ({
+        ...item,
+        uploading: !item.uploadedPath,
+        error: undefined,
+      }))
+      setPendingBrowserFiles(uploadedFiles)
+      let failed = false
+      for (const pending of uploadedFiles) {
+        if (pending.uploadedPath) continue
+        let next = pending
+        if (pending.file.size > MAX_UPLOAD_BYTES) {
+          next = { ...pending, uploading: false, error: strings.fileTooLarge }
+          failed = true
+        } else {
+          try {
+            const uploaded = await host.uploadDroppedFile(targetSessionID, pending.file)
+            if (currentSessionRef.current !== targetSessionID) return
+            next = { ...pending, uploadedPath: uploaded.path, uploading: false, error: undefined }
+          } catch {
+            if (currentSessionRef.current !== targetSessionID) return
+            next = { ...pending, uploading: false, error: strings.fileUploadFailed }
+            failed = true
+          }
+        }
+        uploadedFiles = uploadedFiles.map((item) => item.id === pending.id ? next : item)
+        setPendingBrowserFiles(uploadedFiles)
+      }
+      setIsUploadingFiles(false)
+      if (failed || currentSessionRef.current !== targetSessionID) return
+    }
+
     const images: RuntimeChatImage[] | undefined =
       pendingImages.length > 0
         ? pendingImages.map((i) => ({ data: i.data, media_type: i.media_type, name: i.name }))
         : undefined
-    const body = text || strings.attachedImages
+    const fileContext = uploadedFiles
+      .map((item) => item.uploadedPath ? droppedFilePrompt(item.uploadedPath) : '')
+      .filter(Boolean)
+      .join('\n\n')
+    const body = [text, fileContext].filter(Boolean).join('\n\n') || strings.attachedImages
     if (isRunning) {
       actions.enqueueMessage(body, images)
     } else {
@@ -494,9 +580,10 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     setInput('')
     writeDraft(currentSessionId, '')
     setPendingImages([])
+    setPendingBrowserFiles([])
     setShowSlashMenu(false)
     onSent?.()
-  }, [actions, input, isRunning, onSent, pendingImages, currentSessionId, strings])
+  }, [actions, currentSessionId, host.uploadDroppedFile, input, isRunning, isUploadingFiles, onSent, pendingBrowserFiles, pendingImages, strings])
 
   // ─── Model / mode selection ───────────────────────────────────────────────
 
@@ -580,7 +667,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
 
   // ─── Image attachments ────────────────────────────────────────────────────
 
-  function addImageFile(file: File) {
+  const addImageFile = useCallback((file: File) => {
     const reader = new FileReader()
     reader.onload = () => {
       const result = reader.result as string
@@ -593,6 +680,118 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
       ])
     }
     reader.readAsDataURL(file)
+  }, [])
+
+  const appendDroppedFilePrompts = useCallback((prompts: string[]) => {
+    if (prompts.length === 0) return
+    setInput((current) => {
+      const separator = current.length === 0 || current.endsWith('\n') ? '' : '\n'
+      return `${current}${separator}${prompts.join('\n')}`
+    })
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [])
+
+  const ingestBrowserFiles = useCallback((files: Iterable<File>) => {
+    if (isUploadingFiles) return
+    const prompts: string[] = []
+    const uploads: PendingBrowserFile[] = []
+    for (const file of files) {
+      if (imageSupport && file.type.startsWith('image/') && file.size <= MAX_IMAGE_BYTES) {
+        addImageFile(file)
+        continue
+      }
+      const exposedPath = (file as File & { path?: string }).path
+      if (exposedPath) {
+        prompts.push(droppedFilePrompt(exposedPath))
+        continue
+      }
+      uploads.push({
+        id: nextBrowserFileID(),
+        file,
+        error: file.size > MAX_UPLOAD_BYTES ? strings.fileTooLarge : undefined,
+      })
+    }
+    appendDroppedFilePrompts(prompts)
+    if (uploads.length > 0) setPendingBrowserFiles((current) => [...current, ...uploads])
+  }, [addImageFile, appendDroppedFilePrompts, imageSupport, isUploadingFiles, strings.fileTooLarge])
+
+  const ingestNativePaths = useCallback(async (paths: string[]) => {
+    if (isUploadingFiles) return
+    const results = await Promise.all(paths.map(async (path) => {
+      if (!imageSupport || !host.readDroppedImage) return { path, image: null }
+      try {
+        return { path, image: await host.readDroppedImage(path) }
+      } catch {
+        return { path, image: null }
+      }
+    }))
+    const images = results.flatMap(({ image }) => image ? [{
+      data: image.data,
+      media_type: image.media_type,
+      name: image.name,
+    }] : [])
+    if (images.length > 0) setPendingImages((current) => [...current, ...images])
+    appendDroppedFilePrompts(
+      results.filter(({ image }) => !image).map(({ path }) => droppedFilePrompt(path)),
+    )
+  }, [appendDroppedFilePrompts, host.readDroppedImage, imageSupport, isUploadingFiles])
+
+  useEffect(() => {
+    if (!host.listenForFileDrops) return
+    let active = true
+    let unlisten: (() => void) | undefined
+    void host.listenForFileDrops((event) => {
+      if (!active) return
+      if (event.type === 'leave') {
+        setIsDroppingFiles(false)
+        return
+      }
+      const rect = containerRef.current?.getBoundingClientRect()
+      const inside = !!rect && event.x >= rect.left && event.x <= rect.right &&
+        event.y >= rect.top && event.y <= rect.bottom
+      if (event.type === 'drop') {
+        setIsDroppingFiles(false)
+        if (inside && event.paths.length > 0) void ingestNativePaths(event.paths)
+        return
+      }
+      setIsDroppingFiles(inside)
+    }).then((dispose) => {
+      if (active) unlisten = dispose
+      else dispose()
+    }).catch(() => {
+      if (active) setIsDroppingFiles(false)
+    })
+    return () => {
+      active = false
+      unlisten?.()
+    }
+  }, [host.listenForFileDrops, ingestNativePaths])
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+
+  function handleDragEnter(e: React.DragEvent<HTMLDivElement>) {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+    e.preventDefault()
+    dragDepthRef.current += 1
+    setIsDroppingFiles(true)
+  }
+
+  function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsDroppingFiles(false)
+  }
+
+  function handleFileDrop(e: React.DragEvent<HTMLDivElement>) {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+    e.preventDefault()
+    dragDepthRef.current = 0
+    setIsDroppingFiles(false)
+    if (e.dataTransfer.files.length > 0) ingestBrowserFiles(Array.from(e.dataTransfer.files))
   }
 
   function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
@@ -607,14 +806,10 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     }
   }
 
-  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (!files) return
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/')) continue
-      if (file.size > 10 * 1024 * 1024) continue // 10MB limit
-      addImageFile(file)
-    }
+    ingestBrowserFiles(Array.from(files))
     e.target.value = ''
   }
 
@@ -622,7 +817,21 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     setPendingImages((prev) => prev.filter((_, i) => i !== index))
   }
 
-  function triggerImageUpload() {
+  function removeBrowserFile(id: string) {
+    if (isUploadingFiles) return
+    setPendingBrowserFiles((current) => current.filter((item) => item.id !== id))
+  }
+
+  function retryBrowserFile(id: string) {
+    if (isUploadingFiles) return
+    setPendingBrowserFiles((current) => current.map((item) => item.id === id ? {
+      ...item,
+      uploadedPath: undefined,
+      error: undefined,
+    } : item))
+  }
+
+  function triggerFileUpload() {
     fileInputRef.current?.click()
   }
 
@@ -714,7 +923,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      send()
+      void send()
     }
   }
 
@@ -815,8 +1024,23 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     setShowEffortPicker(false)
   }
 
-  const canSend = input.trim().length > 0 || pendingImages.length > 0
-  const showSend = !isRunning || input.trim().length > 0 || pendingImages.length > 0
+  const pendingFileItems = useMemo<PendingAttachmentItem[]>(() => pendingBrowserFiles.map((item) => ({
+    attachment: {
+      id: item.id,
+      kind: 'file',
+      name: item.file.name || 'attachment',
+      size: item.file.size,
+      media_type: item.file.type || undefined,
+      progress: item.uploading ? 0.5 : item.uploadedPath ? 1 : 0,
+      error: item.error,
+    },
+    status: item.error ? 'error' : item.uploading ? 'uploading' : 'done',
+    remove: () => removeBrowserFile(item.id),
+    retry: () => retryBrowserFile(item.id),
+  })), [isUploadingFiles, pendingBrowserFiles])
+  const hasPayload = input.trim().length > 0 || pendingImages.length > 0 || pendingBrowserFiles.length > 0
+  const canSend = hasPayload && !isUploadingFiles && (!isRunning || pendingBrowserFiles.length === 0)
+  const showSend = !isRunning || ((input.trim().length > 0 || pendingImages.length > 0) && pendingBrowserFiles.length === 0)
   const currentModeDef = MODE_DEFS.find((m) => m.value === mode) ?? MODE_DEFS[0]
   // Host-restricted mode list (M20 cloud ceiling): absent ⇒ all four modes.
   const modeDefs = allowedModes ? MODE_DEFS.filter((d) => allowedModes.includes(d.value)) : MODE_DEFS
@@ -834,7 +1058,22 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
       ref={containerRef}
       className="jcode-product-composer relative w-full bg-transparent"
       style={{ padding: '8px 0 14px' }}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleFileDrop}
     >
+      {isDroppingFiles && (
+        <div
+          className="pointer-events-none absolute inset-0 z-[60] grid place-items-center rounded-[var(--radius-2xl)] border-2 border-dashed border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-surface)_88%,transparent)] text-[var(--color-primary)] shadow-[var(--shadow-lg)]"
+          aria-hidden="true"
+        >
+          <div className="flex items-center gap-2 rounded-[var(--radius-pill)] bg-[var(--color-surface)] px-4 py-2 text-sm font-medium shadow-[var(--shadow-md)]">
+            <ArrowUpTrayIcon className="h-5 w-5" />
+            <span>{strings.attachFiles}</span>
+          </div>
+        </div>
+      )}
       {/* Type-ahead queue */}
       {queued.length > 0 && (
         <div className="mx-auto mb-1.5 flex flex-col gap-1" style={{ padding: '0 8px 6px' }}>
@@ -930,6 +1169,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
               onKeyDown={handleKeyDown}
               onSelect={handleSelect}
               onPaste={handlePaste}
+              disabled={isUploadingFiles}
               placeholder={
                 isRunning
                   ? strings.queuePlaceholder
@@ -947,12 +1187,18 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
               </div>
             )}
 
+            {pendingFileItems.length > 0 && (
+              <div className="mt-2">
+                <PendingAttachmentList items={pendingFileItems} size={56} />
+              </div>
+            )}
+
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
               multiple
-              onChange={handleImageSelect}
+              onChange={handleFileSelect}
+              disabled={isUploadingFiles}
               className="hidden"
             />
           </div>
@@ -992,17 +1238,13 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                     <button
                       type="button"
                       role="menuitem"
-                      disabled={!imageSupport}
-                      title={!imageSupport ? strings.modelNoImages : ''}
-                      onClick={() => { triggerImageUpload(); setShowAddMenu(false) }}
-                      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
-                        !imageSupport ? 'cursor-default opacity-50' : ''
-                      }`}
+                      onClick={() => { triggerFileUpload(); setShowAddMenu(false) }}
+                      className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                     >
                       <PaperClipIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)]" />
                       <span>{strings.attachFiles}</span>
-                      {pendingImages.length > 0 && (
-                        <span className="ml-auto font-mono text-[10px] text-[var(--color-primary)]">{pendingImages.length}</span>
+                      {pendingImages.length + pendingBrowserFiles.length > 0 && (
+                        <span className="ml-auto font-mono text-[10px] text-[var(--color-primary)]">{pendingImages.length + pendingBrowserFiles.length}</span>
                       )}
                     </button>
                     <div className="mx-2 my-1 h-px bg-[var(--color-border)]" aria-hidden="true" />

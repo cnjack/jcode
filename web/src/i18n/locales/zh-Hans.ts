@@ -209,6 +209,11 @@ export default {
     thinking: '思考中…',
     loadingConversation: '加载会话中…',
     attachFiles: '添加附件',
+    fileUpload: {
+      failed: '文件上传失败',
+      unavailable: '当前任务无法上传文件',
+      tooLarge: '文件超过 100MB 上传限制',
+    },
     goal: '目标',
     add: '添加',
     generatedImage: {

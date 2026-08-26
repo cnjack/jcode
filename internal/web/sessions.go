@@ -281,6 +281,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	} else if err := store.Delete(id); err != nil {
 		config.Logger().Printf("[cloud] failed to remove deleted session %s from sync store: %v", id, err)
 	}
+	removeLocalTaskUploads(id)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

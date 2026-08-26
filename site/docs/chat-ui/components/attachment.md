@@ -85,6 +85,13 @@ This keeps **library demos**, **docs**, and the **jcode product** (`web/src/comp
 ## Product (jcode web / desktop)
 
 - Attach entry: **+ menu → Image** (and paste into the textarea).
+- Drag/drop accepts any file. Supported images keep the base64 `ChatImage`
+  path; every other file is inserted into the draft as explicit agent context
+  saying that it was dropped and naming its path. Desktop preserves the Tauri
+  absolute path. Browser Web uploads a managed copy into the current task's
+  local, SSH, or Docker execution environment, then injects that returned
+  Agent-readable path. The model-facing block is fixed English, matching JCode
+  system reminders; visible composer chrome and errors follow the UI locale.
 - Capability gate: model `image_support` / settings “Allow image attachments”.
 - Thumbnails: shared `AttachmentList` (preview + remove).
 - Backend contract remains base64 `ChatImage[]` on the user message.

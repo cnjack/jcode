@@ -212,6 +212,11 @@ export default {
     thinking: '생각 중…',
     loadingConversation: '대화 불러오는 중…',
     attachFiles: '파일 첨부',
+    fileUpload: {
+      failed: '파일 업로드에 실패했습니다',
+      unavailable: '이 작업에서는 파일을 업로드할 수 없습니다',
+      tooLarge: '파일이 100MB 업로드 제한을 초과했습니다',
+    },
     goal: '목표',
     add: '추가',
     copilotHint: 'Enter로 전송 · Shift+Enter로 줄바꿈 · Esc로 취소',

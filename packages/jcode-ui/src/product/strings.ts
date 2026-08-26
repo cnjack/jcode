@@ -34,6 +34,9 @@ export interface ProductComposerStrings {
   goalHintRemove: string
   goalHintReplace: string
   modelNoImages: string
+  fileUploadFailed: string
+  fileUploadUnavailable: string
+  fileTooLarge: string
 
   // ── mode picker ──
   modeApproval: string
@@ -168,6 +171,9 @@ export const defaultProductComposerStrings: ProductComposerStrings = {
   goalHintRemove: 'Remove goal',
   goalHintReplace: 'Setting a new goal replaces the current one',
   modelNoImages: 'Current model does not support images',
+  fileUploadFailed: 'File upload failed',
+  fileUploadUnavailable: 'File upload is unavailable for this task',
+  fileTooLarge: 'File exceeds the 100MB upload limit',
 
   modeApproval: 'Ask for approval',
   modeApprovalSub: 'Pause before each write or command.',

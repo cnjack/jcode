@@ -63,6 +63,23 @@ async function requestBlob(path: string): Promise<Blob> {
   return resp.blob()
 }
 
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  const headers = new Headers()
+  const token = getAuthToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const resp = await fetch(`${apiBase}${path}`, { method: 'POST', headers, body: form })
+  if (resp.status === 401) notifyAuthExpired()
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ error: resp.statusText }))
+    const err = new Error(body.error || `HTTP ${resp.status}`) as APIError
+    err.status = resp.status
+    err.code = typeof body.code === 'string' ? body.code : undefined
+    err.body = body
+    throw err
+  }
+  return resp.json()
+}
+
 async function requestVoid(path: string, method: string, body?: string): Promise<void> {
   const headers = new Headers()
   const token = getAuthToken()
@@ -116,6 +133,14 @@ export const api = {
     }),
   usageStats: (days = 30) => request<UsageStats>(`/api/usage/stats?days=${days}`),
   taskStats: (id: string) => request<TaskStats>(`/api/tasks/${encodeURIComponent(id)}/stats`),
+  uploadTaskFile: (taskId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file, file.name || 'attachment')
+    return requestForm<{ path: string; name: string; size: number }>(
+      `/api/tasks/${encodeURIComponent(taskId)}/uploads`,
+      form,
+    )
+  },
   todos: (taskId?: string) => request<TodoItem[]>(`/api/todos${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`),
   goal: (taskId?: string) => request<Goal | null>(`/api/goal${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`),
   setGoal: (objective: string, start = true, taskId?: string) =>
