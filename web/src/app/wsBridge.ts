@@ -171,6 +171,8 @@ export function createWSHandlers(
           surface: d.surface,
           phase: lifecycle.phase,
           operationID: d.operation_id,
+          approvalID: d.approval_id,
+          approvalGranted: d.approval_granted,
         }),
       )
     },
@@ -202,6 +204,7 @@ export function createWSHandlers(
       const action = chatActions.resolveToolCall({
         name: d.name,
         toolCallID: d.tool_call_id,
+        approvalID: d.approval_id,
         output: d.output,
         displayOutput: d.display_output,
         error: d.error,
@@ -245,7 +248,10 @@ export function createWSHandlers(
       applyAgentDoneBackgroundEffects(key, !isForeground)
     },
     onTodoUpdate: () => {
-      void api.todos().then((todos) => dispatch(chatActions.setTodos(todos)))
+      const taskID = getState().session.currentSessionId
+      void api.todos(taskID || undefined).then((todos) => {
+        if (getState().session.currentSessionId === taskID) dispatch(chatActions.setTodos(todos))
+      })
     },
     onGoalUpdate: (d) => dispatch(chatActions.setGoal(d as Goal | null)),
     onApprovalRequest: (d) =>

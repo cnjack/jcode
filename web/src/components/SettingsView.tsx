@@ -343,6 +343,7 @@ function ProvidersTab() {
   const smallModel = useAppSelector((s) => s.model.smallModel)
   const imageModel = useAppSelector((s) => s.model.imageModel)
   const pickerProviders = useAppSelector((s) => s.model.providers)
+  const currentTaskID = useAppSelector((s) => s.session.currentSessionId)
   const [smallSaving, setSmallSaving] = useState(false)
   const [smallError, setSmallError] = useState('')
   const [smallSaved, setSmallSaved] = useState(false)
@@ -355,7 +356,7 @@ function ProvidersTab() {
   // Refresh the chat model picker after provider/model mutations.
   async function refreshModels() {
     try {
-      const resp = await api.models()
+      const resp = await api.models(currentTaskID || undefined)
       dispatch(modelActions.setProviders(resp.providers))
       dispatch(modelActions.setImageModel(
         resp.current_image?.provider && resp.current_image?.model
@@ -1814,6 +1815,9 @@ function GeneralTab() {
   const dispatch = useAppDispatch()
   const { t, i18n } = useTranslation()
   const autoApprove = useAppSelector((s) => s.model.autoApprove)
+  const currentTaskID = useAppSelector((s) => s.session.currentSessionId)
+  const currentTaskIDRef = useRef(currentTaskID)
+  currentTaskIDRef.current = currentTaskID
   const wsConnected = useAppSelector((s) => s.session.wsConnected)
   const tokenSnapshot = useAppSelector((s) => s.chat.tokenSnapshot)
   const bleAvailable = useAppSelector((s) => s.ui.bleAvailable)
@@ -1827,7 +1831,8 @@ function GeneralTab() {
   async function toggleAutoApprove() {
     const next = !autoApprove
     try {
-      await api.setApprovalMode(next)
+      await api.setApprovalMode(next, currentTaskID || undefined)
+      if (currentTaskIDRef.current !== currentTaskID) return
       dispatch(modelActions.setAutoApprove(next))
       dispatch(modelActions.setMode(next ? 'full_access' : 'approval'))
     } catch (err) {

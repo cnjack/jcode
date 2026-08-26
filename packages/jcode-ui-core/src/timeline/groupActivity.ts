@@ -13,6 +13,7 @@
  * Isolated single tools stay plain `tool` cards (no noisy group of 1).
  */
 
+import { getApprovalOutcome } from '../types/index.ts'
 import type { ActivityGroup, ThreadItem, ToolCall, ToolStatus } from '../types/index.js'
 // NOTE: runtime import uses the .ts extension so `node --experimental-strip-types
 // --test` resolves it directly; tsc rewrites it to .js on emit
@@ -31,7 +32,7 @@ type Unit = { cluster: { tools: ToolCall[]; seq: number } } | { item: ThreadItem
 /** Standalone tools own their complete timeline surface and are hard grouping
  * boundaries from the initial tool_call event onward. */
 export function isStandaloneTool(tool: ToolCall): boolean {
-  return tool.surface === 'standalone' || tool.name === 'ask_user'
+  return tool.surface === 'standalone' || tool.name === 'ask_user' || (!!tool.approval && !tool.approval.resolved)
 }
 
 /**
@@ -124,7 +125,7 @@ export function countActivityFlags(tools: ToolCall[]): { failed: number; denied:
   let failed = 0
   let denied = 0
   for (const t of tools) {
-    if (t.denied) {
+    if (t.denied || (t.approval && getApprovalOutcome(t.approval) === 'denied')) {
       denied += 1
       continue
     }

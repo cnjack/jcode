@@ -329,3 +329,82 @@ func TestDeleteEngineTeardown(t *testing.T) {
 		t.Error("the other engine must remain routable")
 	}
 }
+
+func TestTryStartEngineRejectsReplacedRuntime(t *testing.T) {
+	s := stubFactoryServer(t)
+	old, err := s.buildLocalEngine("replace-me", "/proj/old", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.setActiveEngine(old)
+	replacement, err := s.assembleLocalEngine("replace-me", "/proj/old", "build", s.newEngine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.publishEngineCandidate(replacement, old); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.CloseAllEngines)
+
+	if !old.retired.Load() {
+		t.Fatal("replaced runtime was not retired")
+	}
+	if s.tryStartEngine(old) {
+		t.Fatal("replaced runtime accepted a stale run claim")
+	}
+	if !s.tryStartEngine(replacement) {
+		t.Fatal("canonical replacement rejected a run claim")
+	}
+	replacement.running.Store(false)
+}
+
+func TestDiscardEngineCandidateRefusesRunningRuntime(t *testing.T) {
+	s := stubFactoryServer(t)
+	candidate, err := s.buildLocalEngine("candidate", "/proj/candidate", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.CloseAllEngines)
+	if !s.tryStartEngine(candidate) {
+		t.Fatal("candidate run claim failed")
+	}
+
+	s.discardEngineCandidate(candidate, false)
+	if candidate.retired.Load() {
+		t.Fatal("running candidate was retired")
+	}
+	if got := s.resolveEngine(candidate.taskID); got != candidate {
+		t.Fatalf("running candidate was detached: got=%p want=%p", got, candidate)
+	}
+	candidate.running.Store(false)
+}
+
+func TestRetireEngineRefusesActiveRuntime(t *testing.T) {
+	s := stubFactoryServer(t)
+	active, err := s.buildLocalEngine("active", "/proj/active", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.setActiveEngine(active)
+	t.Cleanup(s.CloseAllEngines)
+
+	if s.retireEngine(active, engineRetirePolicy{requireInactive: true}) {
+		t.Fatal("active runtime was retired")
+	}
+	if active.retired.Load() || s.activeEngine() != active {
+		t.Fatal("active runtime lifecycle changed")
+	}
+}
+
+func TestEngineTeardownIsIdempotent(t *testing.T) {
+	var cancels atomic.Int32
+	eng := &Engine{pumpCancel: func() { cancels.Add(1) }}
+	eng.teardown()
+	eng.teardown()
+	if got := cancels.Load(); got != 1 {
+		t.Fatalf("pump cancel calls=%d, want 1", got)
+	}
+	if !eng.retired.Load() {
+		t.Fatal("teardown did not retire engine")
+	}
+}

@@ -227,28 +227,27 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id is required"})
 		return
 	}
-	// Refuse while the agent is mid-run. Cancelling + deleting a live task races
-	// the recorder (file/index resurrection) and is a bad UX for an intentional
-	// stop — the user should stop the run first, then delete.
-	if eng := s.resolveEngine(id); eng != nil && eng.running.Load() {
+	// Serialize with activation, then atomically reject running tasks and detach
+	// non-active engines under the lifecycle order taskCreateMu -> tasksMu -> mu.
+	// Active engines stay live but have their recorder reset while run claims are
+	// blocked, so the deleted file cannot be reopened between check and delete.
+	s.taskCreateMu.Lock()
+	s.tasksMu.Lock()
+	s.mu.Lock()
+	eng := s.tasks[id]
+	if active := s.Engine; eng == nil && active != nil && active.taskID == id {
+		eng = active
+	}
+	if eng != nil && !eng.retired.Load() && eng.running.Load() {
+		s.mu.Unlock()
+		s.tasksMu.Unlock()
+		s.taskCreateMu.Unlock()
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
 		return
 	}
-	// Tear down the live engine for this task (if any) so leftover cancel state
-	// is cleared and resources reclaimed. The active foreground engine is left
-	// in place — but its recorder is reset so post-delete writes don't land in
-	// the now-unlinked file (silent data loss).
-	if eng := s.resolveEngine(id); eng != nil {
-		eng.emu.Lock()
-		cancel := eng.runCancel
-		eng.emu.Unlock()
-		if cancel != nil {
-			cancel()
-		}
-		if eng != s.activeEngine() {
-			s.deleteEngine(id)
-		} else {
-			// Not running (guarded above): safe to close the recorder now.
+	var teardown *Engine
+	if eng != nil && !eng.retired.Load() {
+		if s.Engine == eng {
 			eng.toolOverrideMu.Lock()
 			eng.emu.Lock()
 			if eng.recorder != nil && eng.recorder.UUID() == id {
@@ -258,13 +257,23 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 			}
 			eng.emu.Unlock()
 			eng.toolOverrideMu.Unlock()
+		} else if s.tasks[id] == eng {
+			eng.retired.Store(true)
+			delete(s.tasks, id)
+			teardown = eng
 		}
 	}
-
-	// Resolve the owning project across all projects: a task deleted from the
-	// sidebar tree may not belong to the active project.
-	if _, err := session.DeleteSessionByUUID(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	// Resolve the owning project across all projects while activation/run claims
+	// remain blocked; otherwise a concurrent first message could resurrect it.
+	_, deleteErr := session.DeleteSessionByUUID(id)
+	s.mu.Unlock()
+	s.tasksMu.Unlock()
+	s.taskCreateMu.Unlock()
+	if teardown != nil {
+		teardown.teardown()
+	}
+	if deleteErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": deleteErr.Error()})
 		return
 	}
 	if store, err := s.cloudSyncStoreLoad(); err != nil {
@@ -383,9 +392,11 @@ func (s *Server) writeResumeReply(w http.ResponseWriter, eng *Engine, entries []
 
 func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SessionID     string                `json:"session_id,omitempty"`
-		Pwd           string                `json:"pwd,omitempty"`
-		WorkspaceKind session.WorkspaceKind `json:"workspace_kind,omitempty"`
+		SessionID         string                `json:"session_id,omitempty"`
+		Pwd               string                `json:"pwd,omitempty"`
+		WorkspaceKind     session.WorkspaceKind `json:"workspace_kind,omitempty"`
+		ExpectedSessionID *string               `json:"expected_session_id,omitempty"`
+		RequireIdle       bool                  `json:"require_idle,omitempty"`
 		// Source is the optional channel label ("console"/"mobile") the cloud
 		// relay passes through when the session is created from the cloud —
 		// such sessions are always stamped as cloud-synced (M19).
@@ -402,13 +413,41 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	guarded := req.ExpectedSessionID != nil || req.RequireIdle
+	guardExpectedSessionID := req.ExpectedSessionID
+	if guarded {
+		// Keep task creation serialized through the authoritative focus check and
+		// any candidate cleanup. The active pointer/running state can still change
+		// during the slow build; focusEngineGuarded revalidates both at commit.
+		s.taskCreateMu.Lock()
+		defer s.taskCreateMu.Unlock()
+		var failure activeEngineGuardFailure
+		guardExpectedSessionID, failure = s.snapshotActiveEngineGuard(
+			guardExpectedSessionID, req.RequireIdle,
+		)
+		if failure != "" {
+			writeFreshSessionGuardConflict(w, failure)
+			return
+		}
+	}
+
 	// Build or recover the task without changing the foreground until every
 	// remote connection and hydration step has succeeded. This is the same cold
 	// activation path used by Cloud commands, so a persisted SSH/Docker UUID can
 	// never silently fall back to a local engine.
-	result, err := s.ensureConversationKind(
-		r.Context(), req.SessionID, req.Pwd, req.Source, req.WorkspaceKind,
+	var (
+		result activationResult
+		err    error
 	)
+	if guarded {
+		result, err = s.ensureConversationLocked(
+			r.Context(), req.SessionID, req.Pwd, req.Source, req.WorkspaceKind,
+		)
+	} else {
+		result, err = s.ensureConversationKind(
+			r.Context(), req.SessionID, req.Pwd, req.Source, req.WorkspaceKind,
+		)
+	}
 	if err != nil {
 		writeConversationActivationError(w, err)
 		return
@@ -418,7 +457,20 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "activated task is unavailable"})
 		return
 	}
-	s.setActiveEngine(eng)
+	if guarded {
+		if failure := s.focusEngineGuarded(eng, guardExpectedSessionID, req.RequireIdle); failure != "" {
+			if result.Activated {
+				s.discardEngineCandidate(
+					eng,
+					req.SessionID == "" && eng.workspaceKind == session.WorkspaceScratch,
+				)
+			}
+			writeFreshSessionGuardConflict(w, failure)
+			return
+		}
+	} else {
+		s.setActiveEngine(eng)
+	}
 
 	if req.SessionID == "" {
 		s.wsBroker.Broadcast(WSEvent{TaskID: eng.taskID, Type: "session_reset", Data: map[string]string{}})
@@ -434,6 +486,18 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		config.Logger().Printf("[web] resume: embedded entries unavailable for %s (client falls back to GET): %v", req.SessionID, loadErr)
 	}
 	s.writeResumeReply(w, eng, entries)
+}
+
+func writeFreshSessionGuardConflict(w http.ResponseWriter, failure activeEngineGuardFailure) {
+	message := "active task changed while creating a fresh task"
+	if failure == activeEngineBusy {
+		message = "active task started running while creating a fresh task"
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":  message,
+		"code":   "fresh_session_guard_failed",
+		"reason": failure,
+	})
 }
 
 func restoredWebSessionMode(saved string) mode.SessionMode {

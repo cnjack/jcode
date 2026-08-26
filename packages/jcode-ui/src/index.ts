@@ -48,6 +48,8 @@ export { ToolBatchGroupCard } from './components/ToolBatchGroup.js'
 export type { ToolBatchGroupCardProps } from './components/ToolBatchGroup.js'
 export { TurnChangesCard } from './components/TurnChangesCard.js'
 export type { TurnChangesCardProps } from './components/TurnChangesCard.js'
+export { CompletedTurnCard } from './components/CompletedTurnCard.js'
+export type { CompletedTurnCardProps } from './components/CompletedTurnCard.js'
 export { CompactToolRow } from './components/CompactToolRow.js'
 export { ApprovalBanner } from './components/ApprovalBanner.js'
 export { AskUserCard } from './components/AskUserCard.js'
@@ -97,6 +99,7 @@ export type {
   Goal,
   Role,
   ActivityGroup,
+  CompletedTurn,
   ToolBatchGroup,
   ExploringGroup,
   TurnChangesSummary,
@@ -111,10 +114,13 @@ export {
   isToolItem,
   isApprovalItem,
   isActivityItem,
+  isTurnItem,
   isExploringItem,
   isBatchItem,
   isTurnChangesItem,
   groupActivityTimeline,
+  bindApprovalsToTools,
+  groupCompletedTurns,
   summarizeActivityCounts,
   countActivityFlags,
   groupExploringTimeline,

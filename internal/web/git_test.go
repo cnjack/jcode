@@ -35,6 +35,92 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func currentGitBranch(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = dir
+	cmd.Env = append(utils.ScrubbedGitEnv(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_DIR="+filepath.Join(dir, ".git"),
+		"GIT_WORK_TREE="+dir,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func initGitRepo(t *testing.T, filename string) (string, string) {
+	t.Helper()
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	runGit(t, repo, "config", "user.email", "t@example.com")
+	runGit(t, repo, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, filename), []byte("initial\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", filename)
+	runGit(t, repo, "commit", "-q", "-m", "init")
+	return repo, currentGitBranch(t, repo)
+}
+
+func TestGitEndpointsResolveExplicitTask(t *testing.T) {
+	repoA, branchA := initGitRepo(t, "a.txt")
+	repoB, branchB := initGitRepo(t, "b.txt")
+	runGit(t, repoB, "checkout", "-q", "-b", "task-b-target")
+	runGit(t, repoB, "checkout", "-q", branchB)
+
+	engA := &Engine{taskID: "task-a", pwd: repoA}
+	engB := &Engine{taskID: "task-b", pwd: repoB}
+	s := &Server{
+		Engine: engA,
+		tasks:  map[string]*Engine{"task-a": engA, "task-b": engB},
+	}
+
+	branchesRec := httptest.NewRecorder()
+	s.handleGitBranches(branchesRec, httptest.NewRequest(
+		http.MethodGet, "/api/git/branches?task_id=task-b", nil,
+	))
+	if branchesRec.Code != http.StatusOK || !strings.Contains(branchesRec.Body.String(), "task-b-target") {
+		t.Fatalf("task-b branches code=%d body=%s", branchesRec.Code, branchesRec.Body.String())
+	}
+
+	checkoutRec := httptest.NewRecorder()
+	s.handleGitCheckout(checkoutRec, httptest.NewRequest(
+		http.MethodPost,
+		"/api/git/checkout",
+		strings.NewReader(`{"branch":"task-b-target","task_id":"task-b"}`),
+	))
+	if checkoutRec.Code != http.StatusOK {
+		t.Fatalf("task-b checkout code=%d body=%s", checkoutRec.Code, checkoutRec.Body.String())
+	}
+	if got := currentGitBranch(t, repoB); got != "task-b-target" {
+		t.Fatalf("task-b branch=%q, want task-b-target", got)
+	}
+	if got := currentGitBranch(t, repoA); got != branchA {
+		t.Fatalf("active task-a branch changed=%q, want %q", got, branchA)
+	}
+
+	unknownBranches := httptest.NewRecorder()
+	s.handleGitBranches(unknownBranches, httptest.NewRequest(
+		http.MethodGet, "/api/git/branches?task_id=missing", nil,
+	))
+	if unknownBranches.Code != http.StatusNotFound {
+		t.Fatalf("unknown branches code=%d body=%s", unknownBranches.Code, unknownBranches.Body.String())
+	}
+	unknownCheckout := httptest.NewRecorder()
+	s.handleGitCheckout(unknownCheckout, httptest.NewRequest(
+		http.MethodPost,
+		"/api/git/checkout",
+		strings.NewReader(`{"branch":"main","task_id":"missing"}`),
+	))
+	if unknownCheckout.Code != http.StatusNotFound {
+		t.Fatalf("unknown checkout code=%d body=%s", unknownCheckout.Code, unknownCheckout.Body.String())
+	}
+}
+
 // TestGitCheckoutRejectsDashBranch is the regression guard for the argv-injection
 // fix: a branch beginning with "-" (e.g. "-f") must be rejected with 400 BEFORE
 // any git runs. Previously it flowed straight into the argv as `git checkout -f`,

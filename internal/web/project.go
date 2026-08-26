@@ -179,25 +179,32 @@ func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetApprovalMode(w http.ResponseWriter, r *http.Request) {
 	autoApprove := false
-	if eng := s.activeEngine(); eng != nil && eng.approvalState != nil {
+	taskID := r.URL.Query().Get("task_id")
+	eng := s.resolveEngine(taskID)
+	if taskID != "" && eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	if eng != nil && eng.approvalState != nil {
 		autoApprove = eng.approvalState.GetMode() == handler.ModeAuto
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"auto_approve": autoApprove})
 }
 
 func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
-	eng := s.activeEngine()
-	if eng == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
-		return
-	}
 	// No running gate: the rebuild is emu-safe and applies next turn, consistent
 	// with the "Allow all" approval path which also flips full_access mid-run.
 	var req struct {
-		AutoApprove bool `json:"auto_approve"`
+		AutoApprove bool   `json:"auto_approve"`
+		TaskID      string `json:"task_id,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	eng := s.resolveEngine(req.TaskID)
+	if eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
 	// Legacy endpoint: auto-approve now maps onto the unified mode (Full access vs
@@ -227,8 +234,9 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 	if eng.rebuildForMode != nil {
 		eng.rebuildMu.Unlock()
 	}
-	// Persist as the default startup mode so the preference survives restarts —
-	// resolveStartupMode reads cfg.DefaultMode. cfgMu serializes the config RMW.
+	// Approval mode is both a per-task runtime choice and the user's startup
+	// default. task_id selects the engine without changing this legacy durable
+	// settings behavior.
 	s.cfgMu.Lock()
 	if s.cfg != nil {
 		s.cfg.DefaultMode = sm.String()

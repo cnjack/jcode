@@ -16,12 +16,16 @@ import {
   isToolItem,
   isApprovalItem,
   isActivityItem,
+  isTurnItem,
   isExploringItem,
   isBatchItem,
   isTurnChangesItem,
   groupActivityTimeline,
+  bindApprovalsToTools,
+  groupCompletedTurns,
   appendTurnChangeSummaries,
   isStandaloneTool,
+  getApprovalOutcome,
 } from 'jcode-ui-core'
 import { toolCallToRendererProps } from 'jcode-ui-core/adapters'
 import type { ThreadItem, ToolCall } from 'jcode-ui-core'
@@ -32,6 +36,7 @@ import { ActivityGroupCard } from './ActivityGroupCard.js'
 import { ExploringGroupCard } from './ExploringGroupCard.js'
 import { ToolBatchGroupCard } from './ToolBatchGroup.js'
 import { TurnChangesCard } from './TurnChangesCard.js'
+import { CompletedTurnCard } from './CompletedTurnCard.js'
 import { useToolRegistry } from './ToolRegistryContext.js'
 
 export interface ThreadProps {
@@ -55,6 +60,11 @@ export interface ThreadProps {
   /** Hide pending ask_user tools before activity grouping when a host presents
    *  them in a dedicated interaction dock. Resolved receipts remain visible. */
   hidePendingAskUser?: boolean
+  /** Host-localized completed-turn duration label. */
+  turnDurationLabel?: (durationMs: number) => string
+  /** Accessible label for expanding/collapsing completed-turn work. */
+  turnExpandLabel?: string
+  turnCollapseLabel?: string
 }
 
 export function Thread({
@@ -66,6 +76,9 @@ export function Thread({
   className,
   overscanBottom,
   hidePendingAskUser = false,
+  turnDurationLabel,
+  turnExpandLabel,
+  turnCollapseLabel,
 }: ThreadProps): ReactNode {
   const { isRunning } = useRuntimeState()
   // Activity coalescing (batches absorbed, ALL adjacent tools grouped), then
@@ -81,7 +94,10 @@ export function Thread({
             !item.data.output
           ))
         : items
-      return appendTurnChangeSummaries(groupActivityTimeline(visibleItems), { isRunning })
+      const approvalsBound = bindApprovalsToTools(visibleItems)
+      const activityGrouped = groupActivityTimeline(approvalsBound)
+      const withChanges = appendTurnChangeSummaries(activityGrouped, { isRunning })
+      return groupCompletedTurns(withChanges, { isRunning })
     },
     [hidePendingAskUser, isRunning],
   )
@@ -92,7 +108,11 @@ export function Thread({
       className={`jcode-thread messages-feather min-h-0 w-full flex-1 scroll-smooth ${className ?? ''}`}
       overscanBottom={overscanBottom ?? 24}
       mapItems={mapItems}
-      renderItem={(item) => renderItem(item, isRunning)}
+      renderItem={(item) => renderItem(item, isRunning, {
+        durationLabel: turnDurationLabel,
+        expandLabel: turnExpandLabel,
+        collapseLabel: turnCollapseLabel,
+      })}
       renderPending={renderPending ?? (() => <DefaultPending label={pendingLabel} />)}
       renderEmpty={emptyState ? () => emptyState : undefined}
       renderFooter={
@@ -108,7 +128,13 @@ export function Thread({
   )
 }
 
-function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
+interface TurnRenderStrings {
+  durationLabel?: (durationMs: number) => string
+  expandLabel?: string
+  collapseLabel?: string
+}
+
+function renderItem(item: ThreadItem, isRunning: boolean, turnStrings: TurnRenderStrings): ReactNode {
   if (isMessageItem(item)) {
     return (
       <Message
@@ -122,6 +148,17 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
       <div className="jcode-chat-col">
         <ActivityGroupCard group={item.data} className="jcode-gutter" />
       </div>
+    )
+  }
+  if (isTurnItem(item)) {
+    return (
+      <CompletedTurnCard
+        turn={item.data}
+        renderActivity={(activityItem) => renderItem(activityItem, false, turnStrings)}
+        durationLabel={turnStrings.durationLabel}
+        expandLabel={turnStrings.expandLabel}
+        collapseLabel={turnStrings.collapseLabel}
+      />
     )
   }
   // Legacy kinds — Thread no longer produces them; kept for hosts that do.
@@ -171,17 +208,36 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
 
 function StandaloneToolCall({ tool }: { tool: ToolCall }): ReactNode {
   const registry = useToolRegistry()
-  const Renderer = registry.has(tool.name) ? registry.get(tool.name) : null
+  const approval = tool.approval
+  const approvalOutcome = approval ? getApprovalOutcome(approval) : undefined
+  if (approval && approvalOutcome === 'pending') {
+    return (
+      <div className="jcode-gutter jcode-standalone-approval" data-testid="tool-approval">
+        <ApprovalBanner approval={approval} />
+      </div>
+    )
+  }
+  const effectiveTool = approvalOutcome === 'denied' && !tool.denied
+    ? { ...tool, denied: true }
+    : tool
+  if (effectiveTool.denied) {
+    return (
+      <div className="jcode-gutter jcode-standalone-tool">
+        <ToolCallCard tool={effectiveTool} />
+      </div>
+    )
+  }
+  const Renderer = registry.has(effectiveTool.name) ? registry.get(effectiveTool.name) : null
   if (!Renderer) {
     return (
-      <div className="jcode-gutter jcode-standalone-tool" data-tool-name={tool.name}>
-        <ToolCallCard tool={tool} />
+      <div className="jcode-gutter jcode-standalone-tool" data-tool-name={effectiveTool.name}>
+        <ToolCallCard tool={effectiveTool} />
       </div>
     )
   }
   return (
-    <div className="jcode-gutter jcode-standalone-tool" data-tool-name={tool.name}>
-      <Renderer {...toolCallToRendererProps(tool)} />
+    <div className="jcode-gutter jcode-standalone-tool" data-tool-name={effectiveTool.name}>
+      <Renderer {...toolCallToRendererProps(effectiveTool)} />
     </div>
   )
 }

@@ -587,6 +587,8 @@ const chatSlice = createSlice({
           surface?: ToolCall['surface']
           phase?: ToolCall['phase']
           operationID?: string
+          approvalID?: string
+          approvalGranted?: boolean
         }
       },
     ) {
@@ -594,6 +596,58 @@ const chatSlice = createSlice({
       // starts a fresh assistant message).
       streamingText = ''
       streamingMsgId = ''
+      if (a.payload.approvalID) {
+        // Approval IDs are minted by the host for one concrete gate. Call IDs
+        // are model supplied and may repeat even inside one turn, so never use
+        // them alone to settle an approval.
+        for (let i = s.timeline.length - 1; i >= 0; i--) {
+          const item = s.timeline[i]
+          if (item.kind === 'message' && item.data.role === 'user') break
+          if (
+            item.kind !== 'approval' ||
+            item.data.id !== a.payload.approvalID ||
+            (a.payload.toolCallID && item.data.tool_call_id !== a.payload.toolCallID) ||
+            item.data.tool_name !== a.payload.name ||
+            item.data.resolved
+          ) continue
+          item.data.resolved = true
+          item.data.approved = a.payload.approvalGranted === true
+          item.data.resolving = false
+          break
+        }
+      }
+      // A pending-approval reload reconstructs the proposed tool from JSONL,
+      // then the Web handler releases the SAME tool_call only after Allow. Fold
+      // that release into the current turn's unresolved occurrence instead of
+      // appending a duplicate card. Stop at the latest user boundary because
+      // model-supplied call IDs may be reused across turns.
+      if (a.payload.toolCallID) {
+        for (let i = s.timeline.length - 1; i >= 0; i--) {
+          const item = s.timeline[i]
+          if (item.kind === 'message' && item.data.role === 'user') break
+          if (
+            item.kind !== 'tool' ||
+            item.data.toolCallID !== a.payload.toolCallID ||
+            item.data.name !== a.payload.name ||
+            (a.payload.args !== '' && item.data.args !== a.payload.args) ||
+            item.data.output !== undefined ||
+            item.data.error !== undefined ||
+            item.data.phase === 'terminal'
+          ) continue
+          item.data.args = a.payload.args || item.data.args
+          item.data.status = 'running'
+          item.data.displayInfo = a.payload.displayInfo ?? item.data.displayInfo
+          item.data.batchId = a.payload.batchId ?? item.data.batchId
+          item.data.batchIndex = a.payload.batchIndex ?? item.data.batchIndex
+          item.data.batchSize = a.payload.batchSize ?? item.data.batchSize
+          item.data.startedAt = a.payload.startedAt ?? Date.now()
+          item.data.surface = a.payload.surface ?? item.data.surface
+          item.data.phase = a.payload.phase ?? item.data.phase
+          item.data.operationID = a.payload.operationID ?? item.data.operationID
+          item.data.approvalID = a.payload.approvalID ?? item.data.approvalID
+          return
+        }
+      }
       // ask_user_request can arrive before the matching tool_call and already
       // insert a pending row. Fold this event into that row so the dock and
       // timeline do not each render their own card.
@@ -613,6 +667,7 @@ const chatSlice = createSlice({
           item.data.surface = a.payload.surface ?? item.data.surface
           item.data.phase = a.payload.phase ?? item.data.phase
           item.data.operationID = a.payload.operationID ?? item.data.operationID
+          item.data.approvalID = a.payload.approvalID ?? item.data.approvalID
           return
         }
       }
@@ -632,6 +687,7 @@ const chatSlice = createSlice({
         surface: a.payload.surface ?? (a.payload.name === 'generate_image' ? 'standalone' : undefined),
         phase: a.payload.phase ?? (a.payload.name === 'generate_image' ? 'queued' : undefined),
         operationID: a.payload.operationID,
+        approvalID: a.payload.approvalID,
       }
       s.timeline.push({ kind: 'tool', data: tc, seq: nextSeq() })
     },
@@ -664,6 +720,7 @@ const chatSlice = createSlice({
         payload: {
           name: string
           toolCallID?: string
+          approvalID?: string
           output?: string
           displayOutput?: string
           error?: string
@@ -684,6 +741,7 @@ const chatSlice = createSlice({
     ) {
       const {
         toolCallID,
+        approvalID,
         name,
         output,
         displayOutput,
@@ -725,18 +783,60 @@ const chatSlice = createSlice({
         })
         return
       }
-      // Match by toolCallID (precise) or by the last running tool with this name.
-      for (let i = s.timeline.length - 1; i >= 0; i--) {
-        const item = s.timeline[i]
-        if (item.kind !== 'tool') continue
-        const match = toolCallID ? item.data.toolCallID === toolCallID : item.data.name === name && item.data.status === 'running'
-        if (match) {
-          item.data.status = error ? 'error' : (meta?.exit_code !== undefined && meta.exit_code !== 0 ? 'error' : 'done')
-          applyResolvedToolFields(item.data, {
-            name, output, displayOutput, error, denied, durationMs, streams, meta, presentation,
-          })
-          break
+      let target = -1
+      if (approvalID) {
+        for (let i = s.timeline.length - 1; i >= 0; i--) {
+          const item = s.timeline[i]
+          if (item.kind === 'message' && item.data.role === 'user') break
+          if (item.kind === 'tool' && item.data.approvalID === approvalID) {
+            target = i
+            break
+          }
         }
+      }
+      if (target < 0 && toolCallID) {
+        // Model IDs can be malformed/reused. Never overwrite a terminal card,
+        // and fail closed when more than one unsettled occurrence is plausible.
+        // Replay historically marks a call-without-result as done, so no-result
+        // done rows remain eligible after a page refresh.
+        for (let i = s.timeline.length - 1; i >= 0; i--) {
+          const item = s.timeline[i]
+          if (item.kind === 'message' && item.data.role === 'user') break
+          const unsettled = item.kind === 'tool' && (
+            item.data.status === 'running' || (
+              item.data.status === 'done' && item.data.output === undefined &&
+              item.data.error === undefined && item.data.phase !== 'terminal' &&
+              item.data.meta?.exit_code === undefined && !item.data.denied
+            )
+          )
+          if (
+            item.kind !== 'tool' || item.data.toolCallID !== toolCallID ||
+            item.data.name !== name || !unsettled
+          ) continue
+          if (target >= 0) {
+            target = -1
+            break
+          }
+          target = i
+        }
+      }
+      if (target < 0 && !toolCallID) {
+        for (let i = s.timeline.length - 1; i >= 0; i--) {
+          const item = s.timeline[i]
+          if (item.kind === 'message' && item.data.role === 'user') break
+          if (item.kind === 'tool' && item.data.name === name && item.data.status === 'running') {
+            target = i
+            break
+          }
+        }
+      }
+      if (target >= 0) {
+        const item = s.timeline[target]
+        if (item.kind !== 'tool') return
+        item.data.status = error ? 'error' : (meta?.exit_code !== undefined && meta.exit_code !== 0 ? 'error' : 'done')
+        applyResolvedToolFields(item.data, {
+          name, output, displayOutput, error, denied, durationMs, streams, meta, presentation,
+        })
       }
     },
     setTokenSnapshot(s, a: { payload: TokenSnapshot | null }) {
@@ -774,12 +874,26 @@ const chatSlice = createSlice({
       delete s.queuedBySession[a.payload]
     },
     agentDone(s, a: { payload: { error?: string; detail?: string; stopped?: boolean } | undefined }) {
-      // Stamp duration on the last assistant message.
+      // Stamp wall-clock turn duration (user submit -> agent_done) on this
+      // turn's final assistant message. Never fall back across the latest user
+      // boundary: a failed/tool-only turn must not rewrite the previous turn.
+      let userIndex = -1
       for (let i = s.timeline.length - 1; i >= 0; i--) {
         const item = s.timeline[i]
-        if (item.kind === 'message' && item.data.role === 'assistant') {
-          item.data.durationMs = Date.now() - (item.data.timestamp || Date.now())
+        if (item.kind === 'message' && item.data.role === 'user') {
+          userIndex = i
           break
+        }
+      }
+      if (userIndex >= 0) {
+        const user = s.timeline[userIndex]
+        for (let i = s.timeline.length - 1; i > userIndex; i--) {
+          const item = s.timeline[i]
+          if (item.kind === 'message' && item.data.role === 'assistant') {
+            const startedAt = user.kind === 'message' ? user.data.timestamp : Date.now()
+            item.data.durationMs = Math.max(0, Date.now() - startedAt)
+            break
+          }
         }
       }
       // Generic tools keep their historical done fallback. Image operations
@@ -1574,13 +1688,16 @@ export const sendMessage = createAsyncThunk(
     // sessionId override targets a specific (possibly background) session —
     // used when draining a stashed queue after that session's agentDone.
     const sessionId = payload.sessionId ?? (state.session.currentSessionId || undefined)
+    const isCurrentForegroundSession = () =>
+      (getState() as RootState).session.currentSessionId === (sessionId || '')
     const trimmed = payload.text.trim()
     // Goal flows are foreground-only: the goal API always targets the active
     // engine, so a background queue drain sends its text as a plain message.
     if (!payload.background && state.chat.goalArmed && trimmed && !trimmed.startsWith('/')) {
       dispatch(chatActions.setGoalArmed(false))
       dispatch(chatActions.addMessage({ role: 'user', content: payload.text }))
-      const goal = await api.setGoal(trimmed, true)
+      const goal = await api.setGoal(trimmed, true, sessionId)
+      if (!isCurrentForegroundSession()) return
       dispatch(chatActions.setGoal(goal))
       dispatch(chatActions.setRunning(true))
       return
@@ -1589,7 +1706,8 @@ export const sendMessage = createAsyncThunk(
     if (!payload.background && (trimmed === '/goal' || trimmed.startsWith('/goal '))) {
       const objective = trimmed.slice('/goal'.length).trim()
       if (objective === '' || objective === 'status') {
-        const goal = await api.goal()
+        const goal = await api.goal(sessionId)
+        if (!isCurrentForegroundSession()) return
         dispatch(chatActions.setGoal(goal))
         dispatch(chatActions.addMessage({
           role: 'system',
@@ -1598,13 +1716,15 @@ export const sendMessage = createAsyncThunk(
         return
       }
       if (objective === 'clear') {
-        await api.clearGoal()
+        await api.clearGoal(sessionId)
+        if (!isCurrentForegroundSession()) return
         dispatch(chatActions.setGoal(null))
         dispatch(chatActions.addMessage({ role: 'system', content: 'Goal cleared.' }))
         return
       }
       dispatch(chatActions.addMessage({ role: 'user', content: payload.text }))
-      const goal = await api.setGoal(objective, true)
+      const goal = await api.setGoal(objective, true, sessionId)
+      if (!isCurrentForegroundSession()) return
       dispatch(chatActions.setGoal(goal))
       dispatch(chatActions.setRunning(true))
       return
@@ -1708,14 +1828,18 @@ export const stopAgent = createAsyncThunk('chat/stop', async (_, { getState }) =
 export const resolveApproval = createAsyncThunk(
   'approval/resolve',
   async (payload: { id: string; approved: boolean; approveAll?: boolean }, { dispatch, getState }) => {
-    dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: true }))
     const state = getState() as RootState
+    const foregroundTaskId = state.session.currentSessionId
     const item = state.chat.timeline.find((i) => i.kind === 'approval' && i.data.id === payload.id)
-    const taskId = item?.kind === 'approval' ? (item.data as Approval & { task_id?: string }).task_id : undefined
+    const itemTaskId = item?.kind === 'approval' ? (item.data as Approval & { task_id?: string }).task_id : undefined
+    const taskId = itemTaskId || foregroundTaskId || undefined
+    dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: true }))
     try {
       await api.approval(payload.id, payload.approved, payload.approveAll ?? false, taskId)
+      if ((getState() as RootState).session.currentSessionId !== foregroundTaskId) return
       dispatch(chatActions.resolveApprovalItem({ id: payload.id, approved: payload.approved }))
     } catch {
+      if ((getState() as RootState).session.currentSessionId !== foregroundTaskId) return
       dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: false }))
     }
   },
@@ -1724,23 +1848,27 @@ export const resolveApproval = createAsyncThunk(
 export const resolveApprovalOption = createAsyncThunk(
   'approval/resolveOption',
   async (payload: { id: string; optionId: string }, { dispatch, getState }) => {
-    dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: true }))
     const state = getState() as RootState
+    const foregroundTaskId = state.session.currentSessionId
     const item = state.chat.timeline.find((entry) => entry.kind === 'approval' && entry.data.id === payload.id)
     const approval = item?.kind === 'approval' ? item.data as Approval & { task_id?: string } : undefined
     const option = approval?.options?.find((candidate) => candidate.id === payload.optionId)
+    dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: true }))
     if (!approval || !option) {
       dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: false }))
       return
     }
+    const taskId = approval.task_id || foregroundTaskId || undefined
     try {
-      await api.approvalOption(payload.id, payload.optionId, approval.task_id)
+      await api.approvalOption(payload.id, payload.optionId, taskId)
+      if ((getState() as RootState).session.currentSessionId !== foregroundTaskId) return
       dispatch(chatActions.resolveApprovalItem({
         id: payload.id,
         approved: option.kind !== 'deny',
         optionId: payload.optionId,
       }))
     } catch {
+      if ((getState() as RootState).session.currentSessionId !== foregroundTaskId) return
       dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: false }))
     }
   },
@@ -1750,6 +1878,7 @@ export const submitAskUser = createAsyncThunk(
   'askUser/submit',
   async (payload: { id: string; answers: AskUserAnswer[] }, { dispatch, getState }) => {
     const state = getState() as RootState
+    const foregroundTaskId = state.session.currentSessionId
     let taskId: string | undefined
     for (const item of state.chat.timeline) {
       if (item.kind === 'tool' && item.data.askUserId === payload.id) {
@@ -1757,11 +1886,14 @@ export const submitAskUser = createAsyncThunk(
         break
       }
     }
+    taskId ||= foregroundTaskId || undefined
     try {
       await api.askUser(payload.id, payload.answers, taskId)
+      if ((getState() as RootState).session.currentSessionId !== foregroundTaskId) return
       // Hide the docked card immediately; the real tool_result may arrive later.
       dispatch(chatActions.resolveAskUserItem({ id: payload.id, answers: payload.answers }))
     } catch (error) {
+      if ((getState() as RootState).session.currentSessionId !== foregroundTaskId) throw error
       // surface in timeline as a system message
       dispatch(chatActions.addMessage({ role: 'system', content: 'Failed to submit answer', level: 'error' }))
       throw error
@@ -1810,13 +1942,17 @@ export const loadProjects = createAsyncThunk('projects/load', async (_, { dispat
   dispatch(sessionActions.setProjectTimes(projects))
 })
 
-export const loadSlashCommands = createAsyncThunk('chat/loadSlash', async (_, { dispatch }) => {
-  const cmds = await api.slashCommands()
+export const loadSlashCommands = createAsyncThunk('chat/loadSlash', async (_, { dispatch, getState }) => {
+  const taskID = (getState() as RootState).session.currentSessionId
+  const cmds = await api.slashCommands(taskID || undefined)
+  if ((getState() as RootState).session.currentSessionId !== taskID) return
   dispatch(chatActions.setSlashCommands(cmds))
 })
 
-export const loadModels = createAsyncThunk('model/loadModels', async (_, { dispatch }) => {
-  const data = await api.models()
+export const loadModels = createAsyncThunk('model/loadModels', async (_, { dispatch, getState }) => {
+  const taskID = (getState() as RootState).session.currentSessionId
+  const data = await api.models(taskID || undefined)
+  if ((getState() as RootState).session.currentSessionId !== taskID) return
   dispatch(modelActions.setProviders(data.providers || []))
   dispatch(modelActions.setProvider(data.current.provider))
   dispatch(modelActions.setModel(data.current.model))
@@ -1830,8 +1966,10 @@ export const loadModels = createAsyncThunk('model/loadModels', async (_, { dispa
   dispatch(modelActions.setImageSupport(model?.input_modalities?.includes('image') ?? !!model?.image_support))
 })
 
-export const loadAgents = createAsyncThunk('model/loadAgents', async (_, { dispatch }) => {
-  const data = await api.agents()
+export const loadAgents = createAsyncThunk('model/loadAgents', async (_, { dispatch, getState }) => {
+  const taskID = (getState() as RootState).session.currentSessionId
+  const data = await api.agents(taskID || undefined)
+  if ((getState() as RootState).session.currentSessionId !== taskID) return
   dispatch(modelActions.setAgents(data.agents || []))
   dispatch(modelActions.setAgent(data.current || ''))
 })
@@ -1846,7 +1984,9 @@ export const loadModelState = createAsyncThunk('model/loadState', async (_, { di
 })
 
 export const loadApprovalMode = createAsyncThunk('model/loadApprovalMode', async (_, { dispatch, getState }) => {
-  const data = await api.approvalMode()
+  const taskID = (getState() as RootState).session.currentSessionId
+  const data = await api.approvalMode(taskID || undefined)
+  if ((getState() as RootState).session.currentSessionId !== taskID) return
   dispatch(modelActions.setAutoApprove(data.auto_approve))
   const state = getState() as RootState
   if (data.auto_approve) dispatch(modelActions.setMode('full_access'))
@@ -1876,8 +2016,10 @@ export const loadConfig = createAsyncThunk('model/loadConfig', async (_, { dispa
   }
 })
 
-export const loadStatus = createAsyncThunk('app/loadStatus', async (_, { dispatch }) => {
-  const status = await api.status()
+export const loadStatus = createAsyncThunk('app/loadStatus', async (_, { dispatch, getState }) => {
+  const taskID = (getState() as RootState).session.currentSessionId
+  const status = await api.status(taskID || undefined)
+  if ((getState() as RootState).session.currentSessionId !== taskID) return
   dispatch(chatActions.setRunning(!!status.running))
   dispatch(sessionActions.setProjectPath(status.project || status.workspace_key || status.pwd))
   dispatch(sessionActions.setWorkspaceKind(status.workspace_kind))
@@ -1888,21 +2030,27 @@ export const loadStatus = createAsyncThunk('app/loadStatus', async (_, { dispatc
   if (status.token) dispatch(chatActions.setTokenSnapshot(status.token))
 })
 
-export const loadGoal = createAsyncThunk('chat/loadGoal', async (_, { dispatch }) => {
-  const goal = await api.goal()
+export const loadGoal = createAsyncThunk('chat/loadGoal', async (_, { dispatch, getState }) => {
+  const taskID = (getState() as RootState).session.currentSessionId
+  const goal = await api.goal(taskID || undefined)
+  if ((getState() as RootState).session.currentSessionId !== taskID) return
   dispatch(chatActions.setGoal(goal))
 })
 
-export const loadTodos = createAsyncThunk('chat/loadTodos', async (_, { dispatch }) => {
-  const todos = await api.todos()
+export const loadTodos = createAsyncThunk('chat/loadTodos', async (_, { dispatch, getState }) => {
+  const taskID = (getState() as RootState).session.currentSessionId
+  const todos = await api.todos(taskID || undefined)
+  if ((getState() as RootState).session.currentSessionId !== taskID) return
   dispatch(chatActions.setTodos(todos))
 })
 
 export const reconcilePendingInteractions = createAsyncThunk('chat/reconcilePending', async (_, { dispatch, getState }) => {
+  const taskID = (getState() as RootState).session.currentSessionId
   const [askResult, approvalResult] = await Promise.allSettled([
-    api.askPending(),
-    api.approvalPending(),
+    api.askPending(taskID || undefined),
+    api.approvalPending(taskID || undefined),
   ])
+  if ((getState() as RootState).session.currentSessionId !== taskID) return
   if (askResult.status === 'fulfilled') {
     for (const req of askResult.value) {
       dispatch(chatActions.attachAskUser({
@@ -2620,21 +2768,57 @@ export const loadSession = createAsyncThunk(
  * ⌘N / ⇧⌘O keyboard shortcuts. The empty session stays out of the sidebar until
  * the first user message (backend only indexes then).
  */
+interface ProvisionNewChatOptions {
+  workspaceKind?: WorkspaceKind
+  projectPath?: string
+  surfaceError?: boolean
+  resetBeforeProvision?: boolean
+  expectedSessionId?: string
+  requireIdle?: boolean
+}
+
 async function provisionNewChat(
   dispatch: AppDispatch,
   getState: () => RootState,
-  overrideKind?: WorkspaceKind,
-  surfaceError = false,
+  options: ProvisionNewChatOptions = {},
 ) {
-  const workspaceKind = overrideKind || getState().session.workspaceKind
   await dispatch(cancelConversationLoad())
+  // Re-check immediately after the async cancellation barrier. A WS agent_start
+  // or foreground navigation can land while cancellation yields; nothing below
+  // awaits before the reset, so a passing check now owns the atomic clear.
+  const current = getState()
+  if (options.expectedSessionId !== undefined && current.session.currentSessionId !== options.expectedSessionId) return
+  if (options.requireIdle && current.chat.isRunning) return
+  const guarded = options.expectedSessionId !== undefined || !!options.requireIdle
+  const expectedSessionId = options.expectedSessionId ?? current.session.currentSessionId
+  const navigationGeneration = conversationNavigationGeneration
+  const workspaceKind = options.workspaceKind || current.session.workspaceKind
+  const projectPath = workspaceKind === 'scratch'
+    ? undefined
+    : options.projectPath || current.session.projectPath || undefined
   dispatch(uiActions.setView('chat'))
+  if (options.resetBeforeProvision && !guarded) {
+    dispatch(chatActions.clearChat())
+    dispatch(sessionActions.setCurrentSession(''))
+  }
   try {
-    const resp = await api.newSession(
-      undefined,
-      undefined,
-      workspaceKind,
-    )
+    const resp = guarded
+      ? await api.newSession(
+          undefined,
+          undefined,
+          workspaceKind,
+          projectPath,
+          { expectedSessionId, requireIdle: !!options.requireIdle },
+        )
+      : await api.newSession(undefined, undefined, workspaceKind, projectPath)
+    const latest = getState()
+    if (
+      guarded && (
+        conversationNavigationGeneration !== navigationGeneration ||
+        latest.session.currentSessionId !== expectedSessionId ||
+        (!!options.requireIdle && latest.chat.isRunning)
+      )
+    ) return
     dispatch(chatActions.clearChat())
     dispatch(sessionActions.setCurrentSession(''))
     dispatch(sessionActions.setCurrentSession(resp.session_id))
@@ -2645,7 +2829,18 @@ async function provisionNewChat(
     if (resp.agent !== undefined) dispatch(modelActions.setAgent(resp.agent))
     if (resp.mode !== undefined) dispatch(modelActions.setMode(normalizeMode(resp.mode)))
   } catch (error) {
-    if (surfaceError) throw error
+    const latest = getState()
+    const stillOwnsUI = !guarded || (
+      conversationNavigationGeneration === navigationGeneration &&
+      latest.session.currentSessionId === expectedSessionId &&
+      (!options.requireIdle || !latest.chat.isRunning)
+    )
+    if (!stillOwnsUI) return
+    if (options.resetBeforeProvision) {
+      dispatch(chatActions.clearChat())
+      dispatch(sessionActions.setCurrentSession(''))
+    }
+    if (options.surfaceError) throw error
     // Existing global-new-task behavior stays quiet; health/gate reconciles.
   }
 }
@@ -2654,8 +2849,34 @@ export const startNewChat = createAsyncThunk('session/startNew', async (_, { dis
   await provisionNewChat(dispatch as AppDispatch, () => getState() as RootState)
 })
 
+/** Provision a fail-closed fresh task for a cold browser open against an
+ * already-used sidecar, or for an idle Desktop window being reopened. Unlike
+ * the ordinary New Task action, failure must surface: an empty UI must never
+ * remain pointed at the backend's old active conversation. */
+export const startFreshChat = createAsyncThunk(
+  'session/startFresh',
+  async (input: {
+    projectPath?: string
+    workspaceKind?: WorkspaceKind
+    expectedSessionId?: string
+    requireIdle?: boolean
+  } | void, { dispatch, getState }) => {
+    await provisionNewChat(dispatch as AppDispatch, () => getState() as RootState, {
+      projectPath: input?.projectPath,
+      workspaceKind: input?.workspaceKind,
+      surfaceError: true,
+      resetBeforeProvision: true,
+      expectedSessionId: input?.expectedSessionId,
+      requireIdle: input?.requireIdle,
+    })
+  },
+)
+
 export const startScratchChat = createAsyncThunk('session/startScratch', async (_, { dispatch, getState }) => {
-  await provisionNewChat(dispatch as AppDispatch, () => getState() as RootState, 'scratch', true)
+  await provisionNewChat(dispatch as AppDispatch, () => getState() as RootState, {
+    workspaceKind: 'scratch',
+    surfaceError: true,
+  })
 })
 
 export const replaySession = createAsyncThunk(

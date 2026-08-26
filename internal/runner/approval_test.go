@@ -24,11 +24,13 @@ type stubHandler struct {
 type progressStubHandler struct {
 	stubHandler
 	progressCalls int
+	progressID    string
 	progressName  string
 }
 
-func (h *progressStubHandler) NotifyToolInProgress(name, _ string) {
+func (h *progressStubHandler) NotifyToolInProgress(toolCallID, name, _ string) {
 	h.progressCalls++
+	h.progressID = toolCallID
 	h.progressName = name
 }
 
@@ -277,6 +279,7 @@ func TestBillableApprovalUsesFullAccessButIgnoresHookAllow(t *testing.T) {
 		NormalizedArgs: `{"prompt":"desk","size":"1024x1024"}`,
 	}
 	ctx := toolpolicy.WithBillableIntent(context.Background(), intent)
+	ctx = agent.WithToolCallID(ctx, "tool-call-image")
 
 	var fullAccessRequests []handler.ApprovalRequest
 	fullAccess := NewApprovalStateWithMode("/tmp/workdir", mode.FullAccess)
@@ -289,8 +292,9 @@ func TestBillableApprovalUsesFullAccessButIgnoresHookAllow(t *testing.T) {
 	if len(fullAccessRequests) != 0 {
 		t.Fatalf("Full access emitted %d billable approval requests, want 0", len(fullAccessRequests))
 	}
-	if progressHandler.progressCalls != 1 || progressHandler.progressName != "generate_image" {
-		t.Fatalf("Full access progress notifications = %d/%q, want 1/generate_image", progressHandler.progressCalls, progressHandler.progressName)
+	if progressHandler.progressCalls != 1 || progressHandler.progressID != "tool-call-image" || progressHandler.progressName != "generate_image" {
+		t.Fatalf("Full access progress notifications = %d/%q/%q, want 1/tool-call-image/generate_image",
+			progressHandler.progressCalls, progressHandler.progressID, progressHandler.progressName)
 	}
 
 	var requests []handler.ApprovalRequest

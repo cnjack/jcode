@@ -217,6 +217,8 @@ export default {
     add: '新增',
     copilotHint: 'Enter 傳送 · Shift+Enter 換行 · Esc 取消',
     turnDuration: '本次耗時',
+    turnShowWork: '展開本輪工作過程',
+    turnHideWork: '摺疊本輪工作過程',
     wechatOn: '微信通知已開啟',
     wechatOff: '微信通知已關閉',
     modes: {
@@ -282,6 +284,7 @@ export default {
     durationSeconds: '{n}秒',
     durationMinutes: '{m}分 {s}秒',
     durationMinutesOnly: '{m}分',
+    durationHours: '{h}小時 {m}分 {s}秒',
   },
 
   approval: {

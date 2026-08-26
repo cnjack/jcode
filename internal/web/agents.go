@@ -16,8 +16,13 @@ type agentRoleView struct {
 	Model       string `json:"model,omitempty"`
 }
 
-func (s *Server) handleListAgents(w http.ResponseWriter, _ *http.Request) {
-	eng := s.activeEngine()
+func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("task_id")
+	eng := s.resolveEngine(taskID)
+	if taskID != "" && eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
 	if eng == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
 		return
@@ -44,18 +49,19 @@ func (s *Server) handleListAgents(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleSwitchAgent(w http.ResponseWriter, r *http.Request) {
-	eng := s.activeEngine()
-	if eng == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
-		return
-	}
 	var req struct {
-		Agent string `json:"agent"`
+		Agent  string `json:"agent"`
+		TaskID string `json:"task_id,omitempty"`
 	}
 	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<16))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	eng := s.resolveEngine(req.TaskID)
+	if eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
 	req.Agent = strings.TrimSpace(req.Agent)

@@ -157,6 +157,13 @@ jobs:
           pnpm -C packages/jcode-ui-core build
           pnpm -C packages/jcode-ui build
 
+      - name: Run frontend regression tests
+        run: |
+          node --experimental-strip-types --test packages/jcode-ui-core/src/timeline/*.test.ts
+          pnpm -C packages/jcode-ui test
+          pnpm -C web test
+          node --test script/generate_jcode_ui_api_docs.test.mjs
+
       - name: Type-check web app
         working-directory: web
         run: npx tsc --noEmit -p tsconfig.app.json

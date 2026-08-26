@@ -29,10 +29,10 @@ type ACPHandler struct {
 
 	toolCallCounter atomic.Int64
 	mu              sync.Mutex
-	// einoToACP maps Eino tool call IDs to ACP tool call IDs so that
-	// OnToolResult can find the correct ACP ID even when multiple tool calls
-	// are active concurrently.
-	einoToACP map[string]acp.ToolCallId
+	// einoToACP retains every occurrence for a model-supplied tool call ID.
+	// IDs are expected to be unique but are not trusted to be; a slice avoids
+	// silently overwriting the earlier ACP row when a malformed batch reuses one.
+	einoToACP map[string][]acp.ToolCallId
 	// toolArgs caches the raw args JSON by ACP tool call ID so that
 	// OnToolResult can build diff content.
 	toolArgs map[acp.ToolCallId]string
@@ -43,10 +43,9 @@ type ACPHandler struct {
 	// turnErr is the error the current turn died on, recorded by OnAgentDone and
 	// consumed by Prompt via TakeTurnError. Guarded by mu.
 	turnErr error
-	// pendingApprovals is a FIFO queue of ACP tool call IDs that have been
-	// started but not yet matched to a RequestApproval call. The approval
-	// middleware does not pass the Eino tool call ID, so we match by
-	// (toolName, toolArgs) in arrival order.
+	// pendingApprovals retains each ACP occurrence until approval/result. Modern
+	// callers match by Eino ID + name + args; ID-less legacy callers only fall
+	// back when one pending occurrence remains.
 	pendingApprovals []pendingApproval
 	// subagentCalls maps a running subagent's name to the ACP tool call ID of
 	// its "subagent" tool call, so lifecycle/progress callbacks (which only
@@ -84,10 +83,79 @@ func (h *ACPHandler) SetArtifactPathResolver(fn func(context.Context, ArtifactRe
 }
 
 type pendingApproval struct {
-	acpID    acp.ToolCallId
-	toolName string
-	toolArgs string
-	claimed  bool
+	acpID      acp.ToolCallId
+	toolCallID string
+	toolName   string
+	toolArgs   string
+	claimed    bool
+}
+
+func pendingApprovalIndex(
+	pending []pendingApproval,
+	toolCallID, name, args string,
+	unclaimedOnly bool,
+) int {
+	if toolCallID == "" {
+		index, matches := -1, 0
+		for i := range pending {
+			candidate := pending[i]
+			if unclaimedOnly && candidate.claimed {
+				continue
+			}
+			if candidate.toolName == name && candidate.toolArgs == args {
+				index = i
+				matches++
+			}
+		}
+		if matches == 1 {
+			return index
+		}
+		return -1
+	}
+
+	exactIndex, exactMatches := -1, 0
+	uniqueIndex, idNameMatches := -1, 0
+	for i := range pending {
+		candidate := pending[i]
+		if unclaimedOnly && candidate.claimed {
+			continue
+		}
+		if candidate.toolCallID != toolCallID || candidate.toolName != name {
+			continue
+		}
+		uniqueIndex = i
+		idNameMatches++
+		if candidate.toolArgs == args {
+			exactIndex = i
+			exactMatches++
+		}
+	}
+	if exactMatches == 1 {
+		return exactIndex
+	}
+	if exactMatches > 1 {
+		return -1
+	}
+	if idNameMatches == 1 {
+		return uniqueIndex
+	}
+	return -1
+}
+
+func uniqueACPToolCallID(ids []acp.ToolCallId) acp.ToolCallId {
+	if len(ids) != 1 {
+		return ""
+	}
+	return ids[0]
+}
+
+func removeACPToolCallID(ids []acp.ToolCallId, target acp.ToolCallId) []acp.ToolCallId {
+	for i, id := range ids {
+		if id == target {
+			return append(ids[:i], ids[i+1:]...)
+		}
+	}
+	return ids
 }
 
 // NewACPHandler creates a handler bound to an ACP connection and session.
@@ -96,7 +164,7 @@ func NewACPHandler(conn *acp.AgentSideConnection, sessionID acp.SessionId, workD
 		conn:           conn,
 		sessionID:      sessionID,
 		workDir:        workDir,
-		einoToACP:      make(map[string]acp.ToolCallId),
+		einoToACP:      make(map[string][]acp.ToolCallId),
 		toolArgs:       make(map[acp.ToolCallId]string),
 		toolTerminated: make(map[acp.ToolCallId]bool),
 		subagentCalls:  make(map[string]acp.ToolCallId),
@@ -369,11 +437,11 @@ func (h *ACPHandler) OnToolCall(ev ToolCallEvent) {
 	id := h.nextToolCallID()
 	h.mu.Lock()
 	if einoToolCallID != "" {
-		h.einoToACP[einoToolCallID] = id
+		h.einoToACP[einoToolCallID] = append(h.einoToACP[einoToolCallID], id)
 	}
 	h.toolArgs[id] = args
 	h.pendingApprovals = append(h.pendingApprovals, pendingApproval{
-		acpID: id, toolName: name, toolArgs: args,
+		acpID: id, toolCallID: einoToolCallID, toolName: name, toolArgs: args,
 	})
 	if name == "subagent" {
 		if sub := subagentNameFromArgs(args); sub != "" {
@@ -405,18 +473,16 @@ func (h *ACPHandler) OnToolCall(ev ToolCallEvent) {
 
 // NotifyToolInProgress is used by the approval state when a tool is about to
 // execute without a visible permission prompt (auto-approval or safe tools).
-func (h *ACPHandler) NotifyToolInProgress(name, args string) {
-	h.updateMatchedToolStatus(name, args, acp.ToolCallStatusInProgress, false)
+func (h *ACPHandler) NotifyToolInProgress(toolCallID, name, args string) {
+	h.updateMatchedToolStatus(toolCallID, name, args, acp.ToolCallStatusInProgress, false)
 }
 
-func (h *ACPHandler) updateMatchedToolStatus(name, args string, status acp.ToolCallStatus, terminal bool) {
+func (h *ACPHandler) updateMatchedToolStatus(toolCallID, name, args string, status acp.ToolCallStatus, terminal bool) {
 	h.mu.Lock()
+	index := pendingApprovalIndex(h.pendingApprovals, toolCallID, name, args, false)
 	var id acp.ToolCallId
-	for _, p := range h.pendingApprovals {
-		if p.toolName == name && p.toolArgs == args {
-			id = p.acpID
-			break
-		}
+	if index >= 0 {
+		id = h.pendingApprovals[index].acpID
 	}
 	if id != "" && terminal {
 		h.toolTerminated[id] = true
@@ -436,9 +502,21 @@ func (h *ACPHandler) updateMatchedToolStatus(name, args string, status acp.ToolC
 func (h *ACPHandler) OnToolResult(ev ToolResultEvent) {
 	name, output, einoToolCallID, err := ev.Name, ev.Output, ev.ToolCallID, ev.Err
 	h.mu.Lock()
-	id := h.einoToACP[einoToolCallID]
+	ids := h.einoToACP[einoToolCallID]
+	id := uniqueACPToolCallID(ids)
+	if id == "" && len(ids) > 1 {
+		h.mu.Unlock()
+		config.Logger().Printf(
+			"[acp-handler] refusing ambiguous tool result for reused id %q (%d occurrences)",
+			einoToolCallID, len(ids),
+		)
+		return
+	}
 	cachedArgs := h.toolArgs[id]
-	delete(h.einoToACP, einoToolCallID)
+	h.einoToACP[einoToolCallID] = removeACPToolCallID(h.einoToACP[einoToolCallID], id)
+	if len(h.einoToACP[einoToolCallID]) == 0 {
+		delete(h.einoToACP, einoToolCallID)
+	}
 	delete(h.toolArgs, id)
 	terminated := h.toolTerminated[id]
 	artifactResolver := h.artifactPathResolver
@@ -648,8 +726,16 @@ func boundedACPMetadata(value string, limit int) string {
 
 func (h *ACPHandler) OnToolProgress(ev ToolProgressEvent) {
 	h.mu.Lock()
-	id := h.einoToACP[ev.ToolCallID]
+	ids := h.einoToACP[ev.ToolCallID]
+	id := uniqueACPToolCallID(ids)
 	h.mu.Unlock()
+	if id == "" && len(ids) > 1 {
+		config.Logger().Printf(
+			"[acp-handler] refusing ambiguous tool progress for reused id %q (%d occurrences)",
+			ev.ToolCallID, len(ids),
+		)
+		return
+	}
 	if id == "" {
 		return
 	}
@@ -708,6 +794,13 @@ func (h *ACPHandler) OnAgentStart() {
 func (h *ACPHandler) OnAgentDone(err error) {
 	h.mu.Lock()
 	h.turnErr = err
+	// Tool-call IDs come from the model. Any malformed reused-ID occurrences
+	// intentionally fail closed above; clear their transport-only bookkeeping at
+	// the turn boundary so they cannot poison a later turn that reuses the ID.
+	h.einoToACP = make(map[string][]acp.ToolCallId)
+	h.toolArgs = make(map[acp.ToolCallId]string)
+	h.toolTerminated = make(map[acp.ToolCallId]bool)
+	h.pendingApprovals = nil
 	h.mu.Unlock()
 }
 
@@ -824,22 +917,26 @@ func (h *ACPHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 	// claim lets this same request stay pending and re-prompt without another
 	// concurrent approval stealing its tool-call id.
 	var matchedID acp.ToolCallId
-	for i := range h.pendingApprovals {
-		p := &h.pendingApprovals[i]
-		if !p.claimed && p.toolName == req.ToolName && p.toolArgs == req.ToolArgs {
-			matchedID = p.acpID
-			p.claimed = true
-			break
-		}
+	if index := pendingApprovalIndex(
+		h.pendingApprovals, req.ToolCallID, req.ToolName, req.ToolArgs, true,
+	); index >= 0 {
+		matchedID = h.pendingApprovals[index].acpID
+		h.pendingApprovals[index].claimed = true
 	}
-	// Fallback: use first pending if no exact match (e.g. args were modified).
-	if matchedID == "" {
+	// Legacy callers without an invocation ID may use a unique-candidate
+	// fallback. A non-empty unknown ID, or multiple legacy candidates, fails
+	// closed instead of claiming an unrelated row.
+	if matchedID == "" && req.ToolCallID == "" {
+		fallbackIndex, fallbackMatches := -1, 0
 		for i := range h.pendingApprovals {
 			if !h.pendingApprovals[i].claimed {
-				matchedID = h.pendingApprovals[i].acpID
-				h.pendingApprovals[i].claimed = true
-				break
+				fallbackIndex = i
+				fallbackMatches++
 			}
+		}
+		if fallbackMatches == 1 {
+			matchedID = h.pendingApprovals[fallbackIndex].acpID
+			h.pendingApprovals[fallbackIndex].claimed = true
 		}
 	}
 	h.mu.Unlock()

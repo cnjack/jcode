@@ -55,7 +55,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if !eng.running.CompareAndSwap(false, true) {
+	if !s.tryStartEngine(eng) {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "this task is already processing a request",
 		})
@@ -162,7 +162,7 @@ func (s *Server) SubmitMessage(message, source string) (accepted bool, err error
 	if eng == nil {
 		return false, nil
 	}
-	if !eng.running.CompareAndSwap(false, true) {
+	if !s.tryStartEngine(eng) {
 		return false, nil
 	}
 	_, err = s.submitMessage(eng, message, eng.curMode(), source, "", nil)
@@ -333,6 +333,9 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 			})
 		}
 		recorder.RecordUser(agentMsg, entryImages...)
+		if recorder.HasRecording() {
+			session.SaveLastSession(engineProject(eng), recorder.UUID())
+		}
 	}
 
 	// Build the user message — include images as multimodal content if provided.

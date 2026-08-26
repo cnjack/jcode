@@ -12,6 +12,7 @@
 
 import { createContext, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { getApprovalOutcome } from '../types/index.js'
 import type { ToolCall } from '../types/index.js'
 import { toolCallToRendererProps } from '../adapters/index.js'
 import type { ToolRendererRegistry } from '../adapters/index.js'
@@ -70,31 +71,45 @@ export function ToolCallView({
   renderSubagentChildren,
 }: ToolCallViewProps): ReactNode {
   const ctx = useToolCallContext()
+  const approvalOutcome = tool.approval ? getApprovalOutcome(tool.approval) : undefined
+  const effectiveTool = approvalOutcome === 'denied' && !tool.denied
+    ? { ...tool, denied: true }
+    : tool
+  const canRenderResult = !effectiveTool.denied
   // Only the recursive subagent tool — team_spawn has its own renderer (Vue parity).
-  const isSubagent = tool.name === 'subagent'
-  const isAskUser = tool.name === 'ask_user'
+  const isSubagent = effectiveTool.name === 'subagent'
+  const isAskUser = effectiveTool.name === 'ask_user'
 
-  const [expanded, setExpanded] = useState(defaultExpanded ?? isSubagent)
+  const [expanded, setExpanded] = useState(defaultExpanded ?? (isSubagent && canRenderResult))
   const toggle = useMemo(() => () => setExpanded((e) => !e), [])
 
   // ask_user: delegate to the ask_user renderer.
-  if (isAskUser && ctx?.renderAskUser) {
-    return <>{ctx.renderAskUser(tool)}</>
+  if (canRenderResult && isAskUser && ctx?.renderAskUser) {
+    return <>{ctx.renderAskUser(effectiveTool)}</>
   }
 
   // Look up a renderer for the body (not used for subagent shells — no args dump).
-  const Renderer = ctx?.registry.get(tool.name) ?? null
+  const Renderer = canRenderResult ? (ctx?.registry.get(effectiveTool.name) ?? null) : null
 
   const header =
-    renderHeader?.(tool, expanded, toggle) ?? (
-      <DefaultToolHeader tool={tool} expanded={expanded} onToggle={toggle} />
+    renderHeader?.(effectiveTool, expanded, toggle) ?? (
+      <DefaultToolHeader tool={effectiveTool} expanded={expanded} onToggle={toggle} />
     )
 
-  const body = !isSubagent && Renderer ? <Renderer {...toolCallToRendererProps(tool)} /> : null
+  // A denied invocation is a receipt, not an executable/renderable result.
+  // Keep its disclosure shell available for status context, but never mount a
+  // host renderer even if the user expands the card.
+  const body = canRenderResult && !isSubagent && Renderer
+    ? <Renderer {...toolCallToRendererProps(effectiveTool)} />
+    : null
 
   const childTools =
-    isSubagent && tool.children && tool.children.length > 0 && depth < maxDepth
-      ? tool.children
+    canRenderResult &&
+    isSubagent &&
+    effectiveTool.children &&
+    effectiveTool.children.length > 0 &&
+    depth < maxDepth
+      ? effectiveTool.children
       : null
 
   const children = childTools
@@ -118,28 +133,28 @@ export function ToolCallView({
     : null
 
   // Prefer displayOutput (clean) over raw output; never surface args for subagents.
-  const subagentText = tool.displayOutput || tool.output || ''
+  const subagentText = effectiveTool.displayOutput || effectiveTool.output || ''
   // When done with a result, show result first prominence (children still available).
-  const showResultFirst = isSubagent && tool.status === 'done' && !!subagentText
+  const showResultFirst = isSubagent && effectiveTool.status === 'done' && !!subagentText
 
   return (
     <div
       data-jcode-ui=""
       className={className}
-      data-tool-name={tool.name}
-      data-tool-status={tool.status}
-      data-tool-denied={tool.denied ? 'true' : undefined}
-      data-tool-awaiting-approval={tool.awaitingApproval ? 'true' : undefined}
+      data-tool-name={effectiveTool.name}
+      data-tool-status={effectiveTool.status}
+      data-tool-denied={effectiveTool.denied ? 'true' : undefined}
+      data-tool-awaiting-approval={effectiveTool.awaitingApproval ? 'true' : undefined}
       data-expanded={expanded ? 'true' : 'false'}
     >
       {header}
 
       {/* Subagent: children + output only (no args). Output rendered by styled slot. */}
-      {expanded && isSubagent && (
+      {expanded && canRenderResult && isSubagent && (
         <div className="toolcall-subagent-body">
           {showResultFirst &&
             (renderSubagentOutput
-              ? renderSubagentOutput(tool)
+              ? renderSubagentOutput(effectiveTool)
               : subagentText
                 ? <pre className="toolcall-subagent-output">{truncate(subagentText, 2000)}</pre>
                 : null)}
@@ -147,25 +162,25 @@ export function ToolCallView({
             <div className={renderSubagentChildren ? undefined : 'toolcall-subagent-children'}>
               {children}
             </div>
-          ) : tool.status === 'running' && !subagentText ? (
+          ) : effectiveTool.status === 'running' && !subagentText ? (
             <div className="toolcall-subagent-starting">Starting…</div>
           ) : null}
           {!showResultFirst &&
             (renderSubagentOutput
-              ? renderSubagentOutput(tool)
+              ? renderSubagentOutput(effectiveTool)
               : subagentText
                 ? <pre className="toolcall-subagent-output">{truncate(subagentText, 2000)}</pre>
                 : null)}
-          {tool.error ? <pre className="toolcall-subagent-error">{tool.error}</pre> : null}
+          {effectiveTool.error ? <pre className="toolcall-subagent-error">{effectiveTool.error}</pre> : null}
         </div>
       )}
 
       {/* Regular tool: single content box under the title (top edge = divider). */}
-      {expanded && !isSubagent && (
+      {expanded && canRenderResult && !isSubagent && (
         <div
           className="toolcall-body jcode-selectable"
           data-selectable
-          data-tool-status={tool.status}
+          data-tool-status={effectiveTool.status}
         >
           {body}
         </div>

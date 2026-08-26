@@ -254,6 +254,8 @@ export default {
     },
     copilotHint: 'Enter to send · Shift+Enter for newline · Esc to cancel',
     turnDuration: 'Time this turn took',
+    turnShowWork: 'Show work from this turn',
+    turnHideWork: 'Hide work from this turn',
     wechatOn: 'WeChat notifications ON',
     wechatOff: 'WeChat notifications OFF',
     modes: {
@@ -325,6 +327,7 @@ export default {
     durationSeconds: '{n}s',
     durationMinutes: '{m}m {s}s',
     durationMinutesOnly: '{m}m',
+    durationHours: '{h}h {m}m {s}s',
   },
 
   approval: {

@@ -111,6 +111,16 @@ func (h *NotifyingHandler) OnToolCall(ev ToolCallEvent) {
 	h.inner.OnToolCall(ev)
 }
 
+// NotifyToolInProgress preserves the optional approval-lifecycle extension of
+// wrapped handlers (ACP/Web defer a pending tool surface until this signal).
+func (h *NotifyingHandler) NotifyToolInProgress(toolCallID, name, args string) {
+	if notifier, ok := h.inner.(interface {
+		NotifyToolInProgress(string, string, string)
+	}); ok {
+		notifier.NotifyToolInProgress(toolCallID, name, args)
+	}
+}
+
 func (h *NotifyingHandler) OnToolResult(ev ToolResultEvent) {
 	h.inner.OnToolResult(ev)
 }

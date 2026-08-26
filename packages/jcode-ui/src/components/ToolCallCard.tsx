@@ -8,12 +8,13 @@
 
 import { memo, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronDownIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
 import type { ToolCall } from 'jcode-ui-core'
-import { groupToolTimeline, summarizeExploringSteps, formatElapsed } from 'jcode-ui-core'
+import { formatElapsed, getApprovalOutcome, groupToolTimeline, summarizeExploringSteps } from 'jcode-ui-core'
 import { ToolCallView, ToolCallProvider } from 'jcode-ui-core/primitives'
 import type { ToolRendererRegistry } from 'jcode-ui-core/adapters'
 import { AskUserCard } from './AskUserCard.js'
+import { ApprovalBanner } from './ApprovalBanner.js'
 import { CompactToolRow } from './CompactToolRow.js'
 import { useToolRegistry } from './ToolRegistryContext.js'
 import { renderMarkdown } from '../lib/markdown.js'
@@ -58,10 +59,26 @@ export const ToolCallCard = memo(function ToolCallCard({
     }),
     [reg],
   )
+  const approval = tool.approval
+  const approvalOutcome = approval ? getApprovalOutcome(approval) : undefined
+  if (approval && approvalOutcome === 'pending') {
+    return (
+      <div
+        data-jcode-ui=""
+        className={`jcode-tool-approval-only ${className ?? ''}`}
+        data-testid="tool-approval"
+      >
+        <ApprovalBanner approval={approval} />
+      </div>
+    )
+  }
+  const effectiveTool = approvalOutcome === 'denied' && !tool.denied
+    ? { ...tool, denied: true }
+    : tool
   return (
     <ToolCallProvider value={providerValue}>
       <ToolCallView
-        tool={tool}
+        tool={effectiveTool}
         depth={depth}
         data-jcode-ui="" className={`jcode-toolcall my-1 ${className ?? ''}`}
         renderHeader={(t, expanded, toggle) =>
@@ -83,7 +100,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         renderSubagentOutput={(t) => <SubagentOutput tool={t} />}
         renderSubagentChildren={(children) => <SubagentChildren tools={children} />}
       />
-      {slots?.footer && <div className="jcode-toolcall__footer">{slots.footer(tool)}</div>}
+      {slots?.footer && <div className="jcode-toolcall__footer">{slots.footer(effectiveTool)}</div>}
     </ToolCallProvider>
   )
 })
@@ -164,8 +181,10 @@ function ToolHeader({
   const isRunning = tool.status === 'running'
   // Denied (user rejected at the approval prompt) is NOT an error: muted +
   // strikethrough, never the destructive red.
-  const isDenied = !!tool.denied
+  const approvalOutcome = tool.approval ? getApprovalOutcome(tool.approval) : undefined
+  const isDenied = !!tool.denied || approvalOutcome === 'denied'
   const isAwaiting = !isDenied && !!tool.awaitingApproval && isRunning
+  const isAllowed = !isDenied && approvalOutcome === 'allowed'
   const isError =
     !isDenied && (tool.status === 'error' || (tool.meta?.exit_code !== undefined && tool.meta.exit_code !== 0))
   const diff = useMemo(() => parseDiffCount(tool), [tool])
@@ -216,6 +235,15 @@ function ToolHeader({
           style={{ color: 'var(--jcode-color-muted-foreground)' }}
         >
           Denied
+        </span>
+      )}
+      {isAllowed && (
+        <span
+          className="jcode-toolcall__allowed inline-flex shrink-0 items-center gap-1 text-[10px] font-medium"
+          style={{ color: 'var(--jcode-color-success-fg)' }}
+        >
+          <ShieldCheckIcon className="h-3 w-3" aria-hidden />
+          Allowed
         </span>
       )}
       {isAwaiting && (

@@ -1,14 +1,15 @@
 /**
  * Message — flat chat message (matches web/src/components/ChatMessage.vue).
  *
- * Layout (NOT chat-bubble cards):
- *   [avatar] Role label
- *            markdown content (jcode-gutter, no bg / no border)
- *            duration · copy / edit (hover)
+ * Layout:
+ *   user      right-aligned muted bubble · actions below
+ *   assistant left-aligned flat markdown · actions below
+ *   system    compact semantic label + flat body
  *
- * User and assistant share the same left-aligned structure; only the avatar
- * fill and label color differ. System messages keep the same skeleton with
- * a level-tinted avatar.
+ * Default user/assistant identity chrome is intentionally invisible: alignment
+ * and surface communicate authorship while aria-label preserves semantics.
+ * Custom header/avatar slots remain available to hosts that need explicit
+ * identity. System and WeChat messages keep a compact visible source label.
  */
 
 import { memo, useCallback, useRef, useState } from 'react'
@@ -33,7 +34,7 @@ import { Sources } from './Sources.js'
 /** Render-prop overrides for the message chrome. Each replaces a piece of the
  *  default layout; omitting one keeps the built-in rendering unchanged. */
 export interface MessageSlots {
-  /** Replaces the avatar circle (inside the default header row). */
+  /** Supplies an avatar inside an opt-in role header. */
   avatar?: (message: MessageData) => ReactNode
   /** Replaces the entire role-header row (avatar + label). */
   header?: (message: MessageData) => ReactNode
@@ -45,11 +46,13 @@ export interface MessageProps {
   message: MessageData
   /** Allow editing (typically user messages when idle). */
   canEdit?: boolean
+  /** Hide the legacy footer duration when a completed-turn disclosure owns it. */
+  showDuration?: boolean
   /** Optional chrome overrides (avatar / header / footer tail). */
   slots?: MessageSlots
 }
 
-export const Message = memo(function Message({ message, canEdit, slots }: MessageProps) {
+export const Message = memo(function Message({ message, canEdit, showDuration = true, slots }: MessageProps) {
   const actions = useRuntimeActions()
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -67,15 +70,11 @@ export const Message = memo(function Message({ message, canEdit, slots }: Messag
         ? 'var(--jcode-color-muted-foreground)'
         : 'var(--jcode-color-warning-fg)'
 
-  const avatarBg = isSystem
+  const labelColor = isSystem
     ? systemColor
-    : message.role === 'assistant'
-      ? 'var(--jcode-color-accent-neutral)'
-      : isWechat
-        ? 'var(--jcode-color-info-fg)'
-        : 'var(--jcode-color-foreground)'
-
-  const labelColor = avatarBg
+    : isWechat
+      ? 'var(--jcode-color-info-fg)'
+      : 'var(--jcode-color-accent-neutral)'
   const roleLabel = isSystem
     ? message.level === 'error'
       ? 'Error'
@@ -85,14 +84,6 @@ export const Message = memo(function Message({ message, canEdit, slots }: Messag
       : isUser
         ? 'You'
         : 'JCODE'
-
-  const avatarGlyph = isSystem
-    ? 'S'
-    : isWechat
-      ? 'W'
-      : isUser
-        ? 'U'
-        : 'J'
 
   const durationLabel = formatDuration(message.durationMs)
 
@@ -140,49 +131,43 @@ export const Message = memo(function Message({ message, canEdit, slots }: Messag
 
   return (
     <div
-      data-jcode-ui="" className="jcode-message jcode-chat-col group/msg jcode-animate-fade-in pt-3 pb-1.5"
+      data-jcode-ui=""
+      className="jcode-message jcode-chat-col group/msg jcode-animate-fade-in pt-3 pb-1.5"
       data-role={message.role}
       data-source={message.source}
       data-level={message.level}
+      role="article"
+      aria-label={slots?.header ? undefined : roleLabel}
     >
-      {/* Role label + avatar — always left-aligned, no bubble chrome. */}
+      {/* Regular user/assistant roles are communicated by layout. System and
+          external-source messages keep a compact visible label. */}
       {slots?.header ? (
         slots.header(message)
-      ) : (
-        <div className="mb-2 flex items-center gap-2.5">
-          {slots?.avatar ? (
-            slots.avatar(message)
-          ) : (
-            <div
-              className="jcode-msg-avatar flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
-              style={{ background: avatarBg, color: 'var(--jcode-color-surface)' }}
-              aria-hidden
-            >
-              {avatarGlyph}
-            </div>
-          )}
+      ) : (slots?.avatar || isSystem || isWechat) ? (
+        <div className="jcode-message__header mb-2 flex items-center gap-2.5">
+          {slots?.avatar?.(message)}
           <span className="text-[11px] font-semibold tracking-wide" style={{ color: labelColor }}>
             {roleLabel}
           </span>
         </div>
-      )}
+      ) : null}
 
       {/* Attachments — same Attachment tiles as composer (assistant-ui UserMessageAttachments). */}
       {message.images && message.images.length > 0 && (
-        <div className="jcode-gutter mb-2">
+        <div className="jcode-message__attachments jcode-gutter mb-2">
           <AttachmentList images={message.images} size={96} preview />
         </div>
       )}
 
       {message.reasoning && (
-        <div className="jcode-gutter">
+        <div className="jcode-message__reasoning jcode-gutter">
           <Reasoning reasoning={message.reasoning} durationMs={message.durationMs} />
         </div>
       )}
 
       {/* Body or inline edit — flat prose, no card bg/border. */}
       {editing ? (
-        <div className="jcode-gutter">
+        <div className="jcode-message__editor jcode-gutter">
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -219,20 +204,20 @@ export const Message = memo(function Message({ message, canEdit, slots }: Messag
           </div>
         </div>
       ) : (
-        <MarkdownBody html={message.content} />
+        <MarkdownBody html={message.content} bubble={isUser} />
       )}
 
       {message.sources && message.sources.length > 0 && (
-        <div className="jcode-gutter">
+        <div className="jcode-message__sources jcode-gutter">
           <Sources sources={message.sources} />
         </div>
       )}
 
       {/* Action footer: branch stepper · duration · copy/edit/regenerate/feedback. */}
       {!editing && (
-        <div className="jcode-gutter mt-0.5 flex items-center gap-2">
+        <div className="jcode-message__footer jcode-gutter mt-0.5 flex items-center gap-2">
           <BranchPicker message={message} />
-          {durationLabel && isAssistant && (
+          {showDuration && durationLabel && isAssistant && (
             <span
               className="text-[10px] tabular-nums"
               style={{
@@ -319,7 +304,7 @@ export const Message = memo(function Message({ message, canEdit, slots }: Messag
 
       {/* System error detail */}
       {isSystem && message.level === 'error' && message.detail && (
-        <details className="jcode-gutter mt-1">
+        <details className="jcode-message__detail jcode-gutter mt-1">
           <summary className="cursor-pointer text-[11px] text-[var(--jcode-color-muted-foreground)]">
             details
           </summary>
@@ -353,7 +338,7 @@ export const Message = memo(function Message({ message, canEdit, slots }: Messag
   )
 })
 
-const MarkdownBody = memo(function MarkdownBody({ html }: { html: string }) {
+const MarkdownBody = memo(function MarkdownBody({ html, bubble }: { html: string; bubble?: boolean }) {
   // Streaming-stable rendering: unclosed fences/emphasis are completed before
   // parse, and finished top-level blocks are cached so long threads don't
   // re-render whole documents per token.
@@ -366,7 +351,7 @@ const MarkdownBody = memo(function MarkdownBody({ html }: { html: string }) {
   return (
     <div
       ref={bind}
-      className="jcode-prose jcode-selectable jcode-gutter max-w-none break-words"
+      className={`jcode-message__body jcode-prose jcode-selectable jcode-gutter max-w-none break-words${bubble ? ' jcode-message-bubble' : ''}`}
       dangerouslySetInnerHTML={{ __html: sanitized }}
     />
   )

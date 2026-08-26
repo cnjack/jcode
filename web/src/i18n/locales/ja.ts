@@ -216,6 +216,8 @@ export default {
     add: '追加',
     copilotHint: 'Enter で送信 · Shift+Enter で改行 · Esc でキャンセル',
     turnDuration: 'このターンの所要時間',
+    turnShowWork: 'このターンの作業を表示',
+    turnHideWork: 'このターンの作業を非表示',
     wechatOn: 'WeChat 通知オン',
     wechatOff: 'WeChat 通知オフ',
     modes: {
@@ -281,6 +283,7 @@ export default {
     durationSeconds: '{n}秒',
     durationMinutes: '{m}分 {s}秒',
     durationMinutesOnly: '{m}分',
+    durationHours: '{h}時間 {m}分 {s}秒',
   },
 
   approval: {

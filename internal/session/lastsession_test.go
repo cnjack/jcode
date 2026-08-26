@@ -139,6 +139,67 @@ func TestLastSessionSkipsStaleIDs(t *testing.T) {
 	}
 }
 
+func TestMostRecentSessionFallsBackPastAnUnrecordedEmptyTask(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir, err := config.SessionsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const durable = "11111111-1111-1111-1111-111111111111"
+	const empty = "22222222-2222-2222-2222-222222222222"
+	if err := os.WriteFile(filepath.Join(dir, durable+".json"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := json.Marshal(lastSessionFile{
+		Projects: map[string]string{
+			"/durable/project": durable,
+			"/empty/project":   empty,
+		},
+		RecentProject: "/empty/project",
+		RecentSession: empty,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "last_session.json"), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	project, id := LoadMostRecentSession()
+	if project != "/durable/project" || id != durable {
+		t.Fatalf("recent fallback = (%q, %q), want durable project/session", project, id)
+	}
+}
+
+func TestEmptyTaskDoesNotReplaceSameProjectDurablePointer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir, err := config.SessionsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const durable = "11111111-1111-1111-1111-111111111111"
+	const empty = "22222222-2222-2222-2222-222222222222"
+	if err := os.WriteFile(filepath.Join(dir, durable+".json"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	SaveLastSession("/work", durable)
+	SaveLastSession("/work", empty) // no transcript by design
+
+	if got := LoadLastSession("/work"); got != durable {
+		t.Fatalf("same-project pointer = %q, want durable %q", got, durable)
+	}
+	project, id := LoadMostRecentSession()
+	if project != "/work" || id != durable {
+		t.Fatalf("recent = (%q, %q), want durable same-project task", project, id)
+	}
+}
+
 // TestLastSessionRejectsBadInput: empty/unsafe values are no-ops, not errors.
 func TestLastSessionRejectsBadInput(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())

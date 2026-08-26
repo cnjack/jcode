@@ -13,7 +13,12 @@ import (
 )
 
 func (s *Server) handleGetTodos(w http.ResponseWriter, r *http.Request) {
-	eng := s.activeEngine()
+	taskID := r.URL.Query().Get("task_id")
+	eng := s.resolveEngine(taskID)
+	if taskID != "" && eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task todos not available"})
+		return
+	}
 	if eng == nil || eng.todoStore == nil {
 		writeJSON(w, http.StatusOK, []any{})
 		return
@@ -22,8 +27,13 @@ func (s *Server) handleGetTodos(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetGoal returns the current session goal (or null when none is set).
-func (s *Server) handleGetGoal(w http.ResponseWriter, _ *http.Request) {
-	eng := s.activeEngine()
+func (s *Server) handleGetGoal(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("task_id")
+	eng := s.resolveEngine(taskID)
+	if taskID != "" && eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task goals not available"})
+		return
+	}
 	if eng == nil || eng.env == nil || eng.env.GoalStore == nil {
 		writeJSON(w, http.StatusOK, nil)
 		return
@@ -58,9 +68,9 @@ func (s *Server) handleSetGoal(w http.ResponseWriter, r *http.Request) {
 
 	if req.Start == nil || *req.Start {
 		// Start working immediately when idle; if busy, the continuation guard
-		// will pick the goal up after the current run finishes. Targets the active
-		// task.
-		if eng.running.CompareAndSwap(false, true) {
+		// will pick the goal up after the current run finishes. The explicit task
+		// id keeps multi-tab callers from inheriting whichever task is active.
+		if s.tryStartEngine(eng) {
 			if _, err := s.submitMessage(
 				eng, tools.GoalKickoffPrompt(objective), eng.curMode(), req.Source, req.TaskID, nil,
 			); err != nil {
@@ -73,8 +83,14 @@ func (s *Server) handleSetGoal(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleClearGoal removes the session goal.
-func (s *Server) handleClearGoal(w http.ResponseWriter, _ *http.Request) {
-	if eng := s.activeEngine(); eng != nil && eng.env != nil && eng.env.GoalStore != nil {
+func (s *Server) handleClearGoal(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("task_id")
+	eng := s.resolveEngine(taskID)
+	if taskID != "" && eng == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task goals not available"})
+		return
+	}
+	if eng != nil && eng.env != nil && eng.env.GoalStore != nil {
 		eng.env.GoalStore.Clear()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})

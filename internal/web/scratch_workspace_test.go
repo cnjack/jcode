@@ -54,13 +54,14 @@ func TestNewScratchSessionAllocatesManagedWorkspace(t *testing.T) {
 	if first.Pwd == second.Pwd {
 		t.Fatalf("scratch sessions reused workspace %q", first.Pwd)
 	}
-	for _, path := range []string{first.Pwd, second.Pwd} {
-		if err := managedworkspace.ValidateScratchPath(path); err != nil {
-			t.Fatalf("invalid managed workspace %q: %v", path, err)
-		}
-		if info, err := os.Stat(path); err != nil || !info.IsDir() {
-			t.Fatalf("scratch workspace missing: path=%q info=%v err=%v", path, info, err)
-		}
+	if _, err := os.Stat(first.Pwd); !os.IsNotExist(err) {
+		t.Fatalf("empty outgoing scratch workspace was not reclaimed: path=%q err=%v", first.Pwd, err)
+	}
+	if err := managedworkspace.ValidateScratchPath(second.Pwd); err != nil {
+		t.Fatalf("invalid active managed workspace %q: %v", second.Pwd, err)
+	}
+	if info, err := os.Stat(second.Pwd); err != nil || !info.IsDir() {
+		t.Fatalf("active scratch workspace missing: path=%q info=%v err=%v", second.Pwd, info, err)
 	}
 	if got := s.activeEngine().workspaceKind; got != session.WorkspaceScratch {
 		t.Fatalf("active engine kind=%q, want scratch", got)
@@ -81,6 +82,9 @@ func TestNewScratchSessionAllocatesManagedWorkspace(t *testing.T) {
 	}
 	if activated.WorkspaceKind != session.WorkspaceScratch || activated.Pwd == second.Pwd {
 		t.Fatalf("activation did not allocate fresh scratch workspace: %+v", activated)
+	}
+	if err := managedworkspace.ValidateScratchPath(activated.Pwd); err != nil {
+		t.Fatalf("invalid activated scratch workspace %q: %v", activated.Pwd, err)
 	}
 }
 

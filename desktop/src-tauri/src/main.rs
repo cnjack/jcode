@@ -9,7 +9,7 @@ mod tray;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_shell::process::CommandChild;
 
 /// Holds the running jcode sidecar so we can terminate it explicitly on exit.
@@ -27,13 +27,19 @@ pub struct DesktopState {
     pub tray: AtomicBool,
 }
 
+const WINDOW_REOPENED_EVENT: &str = "jcode://window-reopened";
+
 /// Bring the main window to the foreground (used by the tray and the
 /// single-instance guard when a second launch is attempted).
 pub fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        let was_visible = w.is_visible().unwrap_or(false);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+        if !was_visible {
+            let _ = app.emit(WINDOW_REOPENED_EVENT, ());
+        }
     }
 }
 
@@ -48,9 +54,7 @@ pub fn toggle_main(app: &AppHandle) {
         if visible && !minimized {
             let _ = w.hide();
         } else {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
+            show_main(app);
         }
     }
 }
@@ -188,6 +192,14 @@ fn main() {
 
     app.run(|app_handle, event| match event {
         RunEvent::ExitRequested { .. } | RunEvent::Exit => kill_sidecar(app_handle),
+        // macOS sends Reopen when the Dock icon is clicked after the last
+        // window was closed-to-tray. Route it through show_main so the WebView
+        // receives the same New Task event as tray/single-instance reopening.
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } if !has_visible_windows => show_main(app_handle),
         _ => {}
     });
 }
