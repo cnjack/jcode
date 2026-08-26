@@ -64,7 +64,11 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          # Pinned: `latest` floated v2.12.2 -> v2.13.1 between Aug 19 and Aug 24
+          # 2026, and the new staticcheck turned pre-existing test-file debt into
+          # red push-to-main runs. PR runs diff with --new-from-rev (old issues
+          # hidden), so only the main full-run feels toolchain drift — pin it.
+          version: v2.13.1
           # Gate regressions without forcing a flag-day cleanup of the existing
           # lint debt (mostly upstream adk.AgentMiddleware deprecations). New
           # issues introduced by a PR still fail.

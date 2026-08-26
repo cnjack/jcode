@@ -81,6 +81,12 @@ const generatedArtifact = {
   height: 1024,
 }
 
+// Shared CI runners occasionally starve workers long enough that the default
+// 1s findByRole window expires even though the synchronous reveal path is
+// intact (once seen on ubuntu-latest: 24s jsdom environment setup). Generous
+// explicit windows keep the assertion about behavior, not runner speed.
+const SLOW_RUNNER_WAIT = { timeout: 5000 }
+
 async function readyGeneratedImage() {
   renderImage({
     status: 'done',
@@ -88,9 +94,9 @@ async function readyGeneratedImage() {
     outcome: 'succeeded',
     artifacts: [generatedArtifact],
   })
-  const image = await screen.findByRole('img', { name: generatedArtifact.title })
+  const image = await screen.findByRole('img', { name: generatedArtifact.title }, SLOW_RUNNER_WAIT)
   fireEvent.load(image)
-  return screen.findByRole('button', { name: 'Open image in a new window' })
+  return screen.findByRole('button', { name: 'Open image in a new window' }, SLOW_RUNNER_WAIT)
 }
 
 describe('GeneratedImageToolRenderer visibility', () => {

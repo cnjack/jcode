@@ -149,7 +149,10 @@ export const GeneratedImageCard = memo(function GeneratedImageCard({
       setImageReady(true)
       return
     }
-    void image.decode().catch(() => undefined).then(() => setImageReady(true))
+    void image.decode().catch(() => undefined).then(() => {
+      // A late settle must not reveal an asset whose src has since changed.
+      if (image.getAttribute('src') === imageSrc) setImageReady(true)
+    })
   }
 
   return (
