@@ -100,7 +100,7 @@ func (s *ApprovalState) SetComputerAppFunc(fn func() string) {
 }
 
 type toolProgressNotifier interface {
-	NotifyToolInProgress(name, args string)
+	NotifyToolInProgress(toolCallID, name, args string)
 }
 
 // NewApprovalState creates a new ApprovalState with the given workpath.
@@ -570,7 +570,7 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 	// specific call, so the user is not prompted. This is scoped to the single
 	// invocation whose ctx carries the flag.
 	if hooks.IsPreApproved(ctx) {
-		s.notifyToolInProgress(toolName, toolArgs)
+		s.notifyToolInProgress(ctx, toolName, toolArgs)
 		return true, nil
 	}
 
@@ -579,13 +579,13 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 	currentMode := s.mode
 	s.mu.Unlock()
 	if currentMode == handler.ModeAuto {
-		s.notifyToolInProgress(toolName, toolArgs)
+		s.notifyToolInProgress(ctx, toolName, toolArgs)
 		return true, nil
 	}
 
 	switch s.decide(toolName, toolArgs) {
 	case decisionAutoApprove:
-		s.notifyToolInProgress(toolName, toolArgs)
+		s.notifyToolInProgress(ctx, toolName, toolArgs)
 		return true, nil
 	case decisionPromptExternal:
 		return s.gatedApproval(ctx, toolName, toolArgs, true, "", "")
@@ -624,9 +624,9 @@ func rejectMissingBillableIntent(toolName string) error {
 	return nil
 }
 
-func (s *ApprovalState) notifyToolInProgress(toolName, toolArgs string) {
+func (s *ApprovalState) notifyToolInProgress(ctx context.Context, toolName, toolArgs string) {
 	if notifier, ok := s.h.(toolProgressNotifier); ok {
-		notifier.NotifyToolInProgress(toolName, toolArgs)
+		notifier.NotifyToolInProgress(agent.ToolCallIDFromContext(ctx), toolName, toolArgs)
 	}
 }
 
@@ -635,7 +635,7 @@ func (s *ApprovalState) requestBillableApprovalWithWorker(
 	toolName, toolArgs, workerName, workerColor string,
 ) (bool, error) {
 	if s.isFullAccess() {
-		s.notifyToolInProgress(toolName, toolArgs)
+		s.notifyToolInProgress(ctx, toolName, toolArgs)
 		return true, nil
 	}
 	return s.requestUserApprovalWithWorker(
@@ -835,13 +835,13 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 		currentMode := s.mode
 		s.mu.Unlock()
 		if currentMode == handler.ModeAuto {
-			s.notifyToolInProgress(toolName, toolArgs)
+			s.notifyToolInProgress(ctx, toolName, toolArgs)
 			return true, nil
 		}
 
 		switch s.decide(toolName, toolArgs) {
 		case decisionAutoApprove:
-			s.notifyToolInProgress(toolName, toolArgs)
+			s.notifyToolInProgress(ctx, toolName, toolArgs)
 			return true, nil
 		case decisionPromptExternal:
 			return s.gatedApproval(ctx, toolName, toolArgs, true, workerName, workerColor)

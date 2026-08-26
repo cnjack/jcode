@@ -333,6 +333,9 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 			})
 		}
 		recorder.RecordUser(agentMsg, entryImages...)
+		if recorder.HasRecording() {
+			session.SaveLastSession(engineProject(eng), recorder.UUID())
+		}
 	}
 
 	// Build the user message — include images as multimodal content if provided.

@@ -30,4 +30,24 @@ describe('remote API errors', () => {
       body: { fingerprint: 'SHA256:abc', key_type: 'ssh-ed25519' },
     })
   })
+
+  it('scopes status reconciliation to the requested task', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
+      running: true,
+      ws_clients: 1,
+      pwd: '/work',
+      project: '/work',
+      provider: 'openai',
+      model: 'test',
+      mode: 'approval',
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.status('task/with space')
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/status?task_id=task%2Fwith%20space')
+  })
 })

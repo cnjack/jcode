@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cnjack/jcode/internal/config"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/tools"
 )
@@ -49,6 +50,11 @@ type WebToolCallData struct {
 	Surface     ToolSurface      `json:"surface,omitempty"`
 	Phase       ToolPhase        `json:"phase,omitempty"`
 	OperationID string           `json:"operation_id,omitempty"`
+	// ApprovalID binds this released call to the exact host-generated approval
+	// occurrence. Model tool-call IDs are not trusted to be unique. When set,
+	// ApprovalGranted is the decision for that gate (false means denied).
+	ApprovalID      string `json:"approval_id,omitempty"`
+	ApprovalGranted bool   `json:"approval_granted,omitempty"`
 }
 
 // ToolDisplayInfo carries human-readable tool metadata for UI rendering.
@@ -427,6 +433,7 @@ type WebToolResultData struct {
 	DisplayOutput string                     `json:"display_output,omitempty"` // clean output for UI display
 	Error         string                     `json:"error,omitempty"`
 	ToolCallID    string                     `json:"tool_call_id,omitempty"`
+	ApprovalID    string                     `json:"approval_id,omitempty"`
 	Streams       *WebToolResultStreams      `json:"streams,omitempty"`
 	Meta          *WebToolResultMeta         `json:"meta,omitempty"`
 	Presentation  *WebToolResultPresentation `json:"presentation,omitempty"`
@@ -541,6 +548,8 @@ type WebHandler struct {
 	mu                    sync.Mutex
 	approvalCounter       int
 	pendingApproval       map[string]*webPendingApproval
+	pendingToolCalls      []webPendingToolCall
+	activeToolCalls       []webActiveToolCall
 	modePromotionCallback func() error
 
 	askUserMu      sync.Mutex
@@ -557,6 +566,28 @@ type webPendingApproval struct {
 	ch       chan ApprovalResponse
 	data     WebApprovalRequestData
 	resolved bool
+}
+
+// webPendingToolCall delays the tool_call WS frame until the approval layer
+// confirms the call may run. Safe/auto-approved tools are released immediately
+// through NotifyToolInProgress; prompted tools stay invisible until the user
+// decides, so their renderer cannot appear before authorization.
+type webPendingToolCall struct {
+	name             string
+	args             string
+	id               string
+	approvalID       string
+	approvalResolved bool
+	approvalGranted  bool
+	data             WebToolCallData
+}
+
+type webActiveToolCall struct {
+	id               string
+	name             string
+	approvalID       string
+	approvalResolved bool
+	approvalGranted  bool
 }
 
 // pendingAskUser pairs a question's response channel with the request payload so
@@ -625,11 +656,266 @@ func (h *WebHandler) OnToolCall(ev ToolCallEvent) {
 	if !ev.StartedAt.IsZero() {
 		data.StartedAt = ev.StartedAt.UnixMilli()
 	}
-	h.emit("tool_call", data)
+	h.mu.Lock()
+	h.pendingToolCalls = append(h.pendingToolCalls, webPendingToolCall{
+		name: ev.Name, args: ev.Args, id: ev.ToolCallID, data: data,
+	})
+	h.mu.Unlock()
+}
+
+// NotifyToolInProgress releases the model-announced call once the approval
+// layer has determined that no visible prompt is needed (safe/full-access/auto
+// reviewer). It intentionally matches ACP's pending→in_progress contract.
+func (h *WebHandler) NotifyToolInProgress(toolCallID, name, args string) {
+	h.releasePendingToolCall(toolCallID, name, args)
+}
+
+func pendingWebToolCallIndex(pending []webPendingToolCall, toolCallID, name, args string) int {
+	if toolCallID == "" {
+		index, matches := -1, 0
+		for i := range pending {
+			candidate := pending[i]
+			if candidate.name == name && (args == "" || candidate.args == args) {
+				index = i
+				matches++
+			}
+		}
+		if matches == 1 {
+			return index
+		}
+		return -1
+	}
+
+	exactIndex, exactMatches := -1, 0
+	uniqueIndex, idNameMatches := -1, 0
+	for i := range pending {
+		candidate := pending[i]
+		if candidate.id != toolCallID || candidate.name != name {
+			continue
+		}
+		uniqueIndex = i
+		idNameMatches++
+		if candidate.args == args {
+			exactIndex = i
+			exactMatches++
+		}
+	}
+	if exactMatches == 1 {
+		return exactIndex
+	}
+	if exactMatches > 1 {
+		return -1
+	}
+	if idNameMatches == 1 {
+		return uniqueIndex
+	}
+	return -1
+}
+
+func (h *WebHandler) markPendingToolApproval(
+	toolCallID, name, args, approvalID string,
+	approved bool,
+) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	index := pendingWebToolCallIndex(h.pendingToolCalls, toolCallID, name, args)
+	if index < 0 {
+		return
+	}
+	h.pendingToolCalls[index].approvalID = approvalID
+	h.pendingToolCalls[index].approvalResolved = true
+	h.pendingToolCalls[index].approvalGranted = approved
+}
+
+func (h *WebHandler) releasePendingToolCall(toolCallID, name, args string) {
+	h.mu.Lock()
+	index := pendingWebToolCallIndex(h.pendingToolCalls, toolCallID, name, args)
+	if index < 0 {
+		h.mu.Unlock()
+		return
+	}
+	pending := h.pendingToolCalls[index]
+	h.pendingToolCalls = append(h.pendingToolCalls[:index], h.pendingToolCalls[index+1:]...)
+	h.mu.Unlock()
+	h.emitReleasedToolCall(pending)
+}
+
+func (h *WebHandler) emitReleasedToolCall(pending webPendingToolCall) {
+	// The visible running timer starts when execution is released, not when the
+	// model first proposed the call before an approval wait.
+	pending.data.StartedAt = time.Now().UnixMilli()
+	if pending.approvalResolved {
+		pending.data.ApprovalID = pending.approvalID
+		pending.data.ApprovalGranted = pending.approvalGranted
+	}
+	h.mu.Lock()
+	h.activeToolCalls = append(h.activeToolCalls, webActiveToolCall{
+		id: pending.id, name: pending.name,
+		approvalID: pending.approvalID, approvalResolved: pending.approvalResolved,
+		approvalGranted: pending.approvalGranted,
+	})
+	h.mu.Unlock()
+	h.emit("tool_call", pending.data)
+}
+
+func isDeniedToolResult(output string) bool {
+	return strings.HasPrefix(strings.TrimSpace(output), "Tool execution was rejected by user.")
+}
+
+func (h *WebHandler) deniedForToolResult(ev ToolResultEvent) bool {
+	h.mu.Lock()
+	matches := 0
+	hasDeniedPending := false
+	for i := range h.pendingToolCalls {
+		candidate := h.pendingToolCalls[i]
+		if candidate.id == ev.ToolCallID && candidate.name == ev.Name {
+			matches++
+			if candidate.approvalResolved && !candidate.approvalGranted {
+				hasDeniedPending = true
+			}
+		}
+	}
+	for i := range h.activeToolCalls {
+		candidate := h.activeToolCalls[i]
+		if candidate.id == ev.ToolCallID && candidate.name == ev.Name {
+			matches++
+		}
+	}
+	h.mu.Unlock()
+	if hasDeniedPending {
+		// The call did not execute, so its middleware-owned rejection receipt is
+		// safe to recognize. This also survives the legacy per-ID meter being
+		// consumed by an approved sibling result first.
+		return isDeniedToolResult(ev.Output)
+	}
+	if matches <= 1 {
+		// The structured runner signal is authoritative for normal calls. Never
+		// interpret arbitrary tool output as a permission decision.
+		return ev.Denied
+	}
+	// A malformed reused model ID collapses the runner's legacy per-ID meter.
+	// Only in that collision path use the middleware-owned rejection receipt to
+	// separate a denied sibling from an approved one.
+	return isDeniedToolResult(ev.Output)
+}
+
+func (h *WebHandler) releasePendingToolCallForResult(ev ToolResultEvent, denied bool) bool {
+	h.mu.Lock()
+	activeMatches := 0
+	for i := range h.activeToolCalls {
+		candidate := h.activeToolCalls[i]
+		if candidate.id == ev.ToolCallID && candidate.name == ev.Name {
+			activeMatches++
+		}
+	}
+	// A non-denied result belongs to an already released occurrence whenever
+	// one exists. Do not consume a concurrently pending denied sibling.
+	if !denied && activeMatches > 0 {
+		h.mu.Unlock()
+		return false
+	}
+	index := -1
+	matches := 0
+	for i := range h.pendingToolCalls {
+		candidate := h.pendingToolCalls[i]
+		if candidate.id != ev.ToolCallID || candidate.name != ev.Name {
+			continue
+		}
+		if denied && (!candidate.approvalResolved || candidate.approvalGranted) {
+			continue
+		}
+		if index < 0 {
+			index = i
+		}
+		matches++
+	}
+	// A denial can safely consume the first exact denied gate: other pending or
+	// approved siblings are excluded above. For non-denied pre-execution errors,
+	// release only a unique occurrence; ambiguity must fail closed.
+	if index < 0 {
+		h.mu.Unlock()
+		return false
+	}
+	if matches != 1 {
+		h.mu.Unlock()
+		config.Logger().Printf(
+			"[web-handler] refusing ambiguous pending result for reused id %q (%d occurrences)",
+			ev.ToolCallID, matches,
+		)
+		return true
+	}
+	pending := h.pendingToolCalls[index]
+	h.pendingToolCalls = append(h.pendingToolCalls[:index], h.pendingToolCalls[index+1:]...)
+	h.mu.Unlock()
+	h.emitReleasedToolCall(pending)
+	return false
+}
+
+func (h *WebHandler) takeActiveToolCallForResult(
+	ev ToolResultEvent,
+	denied bool,
+) (webActiveToolCall, bool, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	index := -1
+	matches := 0
+	for i := range h.activeToolCalls {
+		candidate := h.activeToolCalls[i]
+		if candidate.id != ev.ToolCallID || candidate.name != ev.Name {
+			continue
+		}
+		candidateDenied := candidate.approvalResolved && !candidate.approvalGranted
+		if candidateDenied != denied {
+			continue
+		}
+		index = i
+		matches++
+	}
+	if index < 0 || matches != 1 {
+		if matches > 1 {
+			config.Logger().Printf(
+				"[web-handler] refusing ambiguous tool result for reused id %q (%d occurrences)",
+				ev.ToolCallID, matches,
+			)
+			return webActiveToolCall{}, false, true
+		}
+		return webActiveToolCall{}, false, false
+	}
+	if !denied {
+		for i := range h.pendingToolCalls {
+			candidate := h.pendingToolCalls[i]
+			if candidate.id != ev.ToolCallID || candidate.name != ev.Name {
+				continue
+			}
+			candidateDenied := candidate.approvalResolved && !candidate.approvalGranted
+			if candidateDenied {
+				continue
+			}
+			config.Logger().Printf(
+				"[web-handler] refusing active/pending ambiguous result for reused id %q",
+				ev.ToolCallID,
+			)
+			return webActiveToolCall{}, false, true
+		}
+	}
+	active := h.activeToolCalls[index]
+	h.activeToolCalls = append(h.activeToolCalls[:index], h.activeToolCalls[index+1:]...)
+	return active, true, false
 }
 
 func (h *WebHandler) OnToolResult(ev ToolResultEvent) {
 	name, output := ev.Name, ev.Output
+	denied := h.deniedForToolResult(ev)
+	// Denials and pre-execution errors never receive NotifyToolInProgress. Emit
+	// their call immediately before the result so the UI can render a terminal
+	// receipt without ever showing a pre-approval tool.
+	if h.releasePendingToolCallForResult(ev, denied) {
+		return
+	}
+	active, hasActive, ambiguous := h.takeActiveToolCallForResult(ev, denied)
+	if ambiguous {
+		return
+	}
 	errMsg := ""
 	if ev.Err != nil {
 		errMsg = ev.Err.Error()
@@ -638,9 +924,10 @@ func (h *WebHandler) OnToolResult(ev ToolResultEvent) {
 		Name:        name,
 		Output:      output,
 		ToolCallID:  ev.ToolCallID,
+		ApprovalID:  active.approvalID,
 		Error:       errMsg,
 		DurationMs:  ev.Duration.Milliseconds(),
-		Denied:      ev.Denied,
+		Denied:      denied,
 		Surface:     ev.Surface,
 		Phase:       ev.Phase,
 		OperationID: ev.OperationID,
@@ -649,6 +936,9 @@ func (h *WebHandler) OnToolResult(ev ToolResultEvent) {
 		Provider:    ev.Provider,
 		Model:       ev.Model,
 		Artifacts:   ev.Artifacts,
+	}
+	if !hasActive {
+		data.ApprovalID = ""
 	}
 	// Dual-channel for execute: parse model string into streams/meta for UI.
 	if name == "execute" {
@@ -725,6 +1015,10 @@ func (h *WebHandler) OnAgentStart() {
 }
 
 func (h *WebHandler) OnAgentDone(err error) {
+	h.mu.Lock()
+	h.pendingToolCalls = nil
+	h.activeToolCalls = nil
+	h.mu.Unlock()
 	if err == nil {
 		h.emit("agent_done", WebDoneData{})
 		return
@@ -806,6 +1100,11 @@ func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 		BillableSummary: req.BillableSummary,
 	}
 	h.pendingApproval[id] = &webPendingApproval{ch: respCh, data: data}
+	if index := pendingWebToolCallIndex(
+		h.pendingToolCalls, req.ToolCallID, req.ToolName, req.ToolArgs,
+	); index >= 0 {
+		h.pendingToolCalls[index].approvalID = id
+	}
 	h.mu.Unlock()
 
 	defer func() {
@@ -818,6 +1117,10 @@ func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 
 	select {
 	case resp := <-respCh:
+		h.markPendingToolApproval(req.ToolCallID, req.ToolName, req.ToolArgs, id, resp.Approved)
+		if resp.Approved {
+			h.releasePendingToolCall(req.ToolCallID, req.ToolName, req.ToolArgs)
+		}
 		return resp, nil
 	case <-ctx.Done():
 		return ApprovalResponse{}, ctx.Err()

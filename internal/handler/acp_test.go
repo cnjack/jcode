@@ -265,7 +265,7 @@ func TestACPSubagentDoneClearsMappingWithoutUpdate(t *testing.T) {
 
 func TestACPToolResultClearsStaleSubagentMapping(t *testing.T) {
 	h := NewACPHandler(nil, "sess", "/repo")
-	h.einoToACP["eino_1"] = "tc_1"
+	h.einoToACP["eino_1"] = []acp.ToolCallId{"tc_1"}
 	h.subagentCalls["scan-repo"] = "tc_1"
 	// Terminal status already sent (e.g. permission rejection): OnToolResult
 	// returns before sending, but must still drop the stale mapping.
@@ -275,6 +275,65 @@ func TestACPToolResultClearsStaleSubagentMapping(t *testing.T) {
 
 	if _, ok := h.subagentCalls["scan-repo"]; ok {
 		t.Fatal("tool result did not clear stale subagent mapping")
+	}
+}
+
+func TestACPPendingApprovalMatchesExactOccurrence(t *testing.T) {
+	pending := []pendingApproval{
+		{acpID: "tc_1", toolCallID: "reused", toolName: "write", toolArgs: `{"file_path":"first.txt"}`},
+		{acpID: "tc_2", toolCallID: "reused", toolName: "write", toolArgs: `{"file_path":"second.txt"}`},
+	}
+	if index := pendingApprovalIndex(
+		pending, "reused", "write", `{"file_path":"first.txt"}`, false,
+	); index != 0 {
+		t.Fatalf("first occurrence index = %d, want 0", index)
+	}
+	if index := pendingApprovalIndex(
+		pending, "reused", "write", `{"file_path":"second.txt"}`, false,
+	); index != 1 {
+		t.Fatalf("second occurrence index = %d, want 1", index)
+	}
+	if index := pendingApprovalIndex(
+		pending, "unknown", "write", `{"file_path":"first.txt"}`, false,
+	); index != -1 {
+		t.Fatalf("unknown non-empty id matched occurrence %d", index)
+	}
+	if got := uniqueACPToolCallID([]acp.ToolCallId{"tc_1"}); got != "tc_1" {
+		t.Fatalf("unique ACP id = %q", got)
+	}
+	if got := uniqueACPToolCallID([]acp.ToolCallId{"tc_1", "tc_2"}); got != "" {
+		t.Fatalf("ambiguous ACP ids selected %q instead of failing closed", got)
+	}
+	if index := pendingApprovalIndex(
+		pending[:1], "reused", "write", `{"file_path":"normalized.txt"}`, false,
+	); index != 0 {
+		t.Fatalf("unique id/name fallback index = %d, want 0", index)
+	}
+	if index := pendingApprovalIndex(
+		pending, "reused", "write", `{"file_path":"normalized.txt"}`, false,
+	); index != -1 {
+		t.Fatalf("ambiguous id/name fallback matched occurrence %d", index)
+	}
+	identical := []pendingApproval{
+		{acpID: "tc_1", toolCallID: "reused", toolName: "write", toolArgs: `{}`},
+		{acpID: "tc_2", toolCallID: "reused", toolName: "write", toolArgs: `{}`},
+	}
+	if index := pendingApprovalIndex(identical, "reused", "write", `{}`, false); index != -1 {
+		t.Fatalf("identical duplicate occurrences matched index %d", index)
+	}
+	identical[0].claimed = true
+	if index := pendingApprovalIndex(identical, "reused", "write", `{}`, true); index != 1 {
+		t.Fatalf("claimed occurrence filtering matched index %d, want 1", index)
+	}
+	legacy := []pendingApproval{
+		{acpID: "tc_1", toolName: "write", toolArgs: `{}`},
+		{acpID: "tc_2", toolName: "write", toolArgs: `{}`},
+	}
+	if index := pendingApprovalIndex(legacy[:1], "", "write", `{}`, false); index != 0 {
+		t.Fatalf("unique legacy occurrence index = %d, want 0", index)
+	}
+	if index := pendingApprovalIndex(legacy, "", "write", `{}`, false); index != -1 {
+		t.Fatalf("legacy duplicate occurrences matched index %d", index)
 	}
 }
 

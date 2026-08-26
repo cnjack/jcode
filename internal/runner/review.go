@@ -98,7 +98,7 @@ func (s *ApprovalState) tryReview(ctx context.Context, toolName, toolArgs string
 	switch res.Outcome {
 	case review.Allow:
 		s.breaker.recordNonDenial()
-		s.notifyToolInProgress(toolName, toolArgs)
+		s.notifyToolInProgress(ctx, toolName, toolArgs)
 		return true, true, nil
 	case review.Deny:
 		if s.breaker.recordDenial() {

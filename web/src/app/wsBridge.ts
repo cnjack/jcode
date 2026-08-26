@@ -171,6 +171,8 @@ export function createWSHandlers(
           surface: d.surface,
           phase: lifecycle.phase,
           operationID: d.operation_id,
+          approvalID: d.approval_id,
+          approvalGranted: d.approval_granted,
         }),
       )
     },
@@ -202,6 +204,7 @@ export function createWSHandlers(
       const action = chatActions.resolveToolCall({
         name: d.name,
         toolCallID: d.tool_call_id,
+        approvalID: d.approval_id,
         output: d.output,
         displayOutput: d.display_output,
         error: d.error,

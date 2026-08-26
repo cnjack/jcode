@@ -21,15 +21,18 @@ import type { ApprovalDecisionActions } from 'jcode-ui-core/primitives'
 
 export interface ApprovalBannerProps {
   approval: Approval
+  /** Render inside the matching tool card. The tool header already owns the
+   *  verb/target, and resolved state stays as a compact inline header badge. */
+  embedded?: boolean
 }
 
-export const ApprovalBanner = memo(function ApprovalBanner({ approval }: ApprovalBannerProps) {
+export const ApprovalBanner = memo(function ApprovalBanner({ approval, embedded = false }: ApprovalBannerProps) {
   return (
     <ApprovalBlock
       approval={approval}
-      className="jcode-approval"
-      renderPending={(a, acts) => <PendingCard approval={a} actions={acts} />}
-      renderResolved={(a) => <ResolvedNote approval={a} />}
+      className={`jcode-approval${embedded ? ' jcode-approval--embedded' : ''}`}
+      renderPending={(a, acts) => <PendingCard approval={a} actions={acts} embedded={embedded} />}
+      renderResolved={(a) => embedded ? null : <ResolvedNote approval={a} />}
     />
   )
 })
@@ -47,31 +50,41 @@ function optionButtonClass(kind: ApprovalOption['kind']): string {
   }
 }
 
-function PendingCard({ approval, actions }: { approval: Approval; actions: ApprovalDecisionActions }) {
+function PendingCard({
+  approval,
+  actions,
+  embedded,
+}: {
+  approval: Approval
+  actions: ApprovalDecisionActions
+  embedded: boolean
+}) {
   const target = useMemo(() => extractTarget(approval), [approval])
   if (approval.approvalClass === 'billable_external') {
-    return <BillablePendingCard approval={approval} actions={actions} />
+    return <BillablePendingCard approval={approval} actions={actions} embedded={embedded} />
   }
   const Icon = toolIcon(approval.tool_name)
   const disabled = !!approval.resolving
   const armed = actions.armed || actions.armedOptionId !== null
   const hasOptions = !!approval.options?.length
   return (
-    <div className={`jcode-approval-card${armed ? ' is-armed' : ''}${approval.is_external ? ' is-external' : ''}`}>
+    <div className={`jcode-approval-card${embedded ? ' jcode-approval-card--embedded' : ''}${armed ? ' is-armed' : ''}${approval.is_external ? ' is-external' : ''}`}>
       <div className="jcode-approval-card__head">
         <span className="jcode-approval-card__icon" aria-hidden>
           <Icon className="h-4 w-4" />
         </span>
         <div className="jcode-approval-card__titles">
           <span className="jcode-approval-card__label">Approval needed</span>
-          <span className="jcode-approval-card__verb">
-            {verbOf(approval.tool_name)}
-            {target ? (
-              <code className="jcode-approval-card__target" title={target}>
-                {target}
-              </code>
-            ) : null}
-          </span>
+          {!embedded && (
+            <span className="jcode-approval-card__verb">
+              {verbOf(approval.tool_name)}
+              {target ? (
+                <code className="jcode-approval-card__target" title={target}>
+                  {target}
+                </code>
+              ) : null}
+            </span>
+          )}
         </div>
         {approval.is_external && <span className="jcode-approval-card__badge">external</span>}
       </div>
@@ -166,7 +179,15 @@ function PendingCard({ approval, actions }: { approval: Approval; actions: Appro
   )
 }
 
-function BillablePendingCard({ approval, actions }: { approval: Approval; actions: ApprovalDecisionActions }) {
+function BillablePendingCard({
+  approval,
+  actions,
+  embedded,
+}: {
+  approval: Approval
+  actions: ApprovalDecisionActions
+  embedded: boolean
+}) {
   const summary = approval.billableSummary
   const count = Math.max(1, summary?.count ?? 1)
   const capability = summary?.capability || (approval.tool_name === 'generate_image' ? 'image.generate' : '')
@@ -190,7 +211,7 @@ function BillablePendingCard({ approval, actions }: { approval: Approval; action
   const question = isImage ? `Generate ${unit}?` : isSearch ? `Run ${unit}?` : `Send ${unit}?`
 
   return (
-    <div className="jcode-approval-card jcode-approval-card--billable is-external">
+    <div className={`jcode-approval-card jcode-approval-card--billable${embedded ? ' jcode-approval-card--embedded' : ''} is-external`}>
       <div className="jcode-approval-card__head">
         <span className="jcode-approval-card__icon" aria-hidden>
           <Icon className="h-4 w-4" />

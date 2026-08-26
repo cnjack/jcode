@@ -216,6 +216,8 @@ export default {
     add: '추가',
     copilotHint: 'Enter로 전송 · Shift+Enter로 줄바꿈 · Esc로 취소',
     turnDuration: '이번 턴 소요 시간',
+    turnShowWork: '이번 턴의 작업 보기',
+    turnHideWork: '이번 턴의 작업 숨기기',
     wechatOn: 'WeChat 알림 켜짐',
     wechatOff: 'WeChat 알림 꺼짐',
     modes: {
@@ -281,6 +283,7 @@ export default {
     durationSeconds: '{n}초',
     durationMinutes: '{m}분 {s}초',
     durationMinutesOnly: '{m}분',
+    durationHours: '{h}시간 {m}분 {s}초',
   },
 
   approval: {

@@ -83,7 +83,7 @@ export const api = {
       body: JSON.stringify({ before_user_message: beforeUserMessage }),
     }),
   health: () =>
-    request<{ status: string; version: string; pwd: string; project?: string; workspace_key?: string; workspace_kind?: WorkspaceKind; provider: string; model: string; agent?: string; mode: string; session_id: string; recent_project?: string; recent_session_id?: string; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
+    request<{ status: string; version: string; pwd: string; project?: string; workspace_key?: string; workspace_kind?: WorkspaceKind; provider: string; model: string; agent?: string; mode: string; session_id: string; fresh_session?: boolean; recent_project?: string; recent_session_id?: string; recent_workspace_kind?: WorkspaceKind; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
       '/api/health',
     ),
   // authVerify validates a token typed into the login gate. skipAuth keeps a 401
@@ -94,7 +94,7 @@ export const api = {
       skipAuth: true,
       headers: { Authorization: `Bearer ${token}` },
     }),
-  status: () =>
+  status: (taskId?: string) =>
     request<{
       running: boolean
       ws_clients: number
@@ -107,7 +107,7 @@ export const api = {
       agent?: string
       mode: string
       token?: TokenUpdateData
-    }>('/api/status'),
+    }>(`/api/status${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`),
   config: () => request<{ provider: string; model: string; small_model: string; max_iterations: number; language?: string; theme?: string }>('/api/config'),
   setAccountPreferences: (prefs: { language?: string; theme?: string }) =>
     request<{ language: string; theme: string }>('/api/account-preferences', {
@@ -135,7 +135,7 @@ export const api = {
     }),
   deleteSession: (id: string) =>
     request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  newSession: (sessionId?: string, signal?: AbortSignal, workspaceKind?: WorkspaceKind) =>
+  newSession: (sessionId?: string, signal?: AbortSignal, workspaceKind?: WorkspaceKind, projectPath?: string) =>
     request<{
       status: string
       session_id: string
@@ -159,8 +159,8 @@ export const api = {
       token?: TokenUpdateData
     }>('/api/sessions', {
       method: 'POST',
-      body: sessionId || workspaceKind
-        ? JSON.stringify({ session_id: sessionId, workspace_kind: workspaceKind })
+      body: sessionId || workspaceKind || projectPath
+        ? JSON.stringify({ session_id: sessionId, workspace_kind: workspaceKind, pwd: projectPath })
         : undefined,
       signal,
     }),

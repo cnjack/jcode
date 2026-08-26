@@ -52,17 +52,18 @@
 .jcode-chat-col,
 .chat-col {
   width: 100%;
-  max-width: var(--jcode-col-max, min(56rem, 100%));
+  max-width: var(--jcode-col-max, min(64rem, 100%));
   margin-left: auto;
   margin-right: auto;
-  padding-left: var(--jcode-col-pad-x, 1rem);
-  padding-right: var(--jcode-col-pad-x, 1rem);
+  padding-left: var(--jcode-col-pad-x, clamp(1rem, 2.2vw, 2rem));
+  padding-right: var(--jcode-col-pad-x, clamp(1rem, 2.2vw, 2rem));
   box-sizing: border-box;
 }
 
-/* Indent under the avatar column (replaces hard-coded pl-9). */
+/* Optional shared body inset. The default is zero because message avatars are
+ * no longer part of the visible conversation layout. */
 .jcode-gutter {
-  padding-left: var(--jcode-gutter, 2.25rem);
+  padding-left: var(--jcode-gutter, 0rem);
 }
 
 /* Thread root — always fill host; never inherit host max-width quirks. */
@@ -81,7 +82,7 @@
 .jcode-chat-input {
   position: relative;
   width: 100%;
-  max-width: var(--jcode-col-max, min(56rem, 100%));
+  max-width: var(--jcode-col-max, min(64rem, 100%));
   margin-left: auto;
   margin-right: auto;
   padding: 0.65rem var(--jcode-col-pad-x, 0.75rem) 0.7rem;
@@ -299,6 +300,59 @@
 /* ─── Message polish ─── */
 .jcode-message {
   transition: background-color var(--jcode-duration-normal) var(--jcode-ease-out);
+}
+.jcode-message[data-role='user'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.jcode-message[data-role='user'] .jcode-message__header {
+  align-self: flex-end;
+}
+.jcode-message[data-role='user']
+  :is(
+    .jcode-message__attachments,
+    .jcode-message__reasoning,
+    .jcode-message__editor,
+    .jcode-message__sources,
+    .jcode-message__footer
+  ) {
+  max-width: min(42rem, 72%);
+  padding-left: 0;
+}
+.jcode-message[data-role='user'] .jcode-message__editor {
+  width: min(42rem, 72%);
+}
+.jcode-message[data-role='user'] .jcode-message__footer {
+  justify-content: flex-end;
+}
+.jcode-message-bubble {
+  width: fit-content;
+  max-width: min(42rem, 72%);
+  padding: 0.7rem 1rem;
+  border-radius: var(--jcode-radius-2xl);
+  background: var(--jcode-color-muted);
+  color: var(--jcode-color-foreground);
+  overflow-wrap: anywhere;
+}
+.jcode-message-bubble:empty {
+  display: none;
+}
+@media (max-width: 44.9375rem) {
+  .jcode-message[data-role='user']
+    :is(
+      .jcode-message__attachments,
+      .jcode-message__reasoning,
+      .jcode-message__editor,
+      .jcode-message__sources,
+      .jcode-message__footer
+    ),
+  .jcode-message-bubble {
+    max-width: 92%;
+  }
+  .jcode-message[data-role='user'] .jcode-message__editor {
+    width: 92%;
+  }
 }
 .jcode-message .jcode-msg-avatar {
   box-shadow:
@@ -830,6 +884,67 @@
   border-color: color-mix(in srgb, var(--jcode-color-primary) 28%, var(--jcode-color-border));
 }
 
+/* ─── Completed turn ───
+ * A quiet elapsed-time divider owns the intermediate-work disclosure. The
+ * final assistant message and durable receipts remain ordinary timeline rows. */
+.jcode-turn-disclosure {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+  padding-top: 0.45rem;
+  padding-bottom: 0.15rem;
+  border: 0;
+  background: transparent;
+  color: var(--jcode-color-muted-foreground);
+  text-align: left;
+}
+button.jcode-turn-disclosure {
+  cursor: pointer;
+}
+.jcode-turn-disclosure__label {
+  flex-shrink: 0;
+  font-family: var(--jcode-font-sans);
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+  opacity: 0.82;
+  transition:
+    color var(--jcode-duration-fast) var(--jcode-ease-out),
+    opacity var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-turn-disclosure__chevron {
+  opacity: 0.55;
+  transition:
+    transform var(--jcode-duration-normal) var(--jcode-ease-out),
+    opacity var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-completed-turn[data-expanded='true'] .jcode-turn-disclosure__chevron {
+  transform: rotate(90deg);
+}
+.jcode-turn-disclosure__rule {
+  height: 1px;
+  min-width: 1.5rem;
+  flex: 1;
+  background: color-mix(in srgb, var(--jcode-color-border) 78%, transparent);
+  transition: background-color var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+button.jcode-turn-disclosure:hover .jcode-turn-disclosure__label,
+button.jcode-turn-disclosure:hover .jcode-turn-disclosure__chevron {
+  color: var(--jcode-color-foreground);
+  opacity: 0.9;
+}
+button.jcode-turn-disclosure:hover .jcode-turn-disclosure__rule {
+  background: color-mix(in srgb, var(--jcode-color-muted-foreground) 34%, transparent);
+}
+.jcode-turn-activity {
+  padding-top: 0.15rem;
+  padding-bottom: 0.35rem;
+  animation: jcode-fade-in var(--jcode-duration-normal) var(--jcode-ease-out) both;
+}
+
 /* ─── Turn changes (per-turn "Changed N files" summary, opencode-style) ───
  * Header is a slim muted row; expanded file rows reuse the batch-row look
  * (borderless slot header + independent registry-rendered diff bodies). */
@@ -1003,6 +1118,30 @@
   background: var(--jcode-color-surface);
   box-shadow: var(--jcode-shadow-sm);
   animation: jcode-card-in var(--jcode-duration-slow) var(--jcode-ease-out) both;
+}
+.jcode-toolcall__approval {
+  margin-top: 0.3rem;
+}
+.jcode-approval--embedded .jcode-approval-card {
+  margin: 0.2rem 0 0.45rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--jcode-radius-lg);
+  border-color: color-mix(in srgb, var(--jcode-color-warning-fg) 24%, var(--jcode-color-border));
+  background: color-mix(in srgb, var(--jcode-color-warning-fg) 4%, var(--jcode-color-surface));
+  box-shadow: none;
+}
+.jcode-approval--embedded .jcode-approval-card__icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  background: color-mix(in srgb, var(--jcode-color-warning-fg) 8%, var(--jcode-color-muted));
+  color: var(--jcode-color-warning-fg);
+}
+.jcode-approval--embedded .jcode-approval-card__details {
+  margin-top: 0.5rem;
+}
+.jcode-approval--embedded .jcode-approval-card__actions {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
 }
 .jcode-approval-card.is-external {
   border-color: color-mix(in srgb, var(--jcode-color-error-fg) 28%, var(--jcode-color-border));
@@ -1614,6 +1753,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .jcode-approval-card,
+  .jcode-turn-activity,
   .jcode-ask-user .jcode-interactive-card {
     animation: none;
   }
@@ -1652,6 +1792,7 @@
 /* Focus-visible baseline for interactive controls inside the library. */
 .jcode-toolcall button:focus-visible,
 .jcode-message button:focus-visible,
+.jcode-turn-disclosure:focus-visible,
 .jcode-sources button:focus-visible,
 .jcode-reasoning button:focus-visible {
   outline: 2px solid var(--jcode-accent-border);

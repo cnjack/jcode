@@ -6,12 +6,12 @@ nav_order: 6
 
 # Generated API
 
-> Auto-generated from TypeScript sources on **2026-07-12**.
+> Auto-generated from TypeScript sources on **2026-08-26**.
 > Do not edit by hand — run `node script/generate_jcode_ui_api_docs.mjs`.
 >
 > Human-written guides: [Types](/chat-ui/docs/api/types) · [Runtime](/chat-ui/docs/api/runtime) · [Hooks](/chat-ui/docs/api/hooks) · [Primitives](/chat-ui/docs/api/primitives) · [Components](/chat-ui/docs/api/components).
 
-**304** public symbols extracted.
+**362** public symbols extracted.
 
 ## `jcode-ui`
 
@@ -30,6 +30,9 @@ nav_order: 6
 | [`CanvasPanel`](#jcode-ui-canvaspanel) | const | `packages/jcode-ui/src/canvas/CanvasPanel.tsx` |
 | [`ChatInput`](#jcode-ui-chatinput) | const | `packages/jcode-ui/src/components/ChatInput.tsx` |
 | [`CompactToolRow`](#jcode-ui-compacttoolrow) | const | `packages/jcode-ui/src/components/CompactToolRow.tsx` |
+| [`CompletedTurnCard`](#jcode-ui-completedturncard) | const | `packages/jcode-ui/src/components/CompletedTurnCard.tsx` |
+| [`ComputerActRenderer`](#jcode-ui-computeractrenderer) | const | `packages/jcode-ui/src/toolRenderers/computerAct.tsx` |
+| [`ComputerShotRenderer`](#jcode-ui-computershotrenderer) | const | `packages/jcode-ui/src/toolRenderers/computerShot.tsx` |
 | [`ConnectionBanner`](#jcode-ui-connectionbanner) | const | `packages/jcode-ui/src/components/ConnectionBanner.tsx` |
 | [`ContextBar`](#jcode-ui-contextbar) | const | `packages/jcode-ui/src/components/ContextBar.tsx` |
 | [`DiffRenderer`](#jcode-ui-diffrenderer) | const | `packages/jcode-ui/src/toolRenderers/diff.tsx` |
@@ -37,6 +40,7 @@ nav_order: 6
 | [`ExportButton`](#jcode-ui-exportbutton) | const | `packages/jcode-ui/src/components/ExportButton.tsx` |
 | [`FileTreeRenderer`](#jcode-ui-filetreerenderer) | const | `packages/jcode-ui/src/toolRenderers/fileTree.tsx` |
 | [`FileViewerRenderer`](#jcode-ui-fileviewerrenderer) | const | `packages/jcode-ui/src/toolRenderers/fileViewer.tsx` |
+| [`GeneratedImageCard`](#jcode-ui-generatedimagecard) | const | `packages/jcode-ui/src/components/GeneratedImageCard.tsx` |
 | [`GenericRenderer`](#jcode-ui-genericrenderer) | const | `packages/jcode-ui/src/toolRenderers/generic.tsx` |
 | [`Message`](#jcode-ui-message) | const | `packages/jcode-ui/src/components/Message.tsx` |
 | [`PendingAttachmentList`](#jcode-ui-pendingattachmentlist) | const | `packages/jcode-ui/src/components/Attachment.tsx` |
@@ -69,6 +73,8 @@ nav_order: 6
 | [`balanceEmphasis`](#jcode-ui-balanceemphasis) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`balanceInlineCode`](#jcode-ui-balanceinlinecode) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`bindCodeBlockCopy`](#jcode-ui-bindcodeblockcopy) | function | `packages/jcode-ui/src/lib/markdown.ts` |
+| [`BranchPicker`](#jcode-ui-branchpicker) | function | `packages/jcode-ui/src/product/BranchPicker.tsx` |
+| [`ChatInput`](#jcode-ui-chatinput) | function | `packages/jcode-ui/src/product/ChatInput.tsx` |
 | [`completeStreamingMarkdown`](#jcode-ui-completestreamingmarkdown) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`completeStreamingMarkdownInfo`](#jcode-ui-completestreamingmarkdowninfo) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`completeTableRow`](#jcode-ui-completetablerow) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
@@ -76,48 +82,68 @@ nav_order: 6
 | [`extCategory`](#jcode-ui-extcategory) | function | `packages/jcode-ui/src/toolRenderers/fileTree.tsx` |
 | [`formatQuote`](#jcode-ui-formatquote) | function | `packages/jcode-ui/src/components/QuoteSelection.tsx` |
 | [`formatRelative`](#jcode-ui-formatrelative) | function | `packages/jcode-ui/src/components/ThreadList.tsx` |
+| [`GoalBanner`](#jcode-ui-goalbanner) | function | `packages/jcode-ui/src/product/GoalBanner.tsx` |
 | [`hashString`](#jcode-ui-hashstring) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`headTail`](#jcode-ui-headtail) | function | `packages/jcode-ui/src/toolRenderers/terminal.tsx` |
+| [`isRemotePath`](#jcode-ui-isremotepath) | function | `packages/jcode-ui/src/product/remote.ts` |
 | [`ModelSelector`](#jcode-ui-modelselector) | function | `packages/jcode-ui/src/components/ModelSelector.tsx` |
 | [`parseCodeInfo`](#jcode-ui-parsecodeinfo) | function | `packages/jcode-ui/src/lib/markdown.ts` |
 | [`parsePathList`](#jcode-ui-parsepathlist) | function | `packages/jcode-ui/src/toolRenderers/fileTree.tsx` |
+| [`parseRemoteLabel`](#jcode-ui-parseremotelabel) | function | `packages/jcode-ui/src/product/remote.ts` |
 | [`parseStackTrace`](#jcode-ui-parsestacktrace) | function | `packages/jcode-ui/src/toolRenderers/stackTrace.tsx` |
 | [`parseTestOutput`](#jcode-ui-parsetestoutput) | function | `packages/jcode-ui/src/toolRenderers/testResults.tsx` |
+| [`ProviderIcon`](#jcode-ui-providericon) | function | `packages/jcode-ui/src/product/ProviderIcon.tsx` |
+| [`readDraft`](#jcode-ui-readdraft) | function | `packages/jcode-ui/src/product/drafts.ts` |
 | [`Reasoning`](#jcode-ui-reasoning) | function | `packages/jcode-ui/src/components/Reasoning.tsx` |
 | [`registerCodeBlockRenderer`](#jcode-ui-registercodeblockrenderer) | function | `packages/jcode-ui/src/lib/markdown.ts` |
 | [`registerMathRenderer`](#jcode-ui-registermathrenderer) | function | `packages/jcode-ui/src/lib/markdown.ts` |
 | [`renderMarkdown`](#jcode-ui-rendermarkdown) | function | `packages/jcode-ui/src/lib/markdown.ts` |
 | [`renderMarkdownStreaming`](#jcode-ui-rendermarkdownstreaming) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
+| [`resolveProductComposerStrings`](#jcode-ui-resolveproductcomposerstrings) | function | `packages/jcode-ui/src/product/strings.ts` |
 | [`scanFenceState`](#jcode-ui-scanfencestate) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`Sources`](#jcode-ui-sources) | function | `packages/jcode-ui/src/components/Sources.tsx` |
 | [`splitTopLevelBlocks`](#jcode-ui-splittoplevelblocks) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`stripTrailingLink`](#jcode-ui-striptrailinglink) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`Thread`](#jcode-ui-thread) | function | `packages/jcode-ui/src/components/Thread.tsx` |
+| [`ToolIcon`](#jcode-ui-toolicon) | function | `packages/jcode-ui/src/components/toolIcons.tsx` |
 | [`ToolRegistryProvider`](#jcode-ui-toolregistryprovider) | function | `packages/jcode-ui/src/components/ToolRegistryContext.tsx` |
 | [`ToolRow`](#jcode-ui-toolrow) | function | `packages/jcode-ui/src/components/ToolRow.tsx` |
 | [`ToolRowHeader`](#jcode-ui-toolrowheader) | function | `packages/jcode-ui/src/components/ToolRow.tsx` |
 | [`toolTreeToGraph`](#jcode-ui-tooltreetograph) | function | `packages/jcode-ui/src/canvas/toolTreeToGraph.ts` |
 | [`truncate`](#jcode-ui-truncate) | function | `packages/jcode-ui/src/toolRenderers/terminal.tsx` |
+| [`useComposerStrings`](#jcode-ui-usecomposerstrings) | function | `packages/jcode-ui/src/product/useComposerStrings.ts` |
 | [`useStreamingMarkdown`](#jcode-ui-usestreamingmarkdown) | function | `packages/jcode-ui/src/lib/useStreamingMarkdown.ts` |
 | [`useToolRegistry`](#jcode-ui-usetoolregistry) | function | `packages/jcode-ui/src/components/ToolRegistryContext.tsx` |
+| [`workspaceName`](#jcode-ui-workspacename) | function | `packages/jcode-ui/src/product/remote.ts` |
+| [`WorkspacePicker`](#jcode-ui-workspacepicker) | function | `packages/jcode-ui/src/product/WorkspacePicker.tsx` |
+| [`writeDraft`](#jcode-ui-writedraft) | function | `packages/jcode-ui/src/product/drafts.ts` |
 | [`ActivityGroupCardProps`](#jcode-ui-activitygroupcardprops) | interface | `packages/jcode-ui/src/components/ActivityGroupCard.tsx` |
 | [`ApiBaseProviderProps`](#jcode-ui-apibaseproviderprops) | interface | `packages/jcode-ui/src/lib/apiBaseContext.tsx` |
 | [`ApprovalBannerProps`](#jcode-ui-approvalbannerprops) | interface | `packages/jcode-ui/src/components/ApprovalBanner.tsx` |
 | [`ArtifactProps`](#jcode-ui-artifactprops) | interface | `packages/jcode-ui/src/components/Artifact.tsx` |
 | [`AskUserCardProps`](#jcode-ui-askusercardprops) | interface | `packages/jcode-ui/src/components/AskUserCard.tsx` |
+| [`AskUserCardStrings`](#jcode-ui-askusercardstrings) | interface | `packages/jcode-ui/src/components/AskUserCard.tsx` |
 | [`AttachmentListProps`](#jcode-ui-attachmentlistprops) | interface | `packages/jcode-ui/src/components/Attachment.tsx` |
 | [`AttachmentProps`](#jcode-ui-attachmentprops) | interface | `packages/jcode-ui/src/components/Attachment.tsx` |
 | [`AudioPlayerProps`](#jcode-ui-audioplayerprops) | interface | `packages/jcode-ui/src/voice/AudioPlayer.tsx` |
 | [`BranchPickerProps`](#jcode-ui-branchpickerprops) | interface | `packages/jcode-ui/src/components/BranchPicker.tsx` |
+| [`BrowseFolder`](#jcode-ui-browsefolder) | interface | `packages/jcode-ui/src/product/types.ts` |
+| [`BrowseResult`](#jcode-ui-browseresult) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`CanvasControlsProps`](#jcode-ui-canvascontrolsprops) | interface | `packages/jcode-ui/src/canvas/CanvasControls.tsx` |
 | [`CanvasPanelProps`](#jcode-ui-canvaspanelprops) | interface | `packages/jcode-ui/src/canvas/CanvasPanel.tsx` |
 | [`ChatInputProps`](#jcode-ui-chatinputprops) | interface | `packages/jcode-ui/src/components/ChatInput.tsx` |
 | [`CodeBlockHookArgs`](#jcode-ui-codeblockhookargs) | interface | `packages/jcode-ui/src/lib/markdown.ts` |
 | [`CompactToolRowProps`](#jcode-ui-compacttoolrowprops) | interface | `packages/jcode-ui/src/components/CompactToolRow.tsx` |
+| [`CompletedTurnCardProps`](#jcode-ui-completedturncardprops) | interface | `packages/jcode-ui/src/components/CompletedTurnCard.tsx` |
 | [`CompletionResult`](#jcode-ui-completionresult) | interface | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`ContextBarProps`](#jcode-ui-contextbarprops) | interface | `packages/jcode-ui/src/components/ContextBar.tsx` |
+| [`CustomAgentInfo`](#jcode-ui-customagentinfo) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`ExploringGroupCardProps`](#jcode-ui-exploringgroupcardprops) | interface | `packages/jcode-ui/src/components/ExploringGroupCard.tsx` |
 | [`ExportButtonProps`](#jcode-ui-exportbuttonprops) | interface | `packages/jcode-ui/src/components/ExportButton.tsx` |
+| [`GeneratedImageCardProps`](#jcode-ui-generatedimagecardprops) | interface | `packages/jcode-ui/src/components/GeneratedImageCard.tsx` |
+| [`GeneratedImageCardStrings`](#jcode-ui-generatedimagecardstrings) | interface | `packages/jcode-ui/src/components/GeneratedImageCard.tsx` |
+| [`GitBranchesResult`](#jcode-ui-gitbranchesresult) | interface | `packages/jcode-ui/src/product/types.ts` |
+| [`GitCheckoutResult`](#jcode-ui-gitcheckoutresult) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`KatexApi`](#jcode-ui-katexapi) | interface | `packages/jcode-ui/src/plugins/external-modules.d.ts` |
 | [`KatexOptions`](#jcode-ui-katexoptions) | interface | `packages/jcode-ui/src/plugins/external-modules.d.ts` |
 | [`KatexPluginOptions`](#jcode-ui-katexpluginoptions) | interface | `packages/jcode-ui/src/plugins/katex.ts` |
@@ -126,20 +152,31 @@ nav_order: 6
 | [`MermaidRenderResult`](#jcode-ui-mermaidrenderresult) | interface | `packages/jcode-ui/src/plugins/external-modules.d.ts` |
 | [`MessageProps`](#jcode-ui-messageprops) | interface | `packages/jcode-ui/src/components/Message.tsx` |
 | [`MessageSlots`](#jcode-ui-messageslots) | interface | `packages/jcode-ui/src/components/Message.tsx` |
+| [`ModelInfo`](#jcode-ui-modelinfo) | interface | `packages/jcode-ui/src/product/types.ts` |
+| [`ModelRef`](#jcode-ui-modelref) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`ModelSelectorOption`](#jcode-ui-modelselectoroption) | interface | `packages/jcode-ui/src/components/ModelSelector.tsx` |
 | [`ModelSelectorProps`](#jcode-ui-modelselectorprops) | interface | `packages/jcode-ui/src/components/ModelSelector.tsx` |
 | [`PendingAttachmentListProps`](#jcode-ui-pendingattachmentlistprops) | interface | `packages/jcode-ui/src/components/Attachment.tsx` |
+| [`ProductChatInputProps`](#jcode-ui-productchatinputprops) | interface | `packages/jcode-ui/src/product/ChatInput.tsx` |
+| [`ProductComposerHost`](#jcode-ui-productcomposerhost) | interface | `packages/jcode-ui/src/product/host.ts` |
+| [`ProductComposerStrings`](#jcode-ui-productcomposerstrings) | interface | `packages/jcode-ui/src/product/strings.ts` |
+| [`ProviderInfo`](#jcode-ui-providerinfo) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`QuoteSelectionProps`](#jcode-ui-quoteselectionprops) | interface | `packages/jcode-ui/src/components/QuoteSelection.tsx` |
+| [`ReasoningOption`](#jcode-ui-reasoningoption) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`ReasoningProps`](#jcode-ui-reasoningprops) | interface | `packages/jcode-ui/src/components/Reasoning.tsx` |
+| [`RemoteMeta`](#jcode-ui-remotemeta) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`RuntimeTaskListProps`](#jcode-ui-runtimetasklistprops) | interface | `packages/jcode-ui/src/components/TaskList.tsx` |
+| [`SlashCommandInfo`](#jcode-ui-slashcommandinfo) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`SourcesProps`](#jcode-ui-sourcesprops) | interface | `packages/jcode-ui/src/components/Sources.tsx` |
 | [`SpeechInputProps`](#jcode-ui-speechinputprops) | interface | `packages/jcode-ui/src/voice/SpeechInput.tsx` |
 | [`StackFrame`](#jcode-ui-stackframe) | interface | `packages/jcode-ui/src/toolRenderers/stackTrace.tsx` |
 | [`StackTrace`](#jcode-ui-stacktrace) | interface | `packages/jcode-ui/src/toolRenderers/stackTrace.tsx` |
 | [`SuggestionItem`](#jcode-ui-suggestionitem) | interface | `packages/jcode-ui/src/components/Suggestions.tsx` |
 | [`SuggestionsProps`](#jcode-ui-suggestionsprops) | interface | `packages/jcode-ui/src/components/Suggestions.tsx` |
+| [`TaskContextBreakdown`](#jcode-ui-taskcontextbreakdown) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`TaskListItemProps`](#jcode-ui-tasklistitemprops) | interface | `packages/jcode-ui/src/components/TaskList.tsx` |
 | [`TaskListProps`](#jcode-ui-tasklistprops) | interface | `packages/jcode-ui/src/components/TaskList.tsx` |
+| [`TaskStats`](#jcode-ui-taskstats) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`TestCase`](#jcode-ui-testcase) | interface | `packages/jcode-ui/src/toolRenderers/testResults.tsx` |
 | [`TestSummary`](#jcode-ui-testsummary) | interface | `packages/jcode-ui/src/toolRenderers/testResults.tsx` |
 | [`ThreadListProps`](#jcode-ui-threadlistprops) | interface | `packages/jcode-ui/src/components/ThreadList.tsx` |
@@ -157,12 +194,19 @@ nav_order: 6
 | [`TurnChangesCardProps`](#jcode-ui-turnchangescardprops) | interface | `packages/jcode-ui/src/components/TurnChangesCard.tsx` |
 | [`VoiceVisualizerProps`](#jcode-ui-voicevisualizerprops) | interface | `packages/jcode-ui/src/voice/VoiceVisualizer.tsx` |
 | [`WorkflowCanvasProps`](#jcode-ui-workflowcanvasprops) | interface | `packages/jcode-ui/src/canvas/WorkflowCanvas.tsx` |
+| [`WorkspaceTaskRef`](#jcode-ui-workspacetaskref) | interface | `packages/jcode-ui/src/product/types.ts` |
+| [`AgentMode`](#jcode-ui-agentmode) | type | `packages/jcode-ui/src/product/types.ts` |
 | [`CodeBlockHook`](#jcode-ui-codeblockhook) | type | `packages/jcode-ui/src/lib/markdown.ts` |
+| [`GeneratedImageState`](#jcode-ui-generatedimagestate) | type | `packages/jcode-ui/src/components/GeneratedImageCard.tsx` |
 | [`JcodeStepData`](#jcode-ui-jcodestepdata) | type | `packages/jcode-ui/src/canvas/WorkflowNode.tsx` |
 | [`JcodeStepNode`](#jcode-ui-jcodestepnode) | type | `packages/jcode-ui/src/canvas/WorkflowNode.tsx` |
 | [`JcodeStepStatus`](#jcode-ui-jcodestepstatus) | type | `packages/jcode-ui/src/canvas/WorkflowNode.tsx` |
 | [`MathRenderer`](#jcode-ui-mathrenderer) | type | `packages/jcode-ui/src/lib/markdown.ts` |
+| [`RemoteKind`](#jcode-ui-remotekind) | type | `packages/jcode-ui/src/product/types.ts` |
+| [`RemotePrefill`](#jcode-ui-remoteprefill) | type | `packages/jcode-ui/src/product/types.ts` |
 | [`SpeechInputStatus`](#jcode-ui-speechinputstatus) | type | `packages/jcode-ui/src/voice/SpeechInput.tsx` |
+| [`ToolIconProps`](#jcode-ui-tooliconprops) | type | `packages/jcode-ui/src/components/toolIcons.tsx` |
+| [`WorkspaceKind`](#jcode-ui-workspacekind) | type | `packages/jcode-ui/src/product/types.ts` |
 
 <a id="jcode-ui-activitygroupcard"></a>
 
@@ -294,6 +338,36 @@ export const ChatInput = …
 export const CompactToolRow = …
 ```
 
+<a id="jcode-ui-completedturncard"></a>
+
+### `CompletedTurnCard`
+
+`const` · `packages/jcode-ui/src/components/CompletedTurnCard.tsx`
+
+```ts
+export const CompletedTurnCard = …
+```
+
+<a id="jcode-ui-computeractrenderer"></a>
+
+### `ComputerActRenderer`
+
+`const` · `packages/jcode-ui/src/toolRenderers/computerAct.tsx`
+
+```ts
+export const ComputerActRenderer = …
+```
+
+<a id="jcode-ui-computershotrenderer"></a>
+
+### `ComputerShotRenderer`
+
+`const` · `packages/jcode-ui/src/toolRenderers/computerShot.tsx`
+
+```ts
+export const ComputerShotRenderer = …
+```
+
 <a id="jcode-ui-connectionbanner"></a>
 
 ### `ConnectionBanner`
@@ -365,6 +439,16 @@ export const FileTreeRenderer = …
 
 ```ts
 export const FileViewerRenderer = …
+```
+
+<a id="jcode-ui-generatedimagecard"></a>
+
+### `GeneratedImageCard`
+
+`const` · `packages/jcode-ui/src/components/GeneratedImageCard.tsx`
+
+```ts
+export const GeneratedImageCard = …
 ```
 
 <a id="jcode-ui-genericrenderer"></a>
@@ -710,6 +794,26 @@ flips the label to "Copied" for 1.5s.
 export function bindCodeBlockCopy(root: HTMLElement): () => void { … }
 ```
 
+<a id="jcode-ui-branchpicker"></a>
+
+### `BranchPicker`
+
+`function` · `packages/jcode-ui/src/product/BranchPicker.tsx`
+
+```ts
+export function BranchPicker({ host, placement = 'top' }: { host: ProductComposerHost; placement?: 'top' | 'bottom' }) { … }
+```
+
+<a id="jcode-ui-chatinput"></a>
+
+### `ChatInput`
+
+`function` · `packages/jcode-ui/src/product/ChatInput.tsx`
+
+```ts
+export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = false }: ProductChatInputProps) { … }
+```
+
 <a id="jcode-ui-completestreamingmarkdown"></a>
 
 ### `completeStreamingMarkdown`
@@ -796,6 +900,16 @@ Nm, Nh, Nd, Nw, Nmo, Ny. `now` is injectable for deterministic tests.
 export function formatRelative(ts: number, now: number = Date.now()): string { … }
 ```
 
+<a id="jcode-ui-goalbanner"></a>
+
+### `GoalBanner`
+
+`function` · `packages/jcode-ui/src/product/GoalBanner.tsx`
+
+```ts
+export function GoalBanner({ host }: { host: ProductComposerHost }) { … }
+```
+
 <a id="jcode-ui-hashstring"></a>
 
 ### `hashString`
@@ -822,6 +936,16 @@ export function headTail(
   head: number,
   tail: number,
 ): { … }
+```
+
+<a id="jcode-ui-isremotepath"></a>
+
+### `isRemotePath`
+
+`function` · `packages/jcode-ui/src/product/remote.ts`
+
+```ts
+export function isRemotePath(path: string): boolean { … }
 ```
 
 <a id="jcode-ui-modelselector"></a>
@@ -866,6 +990,18 @@ export function parseCodeInfo(info: string): { … }
 export function parsePathList(text: string): { … }
 ```
 
+<a id="jcode-ui-parseremotelabel"></a>
+
+### `parseRemoteLabel`
+
+`function` · `packages/jcode-ui/src/product/remote.ts`
+
+Decompose ssh:// / docker:// project labels for wizard reconnect.
+
+```ts
+export function parseRemoteLabel(label: string): RemoteMeta | null { … }
+```
+
 <a id="jcode-ui-parsestacktrace"></a>
 
 ### `parseStackTrace`
@@ -884,6 +1020,28 @@ export function parseStackTrace(text: string): StackTrace | null { … }
 
 ```ts
 export function parseTestOutput(text: string): TestSummary | null { … }
+```
+
+<a id="jcode-ui-providericon"></a>
+
+### `ProviderIcon`
+
+`function` · `packages/jcode-ui/src/product/ProviderIcon.tsx`
+
+```ts
+export function ProviderIcon({ provider, size = 18, custom = false, resolveIcon }: ProviderIconProps) { … }
+```
+
+<a id="jcode-ui-readdraft"></a>
+
+### `readDraft`
+
+`function` · `packages/jcode-ui/src/product/drafts.ts`
+
+readDraft returns the saved draft for a session ('' when none).
+
+```ts
+export function readDraft(sessionId: string): string { … }
 ```
 
 <a id="jcode-ui-reasoning"></a>
@@ -947,6 +1105,20 @@ code block that is still streaming.
 
 ```ts
 export function renderMarkdownStreaming(md: string): string { … }
+```
+
+<a id="jcode-ui-resolveproductcomposerstrings"></a>
+
+### `resolveProductComposerStrings`
+
+`function` · `packages/jcode-ui/src/product/strings.ts`
+
+Merge host overrides over the English defaults.
+
+```ts
+export function resolveProductComposerStrings(
+  overrides?: Partial<ProductComposerStrings>,
+): ProductComposerStrings { … }
 ```
 
 <a id="jcode-ui-scanfencestate"></a>
@@ -1013,9 +1185,26 @@ export function Thread({
   emptyState,
   suggestions,
   renderPending,
+  pendingLabel,
   className,
   overscanBottom,
+  hidePendingAskUser = false,
+  turnDurationLabel,
+  turnExpandLabel,
+  turnCollapseLabel,
 }: ThreadProps): ReactNode { … }
+```
+
+<a id="jcode-ui-toolicon"></a>
+
+### `ToolIcon`
+
+`function` · `packages/jcode-ui/src/components/toolIcons.tsx`
+
+Resolve a Heroicon for a tool by kind (preferred) then name.
+
+```ts
+export function ToolIcon({ kind, name, ...rest }: ToolIconProps) { … }
 ```
 
 <a id="jcode-ui-toolregistryprovider"></a>
@@ -1078,6 +1267,16 @@ Count code points (not UTF-16 units) so CJK truncation is fair.
 export function truncate(text: string, max: number): string { … }
 ```
 
+<a id="jcode-ui-usecomposerstrings"></a>
+
+### `useComposerStrings`
+
+`function` · `packages/jcode-ui/src/product/useComposerStrings.ts`
+
+```ts
+export function useComposerStrings(host: ProductComposerHost): ProductComposerStrings { … }
+```
+
 <a id="jcode-ui-usestreamingmarkdown"></a>
 
 ### `useStreamingMarkdown`
@@ -1096,6 +1295,40 @@ export function useStreamingMarkdown(md: string): string { … }
 
 ```ts
 export function useToolRegistry(): ToolRendererRegistry { … }
+```
+
+<a id="jcode-ui-workspacename"></a>
+
+### `workspaceName`
+
+`function` · `packages/jcode-ui/src/product/remote.ts`
+
+Display name for a workspace path (local basename or remote label).
+
+```ts
+export function workspaceName(path: string): string { … }
+```
+
+<a id="jcode-ui-workspacepicker"></a>
+
+### `WorkspacePicker`
+
+`function` · `packages/jcode-ui/src/product/WorkspacePicker.tsx`
+
+```ts
+export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComposerHost; placement?: 'top' | 'bottom' }) { … }
+```
+
+<a id="jcode-ui-writedraft"></a>
+
+### `writeDraft`
+
+`function` · `packages/jcode-ui/src/product/drafts.ts`
+
+writeDraft saves a draft; empty text removes the entry.
+
+```ts
+export function writeDraft(sessionId: string, text: string): void { … }
 ```
 
 <a id="jcode-ui-activitygroupcardprops"></a>
@@ -1134,6 +1367,9 @@ export interface ApiBaseProviderProps {
 ```ts
 export interface ApprovalBannerProps {
   approval: Approval
+  /** Render inside the matching tool card. The tool header already owns the
+   *  verb/target, and resolved state stays as a compact inline header badge. */
+  embedded?: boolean
 }
 ```
 
@@ -1172,6 +1408,34 @@ export interface ArtifactProps {
 ```ts
 export interface AskUserCardProps {
   tool: ToolCall
+  /** Docked cards replace the product composer while the agent waits. */
+  placement?: 'timeline' | 'dock'
+  /** Host-provided copy keeps the package backend and i18n agnostic. */
+  strings?: Partial<AskUserCardStrings>
+}
+```
+
+<a id="jcode-ui-askusercardstrings"></a>
+
+### `AskUserCardStrings`
+
+`interface` · `packages/jcode-ui/src/components/AskUserCard.tsx`
+
+```ts
+export interface AskUserCardStrings {
+  title: string
+  helper: string
+  previous: string
+  next: string
+  skip: string
+  submit: string
+  submitting: string
+  customPlaceholder: string
+  recommended: string
+  multiSelect: string
+  skipped: string
+  noAnswer: string
+  submitError: string
 }
 ```
 
@@ -1237,6 +1501,32 @@ export interface AudioPlayerProps {
 ```ts
 export interface BranchPickerProps {
   message: MessageData
+}
+```
+
+<a id="jcode-ui-browsefolder"></a>
+
+### `BrowseFolder`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface BrowseFolder {
+  name: string
+  path: string
+}
+```
+
+<a id="jcode-ui-browseresult"></a>
+
+### `BrowseResult`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface BrowseResult {
+  current: string
+  folders: BrowseFolder[]
 }
 ```
 
@@ -1340,6 +1630,22 @@ export interface CompactToolRowProps {
 }
 ```
 
+<a id="jcode-ui-completedturncardprops"></a>
+
+### `CompletedTurnCardProps`
+
+`interface` · `packages/jcode-ui/src/components/CompletedTurnCard.tsx`
+
+```ts
+export interface CompletedTurnCardProps {
+  turn: CompletedTurn
+  renderActivity: (item: ThreadItem) => ReactNode
+  durationLabel?: (durationMs: number) => string
+  expandLabel?: string
+  collapseLabel?: string
+}
+```
+
 <a id="jcode-ui-completionresult"></a>
 
 ### `CompletionResult`
@@ -1373,6 +1679,23 @@ export interface ContextBarProps {
 }
 ```
 
+<a id="jcode-ui-customagentinfo"></a>
+
+### `CustomAgentInfo`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+Discoverable top-level agent definition. Empty selection means Default.
+
+```ts
+export interface CustomAgentInfo {
+  name: string
+  description: string
+  /** Optional model applied when this agent is selected. */
+  model?: string
+}
+```
+
 <a id="jcode-ui-exploringgroupcardprops"></a>
 
 ### `ExploringGroupCardProps`
@@ -1399,6 +1722,105 @@ export interface ExportButtonProps {
   /** Document title inside the markdown. */
   title?: string
   className?: string
+}
+```
+
+<a id="jcode-ui-generatedimagecardprops"></a>
+
+### `GeneratedImageCardProps`
+
+`interface` · `packages/jcode-ui/src/components/GeneratedImageCard.tsx`
+
+```ts
+export interface GeneratedImageCardProps {
+  state: GeneratedImageState
+  provider?: string
+  model?: string
+  aspectRatio?: string
+  startedAt?: number
+  imageSrc?: string
+  title?: string
+  alt?: string
+  artifact?: ArtifactRef
+  errorCode?: string
+  errorMessage?: string
+  assetError?: string
+  strings?: Partial<GeneratedImageCardStrings>
+  onOpenImage?: () => void
+  onDownload?: () => void
+  onOpenArtifact?: () => void
+  onReveal?: () => void
+  onOpenSettings?: () => void
+}
+```
+
+<a id="jcode-ui-generatedimagecardstrings"></a>
+
+### `GeneratedImageCardStrings`
+
+`interface` · `packages/jcode-ui/src/components/GeneratedImageCard.tsx`
+
+```ts
+export interface GeneratedImageCardStrings {
+  queued: string
+  queuedHint: string
+  generating: string
+  saving: string
+  savingHint: string
+  succeeded: string
+  failed: string
+  uncertain: string
+  uncertainHint: string
+  cancelled: string
+  cancelledHint: string
+  authError: string
+  quotaError: string
+  safetyError: string
+  rateLimitError: string
+  downloadError: string
+  persistError: string
+  genericError: string
+  loadingAsset: string
+  assetError: string
+  download: string
+  openImage: string
+  openArtifact: string
+  reveal: string
+  openSettings: string
+}
+```
+
+<a id="jcode-ui-gitbranchesresult"></a>
+
+### `GitBranchesResult`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface GitBranchesResult {
+  /** Empty if not a git repo. */
+  current: string
+  /** Local branches, most-recently-committed first. */
+  branches: string[]
+}
+```
+
+<a id="jcode-ui-gitcheckoutresult"></a>
+
+### `GitCheckoutResult`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface GitCheckoutResult {
+  /** New current branch on success; '' when blocked. */
+  branch: string
+  /** true when a plain switch was aborted by uncommitted changes. */
+  blocked?: boolean
+  message?: string
+  /** Files that would be overwritten, parsed from git's output. */
+  files?: string[]
+  stashed?: boolean
 }
 ```
 
@@ -1497,6 +1919,8 @@ export interface MessageProps {
   message: MessageData
   /** Allow editing (typically user messages when idle). */
   canEdit?: boolean
+  /** Hide the legacy footer duration when a completed-turn disclosure owns it. */
+  showDuration?: boolean
   /** Optional chrome overrides (avatar / header / footer tail). */
   slots?: MessageSlots
 }
@@ -1513,12 +1937,56 @@ Render-prop overrides for the message chrome. Each replaces a piece of the
 
 ```ts
 export interface MessageSlots {
-  /** Replaces the avatar circle (inside the default header row). */
+  /** Supplies an avatar inside an opt-in role header. */
   avatar?: (message: MessageData) => ReactNode
   /** Replaces the entire role-header row (avatar + label). */
   header?: (message: MessageData) => ReactNode
   /** Appended to the tail of the action footer. */
   footerExtra?: (message: MessageData) => ReactNode
+}
+```
+
+<a id="jcode-ui-modelinfo"></a>
+
+### `ModelInfo`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface ModelInfo {
+  id: string
+  name: string
+  tool_call: boolean
+  context_limit?: number
+  reasoning?: boolean
+  recommended?: boolean
+  default_enabled?: boolean
+  /** Whether this model is available in the chat picker. Omitted is treated as disabled. */
+  enabled?: boolean
+  image_support?: boolean
+  /** Transport modalities advertised by the model catalog. Legacy hosts may
+   * omit them; consumers treat an omitted output list as text-only. */
+  input_modalities?: string[]
+  output_modalities?: string[]
+  capability_availability?: 'supported' | 'unsupported' | 'unknown'
+  image_sizes?: string[]
+  image_aspect_ratios?: string[]
+  image_resolutions?: string[]
+  /** How this model exposes its reasoning/thinking controls. */
+  reasoning_options?: ReasoningOption[]
+}
+```
+
+<a id="jcode-ui-modelref"></a>
+
+### `ModelRef`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface ModelRef {
+  provider: string
+  model: string
 }
 ```
 
@@ -1573,6 +2041,292 @@ export interface PendingAttachmentListProps {
 }
 ```
 
+<a id="jcode-ui-productchatinputprops"></a>
+
+### `ProductChatInputProps`
+
+`interface` · `packages/jcode-ui/src/product/ChatInput.tsx`
+
+```ts
+export interface ProductChatInputProps {
+  /** Host state + actions projection (see host.ts). */
+  host: ProductComposerHost
+  /** Fired when the user dispatches a message (sent now or queued mid-turn). */
+  onSent?: () => void
+  /** Direction for workspace/branch panels. Welcome opens downward. */
+  pickerPlacement?: 'top' | 'bottom'
+  /**
+   * Elevate the whole composer into a bordered, shadowed card (welcome /
+   * new-task screen). Docked conversation composers stay recessed.
+   */
+  elevated?: boolean
+}
+```
+
+<a id="jcode-ui-productcomposerhost"></a>
+
+### `ProductComposerHost`
+
+`interface` · `packages/jcode-ui/src/product/host.ts`
+
+```ts
+export interface ProductComposerHost {
+  // ── Model catalog state ───────────────────────────────────────────────────
+  providerName: string
+  modelName: string
+  mode: AgentMode
+  /**
+   * Modes the host allows in the mode picker, in pick order. Absent ⇒ all
+   * four modes (the desktop default). Cloud hosts cap cloud-originated
+   * sessions at auto (M20), so they pass `['approval', 'plan', 'auto']` and
+   * a `modeCeilingHint` string explaining the ceiling.
+   */
+  allowedModes?: AgentMode[]
+  providers: ProviderInfo[]
+  /** Favorite refs as "provider/model" keys. */
+  favoriteModels: string[]
+  recentModels: ModelRef[]
+  /** Whether the current model accepts image input (paste/attach gating). */
+  imageSupport: boolean
+  /** Per-"provider/model" reasoning-effort overrides. */
+  effortOverrides: Record<string, string>
+  /** Available top-level custom agents. Empty hides the agent picker. */
+  agents?: CustomAgentInfo[]
+  /** Selected custom agent name. Empty means the built-in Default agent. */
+  agentName?: string
+
+  // ── Chat state ────────────────────────────────────────────────────────────
+  slashCommands: SlashCommandInfo[]
+  /** True when the conversation has any timeline items (welcome ↔ docked layout). */
+  hasMessages: boolean
+  goalArmed: boolean
+  /** Current conversation id — keys composer drafts and task-stats lookups. */
+  sessionId: string
+
+  // ── Workspace state ───────────────────────────────────────────────────────
+  projectPath: string
+  /** Missing means a legacy project-bound host. */
+  workspaceKind?: 'project' | 'scratch'
+  /** All known tasks; the workspace picker derives the workspace list from `project`. */
+  tasks: WorkspaceTaskRef[]
+
+  // ── Presentation ──────────────────────────────────────────────────────────
+  /** Localized labels; merged over the built-in English defaults. */
+  strings?: Partial<ProductComposerStrings>
+  /** Resolve a provider id to an inline SVG string (null ⇒ initial-letter fallback). */
+  resolveProviderIcon?: (provider: string, custom?: boolean) => string | null
+
+  // ── Model actions ─────────────────────────────────────────────────────────
+  /** Switch the active model (host persists + updates its store). */
+  selectModel: (provider: string, model: string) => void | Promise<void>
+  /** Switch the session approval mode. */
+  selectMode: (mode: AgentMode) => void | Promise<void>
+  /** Select a top-level custom agent; empty string restores Default. */
+  selectAgent?: (name: string) => void | Promise<void>
+  /** Set/clear (empty string) a per-model reasoning-effort override. */
+  setEffort: (provider: string, model: string, effort: string) => void | Promise<void>
+  /** Toggle a favorite; the host knows the resulting state. */
+  toggleFavorite: (provider: string, model: string) => void | Promise<void>
+  /** Enable/disable a model in the picker (Manage Models dialog). */
+  setModelEnabled: (provider: string, model: string, enabled: boolean) => void | Promise<void>
+  /** Re-hydrate the model catalog after the Manage dialog closes. */
+  refreshModels: () => void | Promise<void>
+
+  // ── Chat actions ──────────────────────────────────────────────────────────
+  setGoalArmed: (armed: boolean) => void
+  /** Context-capacity popup data; null when unavailable. */
+  fetchTaskStats: (sessionId: string) => Promise<TaskStats | null>
+
+  // ── Workspace actions ─────────────────────────────────────────────────────
+  /** Return the subset of local paths that no longer exist on disk. */
+  validateWorkspacePaths: (paths: string[]) => Promise<string[]>
+  browseFolders: (path?: string) => Promise<BrowseResult>
+  /**
+   * Activate a workspace. When `path` equals the current project the host starts
+   * a NEW session in place; otherwise it switches projects. Throws on failure
+   * (the picker shows the error inline).
+   */
+  switchWorkspace: (path: string) => Promise<void>
+  /** Create and focus a fresh JCode-managed no-project workspace. */
+  startScratchWorkspace?: () => Promise<void>
+  /**
+  /* … truncated */
+}
+```
+
+<a id="jcode-ui-productcomposerstrings"></a>
+
+### `ProductComposerStrings`
+
+`interface` · `packages/jcode-ui/src/product/strings.ts`
+
+Product-composer strings — every user-facing label the product composer
+(ChatInput / WorkspacePicker / BranchPicker / GoalBanner) renders.
+
+The jcode-ui package deliberately does NOT depend on an i18n library: hosts
+inject already-localized strings through `ProductComposerHost.strings`
+(partial — merged over these English defaults). Fields that need
+interpolation are functions, so plural/variable handling stays on the host
+side (the jcode app maps these 1:1 onto its i18next `chat.*` / `goal.*` /
+`branches.*` / `workspace.*` keys).
+
+```ts
+export interface ProductComposerStrings {
+  // ── composer textarea ──
+  placeholder: string
+  goalPlaceholder: string
+  queuePlaceholder: string
+  /** Fallback message body when only images are attached (no text). */
+  attachedImages: string
+  send: string
+  queue: string
+  stop: string
+  stopAgent: string
+  stopAndNext: string
+  removeQueued: string
+  add: string
+  attachFiles: string
+  command: string
+  goal: string
+  workflowBadge: string
+  goalSlashDesc: string
+  goalHintNext: string
+  goalHintNextReplaces: string
+  goalHintRemove: string
+  goalHintReplace: string
+  modelNoImages: string
+
+  // ── mode picker ──
+  modeApproval: string
+  modeApprovalSub: string
+  modePlan: string
+  modePlanSub: string
+  modeAuto: string
+  modeAutoSub: string
+  modeFullAccess: string
+  modeFullAccessSub: string
+  /** Shown in the mode picker when the host restricts `allowedModes` (M20). */
+  modeCeilingHint: string
+
+  // ── custom agent picker ──
+  agentTitle: string
+  agentDefault: string
+  agentDefaultSub: string
+
+  // ── model picker / manage dialog ──
+  modelFilter: string
+  modelCurrent: string
+  modelFavorites: string
+  modelReasoning: string
+  modelTools: string
+  modelImages: string
+  modelImageOutput: string
+  modelNoImageInput: string
+  modelNone: string
+  modelNoMatch: string
+  modelManage: string
+  modelManageTitle: string
+  modelToggleVisibility: string
+  modelVisibleCount: (visible: number, total: number) => string
+  effort: string
+  effortTitle: string
+  effortDefault: string
+
+  // ── context-capacity popup ──
+  contextTitle: string
+  contextSystemPrompt: string
+  contextSystemTools: string
+  contextMcpTools: string
+  contextSkills: string
+  contextMessages: string
+  contextInput: string
+  contextOutput: string
+  contextCached: string
+  contextReasoning: string
+  contextCacheHitRate: string
+
+  // ── workspace picker ──
+  workspaceNone: string
+  workspaceNonePlural: string
+  workspaceSearch: string
+  workspaceLoading: string
+  workspaceNoFolders: string
+  workspaceOpen: string
+  workspaceOpenFolder: string
+  workspaceOpenError: string
+  workspacePathPlaceholder: string
+  workspaceScratchAction: string
+  remoteConnect: string
+
+  // ── branch picker ──
+  branchesTitle: string
+  branchesNone: string
+  branchSearch: string
+  branchCreate: string
+  branchCreateBtn: string
+  branchNewName: string
+  branchCurrent: (name: string) => string
+  branchConfirmTitle: string
+  branchConfirmIntro: (branch: string) => string
+  branchConfirmMore: (count: number) => string
+  branchConfirmStash: string
+  branchConfirmDiscard: string
+  branchConfirmCancel: string
+  branchConfirmHint: string
+  branchSwitchError: string
+
+  // ── goal banner ──
+  goalStatusActive: string
+  goalStatusCompleted: string
+  goalStatusBlocked: string
+  goalStarted: string
+  goalElapsed: string
+  goalEdit: string
+  goalEditTitle: string
+  goalClear: string
+  goalSaveFailed: string
+  goalTokens: (used: number) => string
+  goalTokensK: (k: string) => string
+  durationSeconds: (n: number) => string
+  durationMinutes: (m: number, s: number) => string
+  durationHours: (h: number, m: number) => string
+
+  // ── shared ──
+  commonTokens: (used: string) => string
+  commonLoading: string
+  commonClose: string
+  commonCancel: string
+  commonSave: string
+  commonDone: string
+  commonEnable: string
+  commonDisable: string
+  commonRecommended: string
+}
+```
+
+<a id="jcode-ui-providerinfo"></a>
+
+### `ProviderInfo`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface ProviderInfo {
+  id: string
+  name: string
+  /** Canonical provider family used for icon lookup. */
+  kind?: string
+  /** Desktop providers are direct; Cloud providers are routed via cloud_proxy. */
+  source?: 'desktop' | 'cloud'
+  scope?: 'cluster' | 'project'
+  scope_id?: string
+  scope_name?: string
+  /** true for user-configured OpenAI-compatible providers. */
+  custom?: boolean
+  models: ModelInfo[]
+}
+```
+
 <a id="jcode-ui-quoteselectionprops"></a>
 
 ### `QuoteSelectionProps`
@@ -1587,6 +2341,23 @@ export interface QuoteSelectionProps {
   label?: string
   /** Max characters captured. Default 2000. */
   maxLength?: number
+}
+```
+
+<a id="jcode-ui-reasoningoption"></a>
+
+### `ReasoningOption`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+ReasoningOption mirrors models.dev's reasoning_options.
+
+```ts
+export interface ReasoningOption {
+  type: string
+  values?: string[]
+  min?: number
+  max?: number
 }
 ```
 
@@ -1607,6 +2378,26 @@ export interface ReasoningProps {
 }
 ```
 
+<a id="jcode-ui-remotemeta"></a>
+
+### `RemoteMeta`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface RemoteMeta {
+  /** defaults to 'ssh' for back-compat. */
+  kind?: RemoteKind
+  /** host:port as dialed (ssh). */
+  host: string
+  user: string
+  port: number
+  remotePath: string
+  /** docker container name/id. */
+  container?: string
+}
+```
+
 <a id="jcode-ui-runtimetasklistprops"></a>
 
 ### `RuntimeTaskListProps`
@@ -1619,6 +2410,22 @@ export interface RuntimeTaskListProps {
   compact?: boolean
   hideProgress?: boolean
   className?: string
+}
+```
+
+<a id="jcode-ui-slashcommandinfo"></a>
+
+### `SlashCommandInfo`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+Unified slash command (built-in + skill + flow).
+
+```ts
+export interface SlashCommandInfo {
+  slash: string
+  description: string
+  type: 'builtin' | 'skill' | 'flow'
 }
 ```
 
@@ -1723,6 +2530,23 @@ export interface SuggestionsProps {
 }
 ```
 
+<a id="jcode-ui-taskcontextbreakdown"></a>
+
+### `TaskContextBreakdown`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface TaskContextBreakdown {
+  context_limit: number
+  system_prompt_tokens: number
+  system_tools_tokens: number
+  mcp_tools_tokens: number
+  skills_tokens: number
+  messages_tokens: number
+}
+```
+
 <a id="jcode-ui-tasklistitemprops"></a>
 
 ### `TaskListItemProps`
@@ -1754,6 +2578,31 @@ export interface TaskListProps {
   hideProgress?: boolean
   /** Extra classes on the root. */
   className?: string
+}
+```
+
+<a id="jcode-ui-taskstats"></a>
+
+### `TaskStats`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export interface TaskStats {
+  uuid: string
+  is_active: boolean
+  context?: TaskContextBreakdown
+  cache_hit_rate: number
+  cache_supported: boolean
+  tokens: {
+    total_tokens: number
+    prompt_tokens: number
+    completion_tokens: number
+    cached_tokens: number
+    reasoning_tokens: number
+    calls: number
+    turns?: number
+  }
 }
 ```
 
@@ -1820,10 +2669,22 @@ export interface ThreadProps {
   suggestions?: ReactNode
   /** Override the pending ("Thinking…") indicator. */
   renderPending?: () => ReactNode
+  /** Label for the default pending indicator ("Thinking"). Ignored when
+   *  renderPending is set. The library has no i18n; hosts pass a translated
+   *  string here. */
+  pendingLabel?: string
   /** className passthrough for the scroll container. */
   className?: string
   /** Extra bottom padding (px) to clear a sticky composer. */
   overscanBottom?: number
+  /** Hide pending ask_user tools before activity grouping when a host presents
+   *  them in a dedicated interaction dock. Resolved receipts remain visible. */
+  hidePendingAskUser?: boolean
+  /** Host-localized completed-turn duration label. */
+  turnDurationLabel?: (durationMs: number) => string
+  /** Accessible label for expanding/collapsing completed-turn work. */
+  turnExpandLabel?: string
+  turnCollapseLabel?: string
 }
 ```
 
@@ -2038,6 +2899,35 @@ export interface WorkflowCanvasProps extends ReactFlowProps {
 }
 ```
 
+<a id="jcode-ui-workspacetaskref"></a>
+
+### `WorkspaceTaskRef`
+
+`interface` · `packages/jcode-ui/src/product/types.ts`
+
+Minimal task shape the workspace picker consumes.
+
+```ts
+export interface WorkspaceTaskRef {
+  uuid: string
+  project: string
+  workspace_kind?: WorkspaceKind
+  updated_at?: string
+}
+```
+
+<a id="jcode-ui-agentmode"></a>
+
+### `AgentMode`
+
+`type` · `packages/jcode-ui/src/product/types.ts`
+
+Session approval mode (unified across transports).
+
+```ts
+export type AgentMode = 'approval' | 'plan' | 'auto' | 'full_access';
+```
+
 <a id="jcode-ui-codeblockhook"></a>
 
 ### `CodeBlockHook`
@@ -2048,6 +2938,16 @@ Return HTML to fully replace the code block, or `null` to fall through.
 
 ```ts
 export type CodeBlockHook = (args: CodeBlockHookArgs) => string | null;
+```
+
+<a id="jcode-ui-generatedimagestate"></a>
+
+### `GeneratedImageState`
+
+`type` · `packages/jcode-ui/src/components/GeneratedImageCard.tsx`
+
+```ts
+export type GeneratedImageState = Exclude<ToolPhase, 'terminal'> | ToolOutcome;
 ```
 
 <a id="jcode-ui-jcodestepdata"></a>
@@ -2106,6 +3006,26 @@ Render TeX to an HTML string. `displayMode` = block (`$$…$$`) vs inline (`$…
 export type MathRenderer = (tex: string, displayMode: boolean) => string;
 ```
 
+<a id="jcode-ui-remotekind"></a>
+
+### `RemoteKind`
+
+`type` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export type RemoteKind = 'ssh' | 'docker';
+```
+
+<a id="jcode-ui-remoteprefill"></a>
+
+### `RemotePrefill`
+
+`type` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export type RemotePrefill = RemoteMeta & { loadTaskUuid?: string };
+```
+
 <a id="jcode-ui-speechinputstatus"></a>
 
 ### `SpeechInputStatus`
@@ -2116,6 +3036,31 @@ export type MathRenderer = (tex: string, displayMode: boolean) => string;
 export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 ```
 
+<a id="jcode-ui-tooliconprops"></a>
+
+### `ToolIconProps`
+
+`type` · `packages/jcode-ui/src/components/toolIcons.tsx`
+
+```ts
+export type ToolIconProps = SVGProps<SVGSVGElement> & {
+  /** Presentation kind from ToolDisplayInfo (read | search | list | shell | edit | agent | other). */
+  kind?: string
+  /** Raw tool name; used as fallback when kind is absent. */
+  name?: string
+};
+```
+
+<a id="jcode-ui-workspacekind"></a>
+
+### `WorkspaceKind`
+
+`type` · `packages/jcode-ui/src/product/types.ts`
+
+```ts
+export type WorkspaceKind = 'project' | 'scratch';
+```
+
 ## `jcode-ui-core`
 
 | Symbol | Kind | Source |
@@ -2124,6 +3069,7 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`appendTurnChangeSummaries`](#jcode-ui-core-appendturnchangesummaries) | function | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
 | [`ApprovalBlock`](#jcode-ui-core-approvalblock) | function | `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx` |
 | [`AskUserBlock`](#jcode-ui-core-askuserblock) | function | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
+| [`bindApprovalsToTools`](#jcode-ui-core-bindapprovalstotools) | function | `packages/jcode-ui-core/src/timeline/turnGroups.ts` |
 | [`countActivityFlags`](#jcode-ui-core-countactivityflags) | function | `packages/jcode-ui-core/src/timeline/groupActivity.ts` |
 | [`createAGUIRuntime`](#jcode-ui-core-createaguiruntime) | function | `packages/jcode-ui-core/src/runtime/aguiRuntime.ts` |
 | [`createExternalStoreRuntime`](#jcode-ui-core-createexternalstoreruntime) | function | `packages/jcode-ui-core/src/runtime/externalStore.ts` |
@@ -2136,6 +3082,7 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`exportThreadMarkdown`](#jcode-ui-core-exportthreadmarkdown) | function | `packages/jcode-ui-core/src/export/markdown.ts` |
 | [`formatElapsed`](#jcode-ui-core-formatelapsed) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
 | [`groupActivityTimeline`](#jcode-ui-core-groupactivitytimeline) | function | `packages/jcode-ui-core/src/timeline/groupActivity.ts` |
+| [`groupCompletedTurns`](#jcode-ui-core-groupcompletedturns) | function | `packages/jcode-ui-core/src/timeline/turnGroups.ts` |
 | [`groupExploringTimeline`](#jcode-ui-core-groupexploringtimeline) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
 | [`groupToolTimeline`](#jcode-ui-core-grouptooltimeline) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
 | [`isActivityItem`](#jcode-ui-core-isactivityitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
@@ -2145,8 +3092,10 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`isExploringItem`](#jcode-ui-core-isexploringitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
 | [`isFileChangeTool`](#jcode-ui-core-isfilechangetool) | function | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
 | [`isMessageItem`](#jcode-ui-core-ismessageitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
+| [`isStandaloneTool`](#jcode-ui-core-isstandalonetool) | function | `packages/jcode-ui-core/src/timeline/groupActivity.ts` |
 | [`isToolItem`](#jcode-ui-core-istoolitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
 | [`isTurnChangesItem`](#jcode-ui-core-isturnchangesitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
+| [`isTurnItem`](#jcode-ui-core-isturnitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
 | [`MessageView`](#jcode-ui-core-messageview) | function | `packages/jcode-ui-core/src/primitives/MessageView.tsx` |
 | [`nextAttachmentId`](#jcode-ui-core-nextattachmentid) | function | `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts` |
 | [`normalizeState`](#jcode-ui-core-normalizestate) | function | `packages/jcode-ui-core/src/runtime/index.ts` |
@@ -2159,6 +3108,7 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`Thread`](#jcode-ui-core-thread) | function | `packages/jcode-ui-core/src/primitives/Thread.tsx` |
 | [`ThreadStoreProvider`](#jcode-ui-core-threadstoreprovider) | function | `packages/jcode-ui-core/src/threads/context.tsx` |
 | [`ToolCallProvider`](#jcode-ui-core-toolcallprovider) | function | `packages/jcode-ui-core/src/primitives/ToolCallView.tsx` |
+| [`toolCallToRendererProps`](#jcode-ui-core-toolcalltorendererprops) | function | `packages/jcode-ui-core/src/adapters/index.ts` |
 | [`ToolCallView`](#jcode-ui-core-toolcallview) | function | `packages/jcode-ui-core/src/primitives/ToolCallView.tsx` |
 | [`useAutoScroll`](#jcode-ui-core-useautoscroll) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
 | [`useElapsed`](#jcode-ui-core-useelapsed) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
@@ -2185,6 +3135,7 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`ApprovalBlockRenderSlots`](#jcode-ui-core-approvalblockrenderslots) | interface | `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx` |
 | [`ApprovalDecisionActions`](#jcode-ui-core-approvaldecisionactions) | interface | `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx` |
 | [`ApprovalOption`](#jcode-ui-core-approvaloption) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`ArtifactRef`](#jcode-ui-core-artifactref) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`AskUserAnswer`](#jcode-ui-core-askuseranswer) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`AskUserBlockProps`](#jcode-ui-core-askuserblockprops) | interface | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
 | [`AskUserBlockRenderSlots`](#jcode-ui-core-askuserblockrenderslots) | interface | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
@@ -2193,8 +3144,10 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`AskUserQuestion`](#jcode-ui-core-askuserquestion) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`AskUserState`](#jcode-ui-core-askuserstate) | interface | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
 | [`AttachmentAdapter`](#jcode-ui-core-attachmentadapter) | interface | `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts` |
+| [`BillableApprovalSummary`](#jcode-ui-core-billableapprovalsummary) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ChatImage`](#jcode-ui-core-chatimage) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ChatRuntime`](#jcode-ui-core-chatruntime) | interface | `packages/jcode-ui-core/src/runtime/index.ts` |
+| [`CompletedTurn`](#jcode-ui-core-completedturn) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ComposerHandle`](#jcode-ui-core-composerhandle) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
 | [`ComposerProps`](#jcode-ui-core-composerprops) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
 | [`ComposerRenderSlots`](#jcode-ui-core-composerrenderslots) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
@@ -2204,6 +3157,7 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`ExportMarkdownOptions`](#jcode-ui-core-exportmarkdownoptions) | interface | `packages/jcode-ui-core/src/export/markdown.ts` |
 | [`ExternalStoreRuntimeOptions`](#jcode-ui-core-externalstoreruntimeoptions) | interface | `packages/jcode-ui-core/src/runtime/externalStore.ts` |
 | [`Goal`](#jcode-ui-core-goal) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`GroupCompletedTurnsOptions`](#jcode-ui-core-groupcompletedturnsoptions) | interface | `packages/jcode-ui-core/src/timeline/turnGroups.ts` |
 | [`InlineImageAdapterOptions`](#jcode-ui-core-inlineimageadapteroptions) | interface | `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts` |
 | [`Message`](#jcode-ui-core-message) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`MessageActions`](#jcode-ui-core-messageactions) | interface | `packages/jcode-ui-core/src/primitives/MessageView.tsx` |
@@ -2267,6 +3221,8 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`AGUIRole`](#jcode-ui-core-aguirole) | type | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`AGUITransport`](#jcode-ui-core-aguitransport) | type | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`ApprovalOptionKind`](#jcode-ui-core-approvaloptionkind) | type | `packages/jcode-ui-core/src/types/index.ts` |
+| [`ArtifactStorageKind`](#jcode-ui-core-artifactstoragekind) | type | `packages/jcode-ui-core/src/types/index.ts` |
+| [`AskUserSubmitError`](#jcode-ui-core-askusersubmiterror) | type | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
 | [`ConnectionState`](#jcode-ui-core-connectionstate) | type | `packages/jcode-ui-core/src/types/index.ts` |
 | [`GoalStatus`](#jcode-ui-core-goalstatus) | type | `packages/jcode-ui-core/src/types/index.ts` |
 | [`MockThreadStoreSeed`](#jcode-ui-core-mockthreadstoreseed) | type | `packages/jcode-ui-core/src/threads/store.ts` |
@@ -2276,8 +3232,11 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`SystemLevel`](#jcode-ui-core-systemlevel) | type | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ThreadItem`](#jcode-ui-core-threaditem) | type | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ThreadItemKind`](#jcode-ui-core-threaditemkind) | type | `packages/jcode-ui-core/src/types/index.ts` |
+| [`ToolOutcome`](#jcode-ui-core-tooloutcome) | type | `packages/jcode-ui-core/src/types/index.ts` |
+| [`ToolPhase`](#jcode-ui-core-toolphase) | type | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ToolRenderer`](#jcode-ui-core-toolrenderer) | type | `packages/jcode-ui-core/src/adapters/index.ts` |
 | [`ToolStatus`](#jcode-ui-core-toolstatus) | type | `packages/jcode-ui-core/src/types/index.ts` |
+| [`ToolSurface`](#jcode-ui-core-toolsurface) | type | `packages/jcode-ui-core/src/types/index.ts` |
 
 <a id="jcode-ui-core-toolrendererregistry"></a>
 
@@ -2371,6 +3330,25 @@ export function ApprovalBlock({ approval, className, renderPending, renderResolv
 
 ```ts
 export function AskUserBlock({ tool, className, renderPending, renderResolved }: AskUserBlockProps): ReactNode { … }
+```
+
+<a id="jcode-ui-core-bindapprovalstotools"></a>
+
+### `bindApprovalsToTools`
+
+`function` · `packages/jcode-ui-core/src/timeline/turnGroups.ts`
+
+Attach approval items to the concrete tool-call occurrence they gate.
+
+Tool-call ids are model supplied and may be reused across turns, so this does
+not use a session-wide id map. Each approval binds to the nearest unmatched
+occurrence inside the same user turn (normally the preceding tool; the
+forward fallback covers transports that deliver approval before tool_call).
+Matched approval items disappear from the projected list; unmatched legacy
+approvals remain standalone so no decision UI is lost.
+
+```ts
+export function bindApprovalsToTools(items: ThreadItem[]): ThreadItem[] { … }
 ```
 
 <a id="jcode-ui-core-countactivityflags"></a>
@@ -2546,6 +3524,27 @@ groups. Output contains only `'activity'` items (≥2 tools) and plain
 export function groupActivityTimeline(items: ThreadItem[]): ThreadItem[] { … }
 ```
 
+<a id="jcode-ui-core-groupcompletedturns"></a>
+
+### `groupCompletedTurns`
+
+`function` · `packages/jcode-ui-core/src/timeline/turnGroups.ts`
+
+Replace each settled user turn with:
+
+  user message -> collapsed activity/duration row + final assistant summary
+               -> turn-changes summary (when present)
+
+A turn is left flat when it has no final assistant reply, contains unresolved
+approval/running work, or has tool activity after its last assistant message.
+
+```ts
+export function groupCompletedTurns(
+  items: ThreadItem[],
+  options: GroupCompletedTurnsOptions = {},
+): ThreadItem[] { … }
+```
+
 <a id="jcode-ui-core-groupexploringtimeline"></a>
 
 ### `groupExploringTimeline`
@@ -2657,6 +3656,19 @@ Type guard helpers (kept generic so consumers can narrow item arrays).
 export function isMessageItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
 
+<a id="jcode-ui-core-isstandalonetool"></a>
+
+### `isStandaloneTool`
+
+`function` · `packages/jcode-ui-core/src/timeline/groupActivity.ts`
+
+Standalone tools own their complete timeline surface and are hard grouping
+boundaries from the initial tool_call event onward.
+
+```ts
+export function isStandaloneTool(tool: ToolCall): boolean { … }
+```
+
 <a id="jcode-ui-core-istoolitem"></a>
 
 ### `isToolItem`
@@ -2675,6 +3687,16 @@ export function isToolItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 
 ```ts
 export function isTurnChangesItem(i: ThreadItem): i is Extract<ThreadItem, { … }
+```
+
+<a id="jcode-ui-core-isturnitem"></a>
+
+### `isTurnItem`
+
+`function` · `packages/jcode-ui-core/src/types/index.ts`
+
+```ts
+export function isTurnItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
 
 <a id="jcode-ui-core-messageview"></a>
@@ -2856,6 +3878,19 @@ export function ThreadStoreProvider({ store, children }: ThreadStoreProviderProp
 
 ```ts
 export function ToolCallProvider({ value, children }: { value: ToolCallContextValue; children: ReactNode }) { … }
+```
+
+<a id="jcode-ui-core-toolcalltorendererprops"></a>
+
+### `toolCallToRendererProps`
+
+`function` · `packages/jcode-ui-core/src/adapters/index.ts`
+
+Map a ToolCall to the renderer contract. Shared by the collapsible shell
+and standalone timeline surfaces so lifecycle fields cannot drift.
+
+```ts
+export function toolCallToRendererProps(tool: ToolCall): ToolRendererProps { … }
 ```
 
 <a id="jcode-ui-core-toolcallview"></a>
@@ -3223,6 +4258,10 @@ export interface Approval {
   tool_call_id?: string
   /** Target outside the workspace root — UI flags it prominently. */
   is_external: boolean
+  /** Policy class supplied by the backend (e.g. billable_external). */
+  approvalClass?: string
+  /** Structured, non-secret summary for billable approval copy. */
+  billableSummary?: BillableApprovalSummary
   resolved?: boolean
   approved?: boolean
   /** True while a resolve request is in flight (disables controls). */
@@ -3277,6 +4316,8 @@ export interface ApprovalDecisionActions {
   allowAllCancel: () => void
   deny: () => void
   armed: boolean
+  /** Whether opaque option ids can be returned without boolean coercion. */
+  canResolveOptions: boolean
   /** Options mode: choose a non-arming option (kind ≠ 'allow_always'). */
   choose: (optionId: string) => void
   /** Options mode: id currently armed for two-step confirm, or null. */
@@ -3305,6 +4346,35 @@ export interface ApprovalOption {
   label: string
   kind?: ApprovalOptionKind
   description?: string
+}
+```
+
+<a id="jcode-ui-core-artifactref"></a>
+
+### `ArtifactRef`
+
+`interface` · `packages/jcode-ui-core/src/types/index.ts`
+
+Safe, opaque reference to an Artifact. It never contains pixels or paths
+outside the storage-kind-relative fields below.
+
+```ts
+export interface ArtifactRef {
+  id: string
+  storage: ArtifactStorageKind
+  /** Storage-kind-relative key. Never an absolute path or provider URL. */
+  key: string
+  title: string
+  kind: string
+  media_type: string
+  size: number
+  width?: number
+  height?: number
+  provider?: string
+  model?: string
+  operation_id?: string
+  tool_call_id?: string
+  shareable?: boolean
 }
 ```
 
@@ -3373,10 +4443,18 @@ export interface AskUserControls {
   toggleOption: (question: AskUserQuestion, label: string) => void
   /** Set the free-text value for a question. */
   setOther: (question: AskUserQuestion, value: string) => void
-  /** Submit the current selections (no-op if nothing chosen per question). */
-  submit: () => void
+  /** Zero-based question currently presented by paged renderers. */
+  activeIndex: number
+  /** Move a paged renderer to a question (clamped to the available range). */
+  setActiveIndex: (index: number) => void
+  /** True while the host is accepting an answer. */
+  isSubmitting: boolean
+  /** Stable error code for a failed host submission. */
+  submitError?: AskUserSubmitError
+  /** Submit the current selections (focuses the first unanswered question). */
+  submit: () => Promise<void>
   /** Submit empty answers (skip). */
-  skip: () => void
+  skip: () => Promise<void>
 }
 ```
 
@@ -3450,6 +4528,30 @@ export interface AttachmentAdapter {
 }
 ```
 
+<a id="jcode-ui-core-billableapprovalsummary"></a>
+
+### `BillableApprovalSummary`
+
+`interface` · `packages/jcode-ui-core/src/types/index.ts`
+
+Safe, bounded summary for billable external approvals. Full prompt/tool
+args deliberately stay out of the approval DOM.
+
+```ts
+export interface BillableApprovalSummary {
+  /** Stable provider capability key (for example image.generate or web.search). */
+  capability?: string
+  provider?: string
+  model?: string
+  size?: string
+  aspect_ratio?: string
+  resolution?: string
+  count?: number
+  billable?: boolean
+  has_reference?: boolean
+}
+```
+
 <a id="jcode-ui-core-chatimage"></a>
 
 ### `ChatImage`
@@ -3487,6 +4589,27 @@ export interface ChatRuntime {
   subscribe: (listener: () => void) => () => void
   /** Action bag. Stable identity is recommended (consumers should memoize). */
   readonly actions: RuntimeActions
+}
+```
+
+<a id="jcode-ui-core-completedturn"></a>
+
+### `CompletedTurn`
+
+`interface` · `packages/jcode-ui-core/src/types/index.ts`
+
+A completed user turn projected into one collapsible timeline row. The user
+message remains outside this item; `activity` contains the intermediate
+assistant/tool/approval work, while `summary` is the final assistant reply
+that always stays visible. This is UI-only and does not alter transcript or
+model-facing message boundaries.
+
+```ts
+export interface CompletedTurn {
+  id: string
+  activity: ThreadItem[]
+  summary: Message
+  durationMs: number
 }
 ```
 
@@ -3698,6 +4821,21 @@ export interface Goal {
 }
 ```
 
+<a id="jcode-ui-core-groupcompletedturnsoptions"></a>
+
+### `GroupCompletedTurnsOptions`
+
+`interface` · `packages/jcode-ui-core/src/timeline/turnGroups.ts`
+
+Options for {@link groupCompletedTurns}.
+
+```ts
+export interface GroupCompletedTurnsOptions {
+  /** The final user turn stays expanded while the runtime is active. */
+  isRunning?: boolean
+}
+```
+
 <a id="jcode-ui-core-inlineimageadapteroptions"></a>
 
 ### `InlineImageAdapterOptions`
@@ -3731,7 +4869,8 @@ export interface Message {
   role: Role
   content: string
   timestamp: number
-  /** Origin channel for inbound messages (e.g. 'wechat'). Drives avatar tint. */
+  /** Origin channel for inbound messages (e.g. 'wechat'). Drives the compact
+   *  source label and any host-provided identity chrome. */
   source?: string
   images?: ChatImage[]
   /** system-message severity. */
@@ -4087,7 +5226,10 @@ export interface RuntimeActions {
   /** Resolve an approval gate. `approveAll` arms "allow all future" semantics. */
   resolveApproval: (id: string, approved: boolean, approveAll?: boolean) => void
   /** Answer an `ask_user` batch. */
-  submitAskUser: (id: string, answers: { question_header: string; answer: string; selected?: string[] }[]) => void
+  submitAskUser: (
+    id: string,
+    answers: { question_header: string; answer: string; selected?: string[] }[],
+  ) => void | Promise<unknown>
   /** Edit a past user message and resend from that point. */
   editMessage: (id: string, newText: string) => void
 
@@ -4558,6 +5700,10 @@ export interface ToolCall {
   id: string
   /** Backend tool_call_id for precise result matching. */
   toolCallID?: string
+  /** Host-generated id of the exact permission gate that released this call. */
+  approvalID?: string
+  /** Runner-owned generation-operation id. Never inferred from toolCallID. */
+  operationID?: string
   name: string
   args: string
   output?: string
@@ -4565,12 +5711,30 @@ export interface ToolCall {
   displayOutput?: string
   error?: string
   status: ToolStatus
+  /** Initial timeline surface. Standalone tools are hard Activity boundaries. */
+  surface?: ToolSurface
+  /** Monotonic operation phase. Image tools start queued. */
+  phase?: ToolPhase
+  /** Required for terminal image operations. */
+  outcome?: ToolOutcome
+  /** Typed backend error classification; the UI never parses `error`. */
+  errorCode?: string
+  /** Immutable provider/model snapshot for this operation. These never derive
+   * from the host's currently selected image model. */
+  provider?: string
+  model?: string
+  /** Opaque, structured result references. Duplicate ids are ignored. */
+  artifacts?: ArtifactRef[]
   /** User rejected this call at the approval prompt. Rendered struck-through
    *  and muted (declined ≠ failed) — status stays 'done', not 'error'. */
   denied?: boolean
   /** True while this call sits at an unresolved approval prompt. Rendered in
    *  the warning color; cleared when the approval resolves or a result lands. */
   awaitingApproval?: boolean
+  /** Approval gate bound to this concrete tool-call occurrence for timeline
+   *  rendering. Hosts may keep approvals as independent ThreadItems; the
+   *  UI-only timeline projection attaches the matching item by tool_call_id. */
+  approval?: Approval
   timestamp: number
   displayInfo?: ToolDisplayInfo
   /** Nested tool calls (subagent inner calls). */
@@ -4800,6 +5964,15 @@ export interface ToolRendererProps {
   /** Error string if the tool failed. */
   error?: string
   status: ToolStatus
+  surface?: ToolSurface
+  phase?: ToolPhase
+  outcome?: ToolOutcome
+  errorCode?: string
+  operationID?: string
+  provider?: string
+  model?: string
+  artifacts?: ArtifactRef[]
+  startedAt?: number
   /** Pre-extracted display metadata (title/subtitle/icon). May be absent. */
   displayInfo?: ToolDisplayInfo
   /** Nested subagent calls — renderers decide whether to recurse. */
@@ -4949,6 +6122,26 @@ Button treatment for a host-defined approval option. `allow_always` keeps
 export type ApprovalOptionKind = 'allow_once' | 'allow_always' | 'deny' | 'custom';
 ```
 
+<a id="jcode-ui-core-artifactstoragekind"></a>
+
+### `ArtifactStorageKind`
+
+`type` · `packages/jcode-ui-core/src/types/index.ts`
+
+```ts
+export type ArtifactStorageKind = 'workspace' | 'managed';
+```
+
+<a id="jcode-ui-core-askusersubmiterror"></a>
+
+### `AskUserSubmitError`
+
+`type` · `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx`
+
+```ts
+export type AskUserSubmitError = 'submit_failed';
+```
+
 <a id="jcode-ui-core-connectionstate"></a>
 
 ### `ConnectionState`
@@ -5047,6 +6240,7 @@ export type ThreadItem =
   | { kind: 'tool'; data: ToolCall; seq: number }
   | { kind: 'approval'; data: Approval; seq: number }
   | { kind: 'activity'; data: ActivityGroup; seq: number }
+  | { kind: 'turn'; data: CompletedTurn; seq: number }
   | { kind: 'exploring'; data: ExploringGroup; seq: number }
   | { kind: 'batch'; data: ToolBatchGroup; seq: number }
   | { kind: 'turnchanges'; data: TurnChangesSummary; seq: number };
@@ -5058,7 +6252,7 @@ export type ThreadItem =
 
 `type` · `packages/jcode-ui-core/src/types/index.ts`
 
-Built-in thread-item kinds (activity/exploring/batch/turnchanges are UI-only coalescing).
+Built-in thread-item kinds (activity/turn/exploring/batch/turnchanges are UI-only coalescing).
 
 ```ts
 export type ThreadItemKind =
@@ -5066,9 +6260,35 @@ export type ThreadItemKind =
   | 'tool'
   | 'approval'
   | 'activity'
+  | 'turn'
   | 'exploring'
   | 'batch'
   | 'turnchanges';
+```
+
+<a id="jcode-ui-core-tooloutcome"></a>
+
+### `ToolOutcome`
+
+`type` · `packages/jcode-ui-core/src/types/index.ts`
+
+```ts
+export type ToolOutcome = 'succeeded' | 'failed' | 'cancelled' | 'uncertain';
+```
+
+<a id="jcode-ui-core-toolphase"></a>
+
+### `ToolPhase`
+
+`type` · `packages/jcode-ui-core/src/types/index.ts`
+
+Durable image-tool lifecycle. `terminal` is intentionally separate from the
+outcome so reducers can enforce monotonic ordering without guessing whether
+a terminal call succeeded, failed, was cancelled, or became uncertain.
+
+```ts
+export type ToolPhase = 'queued' | 'generating' | 'saving' | 'terminal'
+export type ToolOutcome = 'succeeded' | 'failed' | 'cancelled' | 'uncertain';
 ```
 
 <a id="jcode-ui-core-toolrenderer"></a>
@@ -5091,5 +6311,17 @@ export type ToolRenderer = ComponentType<ToolRendererProps>;
 
 ```ts
 export type ToolStatus = 'running' | 'done' | 'error';
+```
+
+<a id="jcode-ui-core-toolsurface"></a>
+
+### `ToolSurface`
+
+`type` · `packages/jcode-ui-core/src/types/index.ts`
+
+Timeline surface requested by a tool from its initial tool_call event.
+
+```ts
+export type ToolSurface = 'activity' | 'standalone';
 ```
 

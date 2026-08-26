@@ -36,7 +36,8 @@ export interface Message {
   role: Role
   content: string
   timestamp: number
-  /** Origin channel for inbound messages (e.g. 'wechat'). Drives avatar tint. */
+  /** Origin channel for inbound messages (e.g. 'wechat'). Drives the compact
+   *  source label and any host-provided identity chrome. */
   source?: string
   images?: ChatImage[]
   /** system-message severity. */
@@ -168,6 +169,8 @@ export interface ToolCall {
   id: string
   /** Backend tool_call_id for precise result matching. */
   toolCallID?: string
+  /** Host-generated id of the exact permission gate that released this call. */
+  approvalID?: string
   /** Runner-owned generation-operation id. Never inferred from toolCallID. */
   operationID?: string
   name: string
@@ -197,6 +200,10 @@ export interface ToolCall {
   /** True while this call sits at an unresolved approval prompt. Rendered in
    *  the warning color; cleared when the approval resolves or a result lands. */
   awaitingApproval?: boolean
+  /** Approval gate bound to this concrete tool-call occurrence for timeline
+   *  rendering. Hosts may keep approvals as independent ThreadItems; the
+   *  UI-only timeline projection attaches the matching item by tool_call_id. */
+  approval?: Approval
   timestamp: number
   displayInfo?: ToolDisplayInfo
   /** Nested tool calls (subagent inner calls). */
@@ -380,12 +387,27 @@ export interface TurnChangesSummary {
   hasLineCounts: boolean
 }
 
-/** Built-in thread-item kinds (activity/exploring/batch/turnchanges are UI-only coalescing). */
+/**
+ * A completed user turn projected into one collapsible timeline row. The user
+ * message remains outside this item; `activity` contains the intermediate
+ * assistant/tool/approval work, while `summary` is the final assistant reply
+ * that always stays visible. This is UI-only and does not alter transcript or
+ * model-facing message boundaries.
+ */
+export interface CompletedTurn {
+  id: string
+  activity: ThreadItem[]
+  summary: Message
+  durationMs: number
+}
+
+/** Built-in thread-item kinds (activity/turn/exploring/batch/turnchanges are UI-only coalescing). */
 export type ThreadItemKind =
   | 'message'
   | 'tool'
   | 'approval'
   | 'activity'
+  | 'turn'
   | 'exploring'
   | 'batch'
   | 'turnchanges'
@@ -399,6 +421,7 @@ export type ThreadItem =
   | { kind: 'tool'; data: ToolCall; seq: number }
   | { kind: 'approval'; data: Approval; seq: number }
   | { kind: 'activity'; data: ActivityGroup; seq: number }
+  | { kind: 'turn'; data: CompletedTurn; seq: number }
   | { kind: 'exploring'; data: ExploringGroup; seq: number }
   | { kind: 'batch'; data: ToolBatchGroup; seq: number }
   | { kind: 'turnchanges'; data: TurnChangesSummary; seq: number }
@@ -415,6 +438,9 @@ export function isApprovalItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 
 }
 export function isActivityItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'activity' }> {
   return i.kind === 'activity'
+}
+export function isTurnItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'turn' }> {
+  return i.kind === 'turn'
 }
 export function isExploringItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'exploring' }> {
   return i.kind === 'exploring'

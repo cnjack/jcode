@@ -32,6 +32,10 @@ export interface WSHandlers {
     batch_size?: number
     /** Wall-clock start (unix ms). */
     started_at?: number
+    /** Exact host-generated permission gate that released this call. */
+    approval_id?: string
+    /** Decision for approval_id. False means the call is a denied receipt. */
+    approval_granted?: boolean
   }) => void
   onToolProgress?: (data: {
     name?: string
@@ -49,6 +53,8 @@ export interface WSHandlers {
     display_output?: string
     error?: string
     tool_call_id?: string
+    /** Exact host-generated approval occurrence for collision-safe matching. */
+    approval_id?: string
     /** Total tool duration (ms, approval wait subtracted) — merged into
      *  meta.duration_ms when absent there. */
     duration_ms?: number

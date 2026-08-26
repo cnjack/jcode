@@ -62,6 +62,23 @@ function PendingIndicator() {
 
 export function ChatView({ readOnly }: ChatViewProps) {
   const { t } = useTranslation()
+  const turnDurationLabel = (durationMs: number) => {
+    const totalSeconds = Math.max(0, Math.round(durationMs / 1000))
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    const duration = hours > 0
+      ? t('chat.durationHours', { h: hours, m: minutes, s: seconds })
+      : minutes > 0
+        ? t('chat.durationMinutes', { m: minutes, s: seconds })
+        : t('chat.durationSeconds', { n: seconds })
+    return `${t('chat.turnDuration')} ${duration}`
+  }
+  const turnStrings = {
+    turnDurationLabel,
+    turnExpandLabel: t('chat.turnShowWork'),
+    turnCollapseLabel: t('chat.turnHideWork'),
+  }
   const host = useProductComposerHost()
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
   const sessionLoading = useAppSelector((s) => s.chat.sessionLoading)
@@ -95,7 +112,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
     return (
       <div className="chat-panel flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1">
-          <Thread overscanBottom={8} renderPending={() => <PendingIndicator />} />
+          <Thread overscanBottom={8} renderPending={() => <PendingIndicator />} {...turnStrings} />
         </div>
       </div>
     )
@@ -174,6 +191,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
           overscanBottom={28}
           hidePendingAskUser
           renderPending={pendingAskUser ? () => null : () => <PendingIndicator />}
+          {...turnStrings}
         />
       </div>
       {/* z-[2] keeps the composer’s upward-opening menus above the thread layer. */}

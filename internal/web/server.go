@@ -685,6 +685,12 @@ func (s *Server) currentModelSupportsImage(eng *Engine) bool {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	eng := s.activeEngine()
 	recentProject, recentSessionID := session.LoadMostRecentSession()
+	recentWorkspaceKind := session.WorkspaceProject
+	if recentSessionID != "" {
+		if meta, err := session.FindSessionMeta(recentSessionID); err == nil && meta != nil {
+			recentWorkspaceKind = session.NormalizeWorkspaceKind(meta.WorkspaceKind)
+		}
+	}
 
 	if s.needsSetup || eng == nil {
 		pwd := ""
@@ -696,59 +702,56 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			workspaceKind = session.NormalizeWorkspaceKind(eng.workspaceKind)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":            "needs_setup",
-			"version":           s.version,
-			"pwd":               pwd,
-			"project":           project,
-			"workspace_key":     project,
-			"workspace_kind":    workspaceKind,
-			"provider":          "",
-			"model":             "",
-			"agent":             "",
-			"mode":              "build",
-			"session_id":        "",
-			"recent_project":    recentProject,
-			"recent_session_id": recentSessionID,
-			"running":           false,
-			"needs_setup":       true,
-			"auth_required":     s.requireAuth,
+			"status":                "needs_setup",
+			"version":               s.version,
+			"pwd":                   pwd,
+			"project":               project,
+			"workspace_key":         project,
+			"workspace_kind":        workspaceKind,
+			"provider":              "",
+			"model":                 "",
+			"agent":                 "",
+			"mode":                  "build",
+			"session_id":            "",
+			"recent_project":        recentProject,
+			"recent_session_id":     recentSessionID,
+			"recent_workspace_kind": recentWorkspaceKind,
+			"running":               false,
+			"needs_setup":           true,
+			"auth_required":         s.requireAuth,
 		})
 		return
 	}
 
 	provider, mdl, modeStr := eng.modelSnapshot()
 	sessionID := eng.recUUID()
-	// After a restart the bootstrap engine is a fresh throwaway (no recording,
-	// not running) whose UUID has no history to restore. Report the project's
-	// last foregrounded session instead so clients boot straight back into the
-	// conversation that was open when the app was closed. Once the live engine
-	// has real state it always reports its own UUID.
+	// Keep session_id honest: it is always the current active engine, never an
+	// implicit last-session alias. Clients use fresh_session to distinguish the
+	// unrecorded bootstrap task from a durable/running conversation, while the
+	// recent_* fields remain available for explicit history UX.
 	eng.emu.Lock()
-	throwaway := (eng.recorder == nil || !eng.recorder.HasRecording()) && !eng.running.Load()
+	freshSession := (eng.recorder == nil || !eng.recorder.HasRecording()) && !eng.running.Load()
 	eng.emu.Unlock()
-	if throwaway {
-		if last := session.LoadLastSession(engineProject(eng)); last != "" {
-			sessionID = last
-		}
-	}
 	project := engineProject(eng)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":            "ok",
-		"version":           s.version,
-		"pwd":               eng.pwd,
-		"project":           project,
-		"workspace_key":     project,
-		"workspace_kind":    session.NormalizeWorkspaceKind(eng.workspaceKind),
-		"provider":          provider,
-		"model":             mdl,
-		"agent":             eng.curAgentRole(),
-		"mode":              modeStr,
-		"session_id":        sessionID,
-		"recent_project":    recentProject,
-		"recent_session_id": recentSessionID,
-		"running":           eng.running.Load(),
-		"image_support":     s.currentModelSupportsImage(eng),
-		"auth_required":     s.requireAuth,
+		"status":                "ok",
+		"version":               s.version,
+		"pwd":                   eng.pwd,
+		"project":               project,
+		"workspace_key":         project,
+		"workspace_kind":        session.NormalizeWorkspaceKind(eng.workspaceKind),
+		"provider":              provider,
+		"model":                 mdl,
+		"agent":                 eng.curAgentRole(),
+		"mode":                  modeStr,
+		"session_id":            sessionID,
+		"fresh_session":         freshSession,
+		"recent_project":        recentProject,
+		"recent_session_id":     recentSessionID,
+		"recent_workspace_kind": recentWorkspaceKind,
+		"running":               eng.running.Load(),
+		"image_support":         s.currentModelSupportsImage(eng),
+		"auth_required":         s.requireAuth,
 	})
 }
 

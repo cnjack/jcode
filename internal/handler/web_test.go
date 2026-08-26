@@ -61,6 +61,362 @@ func TestWebHandler_ResolveApprovalOnceVsAll(t *testing.T) {
 	}
 }
 
+func TestWebHandlerDefersToolCallUntilApprovalLayerReleasesIt(t *testing.T) {
+	h := NewWebHandler()
+	h.OnToolCall(ToolCallEvent{
+		Name: "write", Args: `{"file_path":"out.txt","content":"secret preview"}`,
+		ToolCallID: "call-write", StartedAt: time.Now(),
+	})
+	select {
+	case event := <-h.Events():
+		t.Fatalf("tool surfaced before approval decision: %#v", event)
+	default:
+	}
+
+	h.NotifyToolInProgress("call-write", "write", `{"file_path":"out.txt","content":"secret preview"}`)
+	select {
+	case event := <-h.Events():
+		if event.Event != "tool_call" {
+			t.Fatalf("event = %q, want tool_call", event.Event)
+		}
+		data := event.Data.(WebToolCallData)
+		if data.ToolCallID != "call-write" || data.Name != "write" {
+			t.Fatalf("tool_call = %#v", data)
+		}
+		if data.ApprovalGranted {
+			t.Fatal("safe release was mislabeled as a user approval")
+		}
+		if data.ApprovalID != "" {
+			t.Fatalf("safe release carried approval id %q", data.ApprovalID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for released tool_call")
+	}
+}
+
+func TestWebHandlerReleasesOnlyExactPendingToolOccurrence(t *testing.T) {
+	h := NewWebHandler()
+	h.OnToolCall(ToolCallEvent{
+		Name: "write", Args: `{"file_path":"first.txt"}`, ToolCallID: "reused-call", StartedAt: time.Now(),
+	})
+	h.OnToolCall(ToolCallEvent{
+		Name: "write", Args: `{"file_path":"second.txt"}`, ToolCallID: "reused-call", StartedAt: time.Now(),
+	})
+
+	h.markPendingToolApproval(
+		"reused-call", "write", `{"file_path":"second.txt"}`, "approval-second", true,
+	)
+	h.NotifyToolInProgress("reused-call", "write", `{"file_path":"second.txt"}`)
+	select {
+	case event := <-h.Events():
+		data := event.Data.(WebToolCallData)
+		if data.Args != `{"file_path":"second.txt"}` || data.ApprovalID != "approval-second" || !data.ApprovalGranted {
+			t.Fatalf("released args = %s, want second occurrence", data.Args)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for exact occurrence")
+	}
+
+	// A non-empty but unknown id must not fall back to a different call merely
+	// because its name/args happen to match.
+	h.NotifyToolInProgress("unknown-call", "write", `{"file_path":"first.txt"}`)
+	select {
+	case event := <-h.Events():
+		t.Fatalf("released a different occurrence for an unknown id: %#v", event)
+	default:
+	}
+
+	h.NotifyToolInProgress("reused-call", "write", `{"file_path":"first.txt"}`)
+	select {
+	case event := <-h.Events():
+		data := event.Data.(WebToolCallData)
+		if data.Args != `{"file_path":"first.txt"}` {
+			t.Fatalf("released args = %s, want first occurrence", data.Args)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for remaining occurrence")
+	}
+}
+
+func TestWebHandlerUsesUniqueIDNameFallbackWhenApprovalArgsAreNormalized(t *testing.T) {
+	h := NewWebHandler()
+	originalArgs := `{"file_path":"out.txt","content":"hello"}`
+	normalizedArgs := `{"content":"hello","file_path":"out.txt"}`
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: originalArgs, ToolCallID: "call-write"})
+
+	h.markPendingToolApproval("call-write", "write", normalizedArgs, "approval-write", true)
+	h.NotifyToolInProgress("call-write", "write", normalizedArgs)
+
+	select {
+	case event := <-h.Events():
+		data := event.Data.(WebToolCallData)
+		if data.Args != originalArgs || data.ApprovalID != "approval-write" || !data.ApprovalGranted {
+			t.Fatalf("normalized approval released wrong occurrence: %#v", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for unique id/name fallback")
+	}
+}
+
+func TestWebHandlerDoesNotFallbackAcrossAmbiguousIDNameOccurrences(t *testing.T) {
+	h := NewWebHandler()
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: `{"file_path":"first.txt"}`, ToolCallID: "reused"})
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: `{"file_path":"second.txt"}`, ToolCallID: "reused"})
+
+	h.NotifyToolInProgress("reused", "write", `{"file_path":"normalized.txt"}`)
+	select {
+	case event := <-h.Events():
+		t.Fatalf("ambiguous id/name fallback released a call: %#v", event)
+	default:
+	}
+
+	h = NewWebHandler()
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: `{"file_path":"same.txt"}`, ToolCallID: "reused"})
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: `{"file_path":"same.txt"}`, ToolCallID: "reused"})
+	h.NotifyToolInProgress("reused", "write", `{"file_path":"same.txt"}`)
+	select {
+	case event := <-h.Events():
+		t.Fatalf("identical duplicate occurrences selected the first call: %#v", event)
+	default:
+	}
+
+	h = NewWebHandler()
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: `{}`, ToolCallID: ""})
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: `{}`, ToolCallID: ""})
+	h.NotifyToolInProgress("", "write", `{}`)
+	select {
+	case event := <-h.Events():
+		t.Fatalf("legacy duplicate occurrences selected the first call: %#v", event)
+	default:
+	}
+}
+
+func TestWebHandlerDeniedResultReleasesOnlyDeniedOccurrence(t *testing.T) {
+	h := NewWebHandler()
+	firstArgs := `{"file_path":"first.txt"}`
+	secondArgs := `{"file_path":"second.txt"}`
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: firstArgs, ToolCallID: "reused-call"})
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: secondArgs, ToolCallID: "reused-call"})
+	h.markPendingToolApproval("reused-call", "write", secondArgs, "approval-second", false)
+
+	h.OnToolResult(ToolResultEvent{
+		Name: "write", ToolCallID: "reused-call", Denied: true,
+		Output: "Tool execution was rejected by user.",
+	})
+	callEvent := <-h.Events()
+	resultEvent := <-h.Events()
+	if callEvent.Event != "tool_call" || resultEvent.Event != "tool_result" {
+		t.Fatalf("denied event order = %q, %q", callEvent.Event, resultEvent.Event)
+	}
+	denied := callEvent.Data.(WebToolCallData)
+	if denied.Args != secondArgs || denied.ApprovalID != "approval-second" || denied.ApprovalGranted {
+		t.Fatalf("released wrong denied occurrence: %#v", denied)
+	}
+
+	// The unresolved sibling must remain buffered until its own gate releases.
+	h.NotifyToolInProgress("reused-call", "write", firstArgs)
+	select {
+	case event := <-h.Events():
+		remaining := event.Data.(WebToolCallData)
+		if remaining.Args != firstArgs {
+			t.Fatalf("remaining occurrence args = %s", remaining.Args)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unresolved sibling was consumed by the denied result")
+	}
+}
+
+func TestWebHandlerFailsClosedForMultipleDeniedOccurrences(t *testing.T) {
+	h := NewWebHandler()
+	firstArgs := `{"file_path":"first.txt"}`
+	secondArgs := `{"file_path":"second.txt"}`
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: firstArgs, ToolCallID: "reused-call"})
+	h.OnToolCall(ToolCallEvent{Name: "write", Args: secondArgs, ToolCallID: "reused-call"})
+	h.markPendingToolApproval("reused-call", "write", firstArgs, "approval-first", false)
+	h.markPendingToolApproval("reused-call", "write", secondArgs, "approval-second", false)
+
+	h.OnToolResult(ToolResultEvent{
+		Name: "write", ToolCallID: "reused-call", Denied: true,
+		Output: "Tool execution was rejected by user.",
+	})
+	select {
+	case event := <-h.Events():
+		t.Fatalf("ambiguous denied result selected the first occurrence: %#v", event)
+	default:
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.pendingToolCalls) != 2 || len(h.activeToolCalls) != 0 {
+		t.Fatalf("ambiguous denial mutated occurrences: pending=%d active=%d", len(h.pendingToolCalls), len(h.activeToolCalls))
+	}
+}
+
+func TestWebHandlerInterleavedDuplicateResultsCarryExactApprovalID(t *testing.T) {
+	h := NewWebHandler()
+	firstArgs := `{"command":"slow"}`
+	secondArgs := `{"command":"deny"}`
+	h.OnToolCall(ToolCallEvent{Name: "execute", Args: firstArgs, ToolCallID: "reused-call"})
+	h.OnToolCall(ToolCallEvent{Name: "execute", Args: secondArgs, ToolCallID: "reused-call"})
+	h.markPendingToolApproval("reused-call", "execute", firstArgs, "approval-first", true)
+	h.NotifyToolInProgress("reused-call", "execute", firstArgs)
+	if released := (<-h.Events()).Data.(WebToolCallData); released.ApprovalID != "approval-first" {
+		t.Fatalf("approved occurrence = %#v", released)
+	}
+	h.markPendingToolApproval("reused-call", "execute", secondArgs, "approval-second", false)
+
+	// A reused-id approval meter can only expose an aggregate denied bit. The
+	// middleware's fixed rejection receipt is the occurrence-safe evidence: a
+	// successful output must stay on the already released approved call.
+	h.OnToolResult(ToolResultEvent{
+		Name: "execute", ToolCallID: "reused-call", Output: "slow done", Denied: true,
+	})
+	success := (<-h.Events()).Data.(WebToolResultData)
+	if success.ApprovalID != "approval-first" || success.Denied || success.Output != "slow done" {
+		t.Fatalf("success result identity = %#v", success)
+	}
+
+	h.OnToolResult(ToolResultEvent{
+		Name: "execute", ToolCallID: "reused-call",
+		Output: "Tool execution was rejected by user.", Denied: false,
+	})
+	deniedCall := (<-h.Events()).Data.(WebToolCallData)
+	deniedResult := (<-h.Events()).Data.(WebToolResultData)
+	if deniedCall.ApprovalID != "approval-second" || deniedResult.ApprovalID != "approval-second" ||
+		!deniedResult.Denied {
+		t.Fatalf("denied result identity: call=%#v result=%#v", deniedCall, deniedResult)
+	}
+}
+
+func TestWebHandlerFailsClosedForActivePendingNonDeniedCollision(t *testing.T) {
+	h := NewWebHandler()
+	firstArgs := `{"command":"slow"}`
+	secondArgs := `{"command":"preflight-error"}`
+	h.OnToolCall(ToolCallEvent{Name: "execute", Args: firstArgs, ToolCallID: "reused-call"})
+	h.OnToolCall(ToolCallEvent{Name: "execute", Args: secondArgs, ToolCallID: "reused-call"})
+	h.markPendingToolApproval("reused-call", "execute", firstArgs, "approval-first", true)
+	h.NotifyToolInProgress("reused-call", "execute", firstArgs)
+	<-h.Events() // approved tool_call
+
+	h.OnToolResult(ToolResultEvent{
+		Name: "execute", ToolCallID: "reused-call",
+		Output: "Tool approval error: invalid billable intent",
+	})
+	select {
+	case event := <-h.Events():
+		t.Fatalf("ambiguous pre-execution result was emitted and could be misbound: %#v", event)
+	default:
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.activeToolCalls) != 1 || len(h.pendingToolCalls) != 1 {
+		t.Fatalf("ambiguous result mutated occurrences: active=%d pending=%d", len(h.activeToolCalls), len(h.pendingToolCalls))
+	}
+}
+
+func TestWebHandlerDoesNotInferDenialFromUniqueToolOutput(t *testing.T) {
+	h := NewWebHandler()
+	output := "Tool execution was rejected by user. This is ordinary command output."
+	h.OnToolCall(ToolCallEvent{Name: "execute", Args: `{"command":"printf text"}`, ToolCallID: "unique"})
+	h.NotifyToolInProgress("unique", "execute", `{"command":"printf text"}`)
+	<-h.Events() // released tool_call
+	h.OnToolResult(ToolResultEvent{Name: "execute", ToolCallID: "unique", Output: output, Denied: false})
+	result := (<-h.Events()).Data.(WebToolResultData)
+	if result.Denied {
+		t.Fatalf("ordinary output was inferred as a denial: %#v", result)
+	}
+}
+
+func TestWebHandlerApprovalEmitsPromptBeforeToolAndDenialReleasesOnlyReceipt(t *testing.T) {
+	h := NewWebHandler()
+	args := `{"command":"printf test"}`
+	h.OnToolCall(ToolCallEvent{
+		Name: "execute", Args: args, ToolCallID: "call-denied", StartedAt: time.Now(),
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	responseCh := make(chan ApprovalResponse, 1)
+	go func() {
+		response, _ := h.RequestApproval(ctx, ApprovalRequest{
+			ToolName: "execute", ToolArgs: args, ToolCallID: "call-denied",
+		})
+		responseCh <- response
+	}()
+
+	requestEvent := <-h.Events()
+	if requestEvent.Event != "approval_request" {
+		t.Fatalf("first event = %q, want approval_request", requestEvent.Event)
+	}
+	request := requestEvent.Data.(WebApprovalRequestData)
+	if err := h.ResolveApproval(request.ID, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if response := <-responseCh; response.Approved {
+		t.Fatalf("denied response = %#v", response)
+	}
+	select {
+	case event := <-h.Events():
+		t.Fatalf("denied tool surfaced before terminal result: %#v", event)
+	default:
+	}
+
+	h.OnToolResult(ToolResultEvent{
+		Name: "execute", ToolCallID: "call-denied", Denied: true,
+		Output: "Tool execution was rejected by user.",
+	})
+	callEvent := <-h.Events()
+	resultEvent := <-h.Events()
+	if callEvent.Event != "tool_call" || resultEvent.Event != "tool_result" {
+		t.Fatalf("denied event order = %q, %q", callEvent.Event, resultEvent.Event)
+	}
+	deniedCall := callEvent.Data.(WebToolCallData)
+	if deniedCall.ApprovalID != request.ID || deniedCall.ApprovalGranted {
+		t.Fatalf("denied receipt identity = %#v", deniedCall)
+	}
+}
+
+func TestWebHandlerApprovalReleasesToolOnlyAfterAllow(t *testing.T) {
+	h := NewWebHandler()
+	args := `{"command":"printf approved"}`
+	h.OnToolCall(ToolCallEvent{
+		Name: "execute", Args: args, ToolCallID: "call-approved", StartedAt: time.Now(),
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	responseCh := make(chan ApprovalResponse, 1)
+	go func() {
+		response, _ := h.RequestApproval(ctx, ApprovalRequest{
+			ToolName: "execute", ToolArgs: args, ToolCallID: "call-approved",
+		})
+		responseCh <- response
+	}()
+
+	requestEvent := <-h.Events()
+	if requestEvent.Event != "approval_request" {
+		t.Fatalf("first event = %q, want approval_request", requestEvent.Event)
+	}
+	request := requestEvent.Data.(WebApprovalRequestData)
+	if err := h.ResolveApproval(request.ID, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if response := <-responseCh; !response.Approved {
+		t.Fatalf("approved response = %#v", response)
+	}
+	select {
+	case event := <-h.Events():
+		if event.Event != "tool_call" {
+			t.Fatalf("event after allow = %q, want tool_call", event.Event)
+		}
+		if data := event.Data.(WebToolCallData); data.ToolCallID != "call-approved" ||
+			data.ApprovalID != request.ID || !data.ApprovalGranted {
+			t.Fatalf("released approved tool = %#v", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for tool_call after allow")
+	}
+}
+
 func TestWebHandler_AgentDoneCarriesRemoteErrorCode(t *testing.T) {
 	h := NewWebHandler()
 	h.OnAgentDone(tools.Fatal(&tools.RemoteTransportError{

@@ -12,6 +12,7 @@ type mockHandler struct {
 	mu           sync.Mutex
 	texts        []string
 	toolCalls    []string
+	toolProgress []string
 	doneErr      error
 	doneCalled   bool
 	approvalResp ApprovalResponse
@@ -40,6 +41,12 @@ func (m *mockHandler) OnToolCall(ev ToolCallEvent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.toolCalls = append(m.toolCalls, ev.Name)
+}
+
+func (m *mockHandler) NotifyToolInProgress(_, name, _ string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.toolProgress = append(m.toolProgress, name)
 }
 
 func (m *mockHandler) OnToolResult(ev ToolResultEvent) {}
@@ -220,6 +227,7 @@ func TestNotifyingHandler_Passthrough(t *testing.T) {
 
 	h.OnAgentText("test")
 	h.OnToolCall(ToolCallEvent{Name: "edit", Args: "{}", ToolCallID: "call_1"})
+	h.NotifyToolInProgress("call_1", "edit", "{}")
 	h.OnAgentDone(nil)
 
 	inner.mu.Lock()
@@ -230,6 +238,9 @@ func TestNotifyingHandler_Passthrough(t *testing.T) {
 	}
 	if len(inner.toolCalls) != 1 || inner.toolCalls[0] != "edit" {
 		t.Fatalf("tool call not passed through: %v", inner.toolCalls)
+	}
+	if len(inner.toolProgress) != 1 || inner.toolProgress[0] != "edit" {
+		t.Fatalf("tool progress not passed through: %v", inner.toolProgress)
 	}
 	if !inner.doneCalled {
 		t.Fatal("done not passed through")

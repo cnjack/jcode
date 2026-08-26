@@ -16,11 +16,12 @@
   /* ─── Layout (conversation column) ───
    * Hosts/embeds can override on a parent:
    *   .jcode-demo { --jcode-col-max: 100%; --jcode-col-pad-x: 0.75rem; }
-   * Product full-screen keeps the wide reading column. */
-  --jcode-col-max: min(56rem, 100%);
-  --jcode-col-pad-x: 1rem;
-  /* Avatar + gap → content indent (was hard-coded Tailwind pl-9 = 2.25rem). */
-  --jcode-gutter: 2.25rem;
+   * Product full-screen uses a broad conversation stage: assistant content
+   * anchors left while the user bubble anchors right. */
+  --jcode-col-max: min(64rem, 100%);
+  --jcode-col-pad-x: clamp(1rem, 2.2vw, 2rem);
+  /* Shared tool/body inset. Default message chrome has no avatar column. */
+  --jcode-gutter: 0rem;
 
   /* ─── Fonts ─── */
   --jcode-font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

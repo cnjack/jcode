@@ -9,8 +9,8 @@ import (
 )
 
 // lastSessionFile is the on-disk structure of last_session.json: the most
-// recently foregrounded session per project, so a web/desktop client can
-// return to the conversation that was open before a restart.
+// recently foregrounded durable-session hints used by explicit history and
+// cold-start workspace selection. Clients do not implicitly reopen content.
 type lastSessionFile struct {
 	Projects      map[string]string `json:"projects"`                 // project path → session uuid
 	RecentProject string            `json:"recent_project,omitempty"` // last foregrounded project across workspaces
@@ -29,7 +29,9 @@ func lastSessionPath() (string, error) {
 // Best-effort: persistence must never break session switching, and callers
 // run outside any engine lock (file I/O).
 func SaveLastSession(project, id string) {
-	if project == "" || id == "" || ValidateSessionID(id) != nil {
+	// Empty New Tasks have a UUID but no transcript yet. Never let one replace
+	// the project's last durable conversation/workspace pointer.
+	if project == "" || validateLastSessionID(id) == "" {
 		return
 	}
 	indexMu.Lock()
@@ -92,11 +94,11 @@ func LoadLastSession(project string) string {
 	return validateLastSessionID(f.Projects[project])
 }
 
-// LoadMostRecentSession returns the last foregrounded project/session across
-// all workspaces. Desktop uses this on a cold start because its sidecar always
-// boots from a local directory and therefore cannot infer that the previously
-// focused workspace was SSH or Docker. Project-scoped web startup continues to
-// use LoadLastSession.
+// LoadMostRecentSession returns the last durable foregrounded project/session
+// across all workspaces. Desktop uses the project as the authority for a fresh
+// cold-start task without reopening the old conversation; it matters because
+// the sidecar itself always boots from a local directory and cannot infer that
+// the previous workspace was SSH or Docker.
 func LoadMostRecentSession() (project, id string) {
 	p, err := lastSessionPath()
 	if err != nil {
@@ -119,7 +121,10 @@ func LoadMostRecentSession() (project, id string) {
 	}
 	id = validateLastSessionID(f.RecentSession)
 	if id == "" {
-		return "", ""
+		// Empty new tasks can become the recent pointer before their first user
+		// message creates a transcript. Fall back to the newest durable per-project
+		// entry instead of losing the last usable workspace altogether.
+		return inferMostRecentLegacySession(f.Projects)
 	}
 	return f.RecentProject, id
 }

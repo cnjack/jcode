@@ -31,7 +31,7 @@ type Unit = { cluster: { tools: ToolCall[]; seq: number } } | { item: ThreadItem
 /** Standalone tools own their complete timeline surface and are hard grouping
  * boundaries from the initial tool_call event onward. */
 export function isStandaloneTool(tool: ToolCall): boolean {
-  return tool.surface === 'standalone' || tool.name === 'ask_user'
+  return tool.surface === 'standalone' || tool.name === 'ask_user' || (!!tool.approval && !tool.approval.resolved)
 }
 
 /**

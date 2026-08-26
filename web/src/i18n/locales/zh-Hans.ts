@@ -244,6 +244,8 @@ export default {
     },
     copilotHint: '回车发送 · Shift+回车换行 · Esc 取消',
     turnDuration: '本次耗时',
+    turnShowWork: '展开本轮工作过程',
+    turnHideWork: '折叠本轮工作过程',
     wechatOn: '微信通知已开启',
     wechatOff: '微信通知已关闭',
     modes: {
@@ -310,6 +312,7 @@ export default {
     durationSeconds: '{n}秒',
     durationMinutes: '{m}分 {s}秒',
     durationMinutesOnly: '{m}分',
+    durationHours: '{h}小时 {m}分 {s}秒',
   },
 
   approval: {

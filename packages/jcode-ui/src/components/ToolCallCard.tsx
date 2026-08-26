@@ -8,12 +8,13 @@
 
 import { memo, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronDownIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
 import type { ToolCall } from 'jcode-ui-core'
 import { groupToolTimeline, summarizeExploringSteps, formatElapsed } from 'jcode-ui-core'
 import { ToolCallView, ToolCallProvider } from 'jcode-ui-core/primitives'
 import type { ToolRendererRegistry } from 'jcode-ui-core/adapters'
 import { AskUserCard } from './AskUserCard.js'
+import { ApprovalBanner } from './ApprovalBanner.js'
 import { CompactToolRow } from './CompactToolRow.js'
 import { useToolRegistry } from './ToolRegistryContext.js'
 import { renderMarkdown } from '../lib/markdown.js'
@@ -58,6 +59,17 @@ export const ToolCallCard = memo(function ToolCallCard({
     }),
     [reg],
   )
+  if (tool.approval && !tool.approval.resolved) {
+    return (
+      <div
+        data-jcode-ui=""
+        className={`jcode-tool-approval-only ${className ?? ''}`}
+        data-testid="tool-approval"
+      >
+        <ApprovalBanner approval={tool.approval} />
+      </div>
+    )
+  }
   return (
     <ToolCallProvider value={providerValue}>
       <ToolCallView
@@ -166,6 +178,7 @@ function ToolHeader({
   // strikethrough, never the destructive red.
   const isDenied = !!tool.denied
   const isAwaiting = !isDenied && !!tool.awaitingApproval && isRunning
+  const isAllowed = !isDenied && !!tool.approval?.resolved && tool.approval.approved === true
   const isError =
     !isDenied && (tool.status === 'error' || (tool.meta?.exit_code !== undefined && tool.meta.exit_code !== 0))
   const diff = useMemo(() => parseDiffCount(tool), [tool])
@@ -216,6 +229,15 @@ function ToolHeader({
           style={{ color: 'var(--jcode-color-muted-foreground)' }}
         >
           Denied
+        </span>
+      )}
+      {isAllowed && (
+        <span
+          className="jcode-toolcall__allowed inline-flex shrink-0 items-center gap-1 text-[10px] font-medium"
+          style={{ color: 'var(--jcode-color-success-fg)' }}
+        >
+          <ShieldCheckIcon className="h-3 w-3" aria-hidden />
+          Allowed
         </span>
       )}
       {isAwaiting && (

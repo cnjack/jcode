@@ -161,6 +161,24 @@ describe('groupActivityTimeline', () => {
     )
   })
 
+  it('keeps a pending approval as a hard boundary so no tool group renders before the decision', () => {
+    const pending = shell('approval-gated', { status: 'running' })
+    pending.approval = {
+      id: 'approval-1',
+      tool_name: 'execute',
+      tool_args: '{}',
+      tool_call_id: pending.toolCallID,
+      is_external: false,
+    }
+    const out = groupActivityTimeline([
+      toolItem(read('before'), 1),
+      toolItem(pending, 2),
+      toolItem(read('after'), 3),
+    ])
+
+    assert.deepEqual(out.map((item) => item.kind), ['tool', 'tool', 'tool'])
+  })
+
   it('does not pull batch members backwards across a standalone image', () => {
     const out = groupActivityTimeline([
       toolItem(read('a'), 1),

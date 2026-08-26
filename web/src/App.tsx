@@ -3,8 +3,8 @@
  *
  * Boot flow (mirrors the Vue App.vue):
  *   1. initApiBase() already resolved in main.tsx (dual-host contract).
- *   2. GET /api/health → seed model/mode/session, gate on auth/setup.
- *   3. Connect WS, load sessions/tasks/slash commands.
+ *   2. GET /api/health → seed model/mode/workspace, gate on auth/setup.
+ *   3. Load sidebar state and land on a fresh New Task (reusing bootstrap when possible).
  *   4. Render the active view (chat / automations / cloud-mobile) wrapped in the
  *      jcode-ui RuntimeProvider so Thread/Composer read from the RTK store.
  *
@@ -28,7 +28,7 @@ import {
   createDefaultToolRegistry,
 } from 'jcode-ui'
 import { WSClient } from './lib/ws'
-import { api } from './lib/api'
+import { api, isAPIError } from './lib/api'
 import { apiBase } from './lib/apiBase'
 import { normalizeMode } from './lib/types'
 import { useAppDispatch, useAppSelector } from './app/hooks'
@@ -41,10 +41,19 @@ import {
   openConversation,
   replaySession,
   startNewChat,
+  startFreshChat,
 } from './app/store'
 import { bridgeWS } from './app/wsBridge'
 import { useChatRuntime } from './app/runtime'
 import { selectShowSessionChrome } from './app/selectors'
+import {
+  coldDesktopFreshTarget,
+  markPageBootComplete,
+  pageBootCompleted,
+  shouldStartFreshOnWindowReopen,
+  startupLanding,
+  type FreshTaskTarget,
+} from './app/startup'
 import { triggerKindLabel, type AutomationRun } from './lib/automation'
 import { Sidebar } from './components/Sidebar'
 import { ChatView } from './components/ChatView'
@@ -67,6 +76,8 @@ import type { RemotePrefill } from './lib/remote'
 import { isTauri } from './lib/useDesktop'
 import { AppUpdateProvider } from './lib/useAppUpdate'
 
+let pageHasBooted = pageBootCompleted()
+
 export default function App() {
   const dispatch = useAppDispatch()
   const activeView = useAppSelector((s) => s.ui.activeView)
@@ -74,6 +85,19 @@ export default function App() {
   const needsSetup = useAppSelector((s) => s.ui.needsSetup)
   const connectionError = useAppSelector((s) => s.ui.connectionError)
   const wsRef = useRef<WSClient | null>(null)
+  const freshTaskRef = useRef<Promise<void> | null>(null)
+  const openFreshTask = useCallback((target?: FreshTaskTarget) => {
+    if (freshTaskRef.current) return freshTaskRef.current
+    const pending = (async () => {
+      try {
+        await dispatch(startFreshChat(target)).unwrap()
+      } finally {
+        freshTaskRef.current = null
+      }
+    })()
+    freshTaskRef.current = pending
+    return pending
+  }, [dispatch])
 
   // Boot: health check + seed state. Runs once.
   useEffect(() => {
@@ -90,29 +114,65 @@ export default function App() {
         dispatch(modelActions.setImageSupport(!!h.image_support))
         dispatch(sessionActions.setProjectPath(h.project || h.workspace_key || h.pwd))
         dispatch(sessionActions.setWorkspaceKind(h.workspace_kind))
-        const restoreSessionId = isTauri ? h.recent_session_id || h.session_id : h.session_id
-        const restoreProject = isTauri && h.recent_session_id
-          ? h.recent_project || h.project || h.workspace_key || h.pwd
-          : h.project || h.workspace_key || h.pwd
-        dispatch(sessionActions.setCurrentSession(restoreSessionId || ''))
-        dispatch(chatActions.setRunning(!!h.running))
+        const activeSessionId = h.session_id || ''
+        const activeProject = h.project || h.workspace_key || h.pwd
+        // Route task-scoped WS frames immediately while the sidebar indexes
+        // load. Cold-start provisioning clears/replaces this id atomically.
+        dispatch(sessionActions.setCurrentSession(activeSessionId))
+        dispatch(chatActions.clearChat())
         if (h.auth_required) dispatch(uiActions.setNeedsAuth(true))
         if (h.needs_setup) dispatch(uiActions.setNeedsSetup(true))
-        // Load the workspace state, then restore the current session only if it
-        // has persisted history. A fresh empty session should stay on welcome.
+        // A cold Web/Desktop open always starts at New Task. A same-tab reload
+        // may restore the current durable session (critical for a pending
+        // approval); fresh_session is authoritative and indexes add metadata.
         if (!h.auth_required && !h.needs_setup) {
           await dispatch(loadWorkspaceState())
-          if (restoreSessionId) {
-            const state = store_getState()
-            const indexedTask = state.session.tasks.find((task) => task.uuid === restoreSessionId)
-            const indexedSession = state.session.sessions.find((session) => session.uuid === restoreSessionId)
+          if (cancelled) return
+          const state = store_getState()
+          const indexedTask = activeSessionId
+            ? state.session.tasks.find((task) => task.uuid === activeSessionId)
+            : undefined
+          const indexedSession = activeSessionId
+            ? state.session.sessions.find((session) => session.uuid === activeSessionId)
+            : undefined
+          let landing = startupLanding(
+            !pageHasBooted,
+            activeSessionId,
+            !!(indexedTask || indexedSession),
+            !!h.running,
+            h.fresh_session,
+          )
+          const freshTarget = coldDesktopFreshTarget(
+            !pageHasBooted,
+            isTauri,
+            h.recent_project,
+            h.recent_workspace_kind,
+          )
+          if (
+            landing === 'reuse_bootstrap' &&
+            freshTarget &&
+            (freshTarget.workspaceKind === 'scratch' || freshTarget.projectPath !== activeProject)
+          ) {
+            landing = 'provision'
+          }
+          if (landing === 'restore') {
             await dispatch(openConversation({
-              uuid: restoreSessionId,
-              project: indexedTask?.project || restoreProject,
+              uuid: activeSessionId,
+              project: indexedTask?.project || activeProject,
               title: indexedTask?.title || indexedSession?.title,
               workspaceKind: indexedTask?.workspace_kind,
             }))
+          } else if (landing === 'reuse_bootstrap') {
+            // A fresh bootstrap engine is already the correct New Task. Reuse
+            // its UUID so the first task-scoped WS frames are not filtered, and
+            // avoid allocating a second empty engine/last-session pointer.
+            dispatch(sessionActions.setCurrentSession(activeSessionId))
+            dispatch(chatActions.clearChat())
+          } else {
+            await openFreshTask(freshTarget)
           }
+          pageHasBooted = true
+          markPageBootComplete()
         }
       } catch (err) {
         if (!cancelled) {
@@ -124,7 +184,55 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [dispatch])
+  }, [dispatch, openFreshTask])
+
+  // Desktop close-to-tray keeps the WebView alive, so reopening does not rerun
+  // boot. The native shell emits this event only on a hidden→visible transition.
+  // Keep a running task in view (approval/stop controls must not disappear);
+  // otherwise reopening intentionally lands on a fresh New Task.
+  useEffect(() => {
+    if (!isTauri) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event')
+        const stop = await listen('jcode://window-reopened', () => {
+          void (async () => {
+            const queriedSessionId = store_getState().session.currentSessionId
+            try {
+              const status = await api.status(queriedSessionId || undefined)
+              const current = store_getState()
+              if (current.session.currentSessionId !== queriedSessionId) return
+              const running = current.chat.isRunning || !!status.running
+              if (!shouldStartFreshOnWindowReopen(running)) return
+              await openFreshTask({ expectedSessionId: queriedSessionId, requireIdle: true })
+            } catch (err) {
+              const current = store_getState()
+              if (current.session.currentSessionId !== queriedSessionId) return
+              if (isAPIError(err) && err.status === 404) {
+                try {
+                  await openFreshTask({ expectedSessionId: queriedSessionId, requireIdle: true })
+                } catch (freshErr) {
+                  dispatch(uiActions.setConnectionError(freshErr instanceof Error ? freshErr.message : String(freshErr)))
+                }
+                return
+              }
+              dispatch(uiActions.setConnectionError(err instanceof Error ? err.message : String(err)))
+            }
+          })()
+        })
+        if (disposed) stop()
+        else unlisten = stop
+      } catch (err) {
+        if (!disposed) dispatch(uiActions.setConnectionError(err instanceof Error ? err.message : String(err)))
+      }
+    })()
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [dispatch, openFreshTask])
 
   // WS bridge: connect once. The handlers read fresh state via getState, so a
   // single client + handler set stays correct across session/view changes.
