@@ -18,11 +18,23 @@ fail() { echo "" >&2; echo "✗ pre-push: $1" >&2; echo "  (bypass with: git pus
 # that distinction here so a local main push cannot pass a weaker check than
 # the GitHub job.
 pushes_main=0
-while read -r _local_ref _local_oid remote_ref _remote_oid; do
+push_count=0
+pushed_oid=""
+zero_oid=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+while read -r _local_ref local_oid remote_ref _remote_oid; do
+	[ "$local_oid" = "$zero_oid" ] && continue
+	push_count=$((push_count + 1))
+	pushed_oid=$local_oid
 	if [ "$remote_ref" = "refs/heads/main" ]; then
 		pushes_main=1
 	fi
 done
+if [ "$push_count" -eq 0 ]; then
+	exit 0
+fi
+if [ "$push_count" -ne 1 ] || [ "$pushed_oid" != "$(git rev-parse HEAD)" ]; then
+	fail "pushes of multiple or non-current refs are not supported; check out and push one branch at a time"
+fi
 
 # The module embeds internal/web/dist via //go:embed and depends on generated
 # code — without them nothing compiles. Don't silently run the heavy
@@ -46,8 +58,10 @@ if command -v golangci-lint >/dev/null 2>&1; then
 		golangci-lint run ./... || fail "golangci-lint found issues"
 	else
 		echo "==> golangci-lint (new issues vs origin/main)..."
-		git fetch -q origin main 2>/dev/null || true
-		base=$(git merge-base HEAD origin/main 2>/dev/null || true)
+		base=""
+		if git fetch -q origin main 2>/dev/null; then
+			base=$(git merge-base "$pushed_oid" origin/main 2>/dev/null || true)
+		fi
 		if [ -n "$base" ]; then
 			golangci-lint run --new-from-rev="$base" ./... || fail "golangci-lint found new issues"
 		else

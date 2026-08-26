@@ -35,6 +35,9 @@ pub fn read_dropped_image(path: String) -> Result<Option<DroppedImage>, String> 
     }
 
     let bytes = fs::read(path).map_err(|error| format!("read dropped image: {error}"))?;
+    if detected_image_media_type(&bytes) != Some(media_type) {
+        return Ok(None);
+    }
     let name = path
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
@@ -44,6 +47,22 @@ pub fn read_dropped_image(path: String) -> Result<Option<DroppedImage>, String> 
         media_type,
         name,
     }))
+}
+
+fn detected_image_media_type(data: &[u8]) -> Option<&'static str> {
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("image/png");
+    }
+    if data.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Some("image/jpeg");
+    }
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        return Some("image/gif");
+    }
+    if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    None
 }
 
 fn image_media_type(path: &Path) -> Option<&'static str> {
@@ -69,7 +88,8 @@ mod tests {
     fn reads_supported_image_as_base64() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("sample.png");
-        fs::write(&path, b"png-bytes").expect("write image");
+        let bytes = b"\x89PNG\r\n\x1a\npng-bytes";
+        fs::write(&path, bytes).expect("write image");
 
         let image = read_dropped_image(path.to_string_lossy().into_owned())
             .expect("read dropped image")
@@ -77,7 +97,7 @@ mod tests {
 
         assert_eq!(image.media_type, "image/png");
         assert_eq!(image.name, "sample.png");
-        assert_eq!(image.data, STANDARD.encode(b"png-bytes"));
+        assert_eq!(image.data, STANDARD.encode(bytes));
     }
 
     #[test]
@@ -101,6 +121,22 @@ mod tests {
 
         assert!(read_dropped_image(path.to_string_lossy().into_owned())
             .expect("classify dropped image")
+            .is_none());
+    }
+
+    #[test]
+    fn leaves_invalid_or_mismatched_images_for_prompt_fallback() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = dir.path().join("fake.png");
+        fs::write(&fake, b"not-an-image").expect("write fake image");
+        assert!(read_dropped_image(fake.to_string_lossy().into_owned())
+            .expect("classify fake image")
+            .is_none());
+
+        let mismatch = dir.path().join("mismatch.jpg");
+        fs::write(&mismatch, b"\x89PNG\r\n\x1a\npng-bytes").expect("write mismatch");
+        assert!(read_dropped_image(mismatch.to_string_lossy().into_owned())
+            .expect("classify mismatched image")
             .is_none());
     }
 }

@@ -19,7 +19,12 @@ Image attachment tiles for the composer and user messages — thumbnails, remove
 | `ChatInput` + `allowImages` | Paste + paperclip picker + strip above the input |
 | `Message` | Renders `message.images` with the same tiles |
 
-**Not included (by design):** PDF / arbitrary file adapters, upload progress, cloud storage. Those stay host concerns — attach your own chips next to the composer if needed. Most agent models only accept images today.
+The generic `Attachment` / `AttachmentList` API remains image-oriented. The
+generic `ChatInput` can accept arbitrary files only when an integrator supplies
+an `AttachmentAdapter`; storage and Agent context remain that host's concern.
+JCode's built-in product composer is a separate host integration: it ships the
+managed arbitrary-file drag/drop and browser-upload path described below for
+`jcode web` and Desktop.
 
 ## Usage
 

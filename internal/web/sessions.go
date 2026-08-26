@@ -245,6 +245,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
 		return
 	}
+	uploadLocked := eng != nil
+	if uploadLocked {
+		eng.uploadMu.Lock()
+		eng.uploadGeneration++
+	}
 	var teardown *Engine
 	if eng != nil && !eng.retired.Load() {
 		if s.Engine == eng {
@@ -272,6 +277,12 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	if teardown != nil {
 		teardown.teardown()
 	}
+	if deleteErr == nil {
+		removeLocalTaskUploads(id)
+	}
+	if uploadLocked {
+		eng.uploadMu.Unlock()
+	}
 	if deleteErr != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": deleteErr.Error()})
 		return
@@ -281,7 +292,6 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	} else if err := store.Delete(id); err != nil {
 		config.Logger().Printf("[cloud] failed to remove deleted session %s from sync store: %v", id, err)
 	}
-	removeLocalTaskUploads(id)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

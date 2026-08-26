@@ -181,3 +181,27 @@ func TestTaskUploadRejectsRunningTask(t *testing.T) {
 		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestTaskUploadRejectsDeletionAfterMultipartRead(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	env := tools.NewEnv(t.TempDir(), "darwin/arm64")
+	eng := &Engine{taskID: "task-a", pwd: env.Pwd(), env: env}
+	s := &Server{Engine: eng, tasks: map[string]*Engine{eng.taskID: eng}}
+
+	eng.uploadMu.Lock()
+	generation := eng.uploadGeneration
+	// This is the deletion-side invalidation that occurs after the request has
+	// read its multipart bytes but before it enters the persistence gate.
+	eng.uploadGeneration++
+	eng.uploadMu.Unlock()
+
+	_, err := s.saveTaskUpload(context.Background(), eng.taskID, eng, generation, "notes.txt", []byte("hello"))
+	if !errors.Is(err, errUploadTaskChanged) {
+		t.Fatalf("err=%v, want errUploadTaskChanged", err)
+	}
+	uploadDir := filepath.Join(home, ".jcode", "uploads", eng.taskID)
+	if _, err := os.Stat(uploadDir); !os.IsNotExist(err) {
+		t.Fatalf("stale upload created files after deletion: %v", err)
+	}
+}

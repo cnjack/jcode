@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -47,6 +48,9 @@ func (s *Server) handleTaskUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "wait for the current turn to finish before uploading files"})
 		return
 	}
+	eng.uploadMu.Lock()
+	uploadGeneration := eng.uploadGeneration
+	eng.uploadMu.Unlock()
 
 	name, data, err := readTaskUpload(w, r, maxTaskUploadBytes)
 	if err != nil {
@@ -59,26 +63,80 @@ func (s *Server) handleTaskUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	safeName, err := uniqueUploadName(name)
+	response, err := s.saveTaskUpload(r.Context(), taskID, eng, uploadGeneration, name, data)
+	if errors.Is(err, errUploadTaskChanged) || errors.Is(err, errUploadTaskRunning) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not allocate upload filename"})
-		return
-	}
-	dir, remote := taskUploadDir(eng, taskID)
-	if err := prepareUploadDir(r, eng, dir, remote); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not prepare task upload directory"})
-		return
-	}
-	target := joinUploadPath(dir, safeName, remote)
-	if err := eng.env.Exec.WriteFile(r.Context(), target, data, uploadFileMode); err != nil {
-		config.Logger().Printf("[web] task upload write failed for %s: %v", taskID, err)
+		config.Logger().Printf("[web] task upload save failed for %s: %v", taskID, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save uploaded file"})
 		return
 	}
-	writeJSON(w, http.StatusCreated, taskUploadResponse{Path: target, Name: safeName, Size: int64(len(data))})
+	writeJSON(w, http.StatusCreated, response)
 }
 
-var errUploadTooLarge = errors.New("task upload exceeds size limit")
+var (
+	errUploadTooLarge    = errors.New("task upload exceeds size limit")
+	errUploadTaskChanged = errors.New("task changed while the file was uploading")
+	errUploadTaskRunning = errors.New("wait for the current turn to finish before uploading files")
+)
+
+func (s *Server) saveTaskUpload(
+	ctx context.Context,
+	taskID string,
+	expected *Engine,
+	generation uint64,
+	originalName string,
+	data []byte,
+) (taskUploadResponse, error) {
+	eng, ok := s.lockTaskUpload(taskID, expected, generation)
+	if !ok {
+		return taskUploadResponse{}, errUploadTaskChanged
+	}
+	defer eng.uploadMu.Unlock()
+	if eng.running.Load() {
+		return taskUploadResponse{}, errUploadTaskRunning
+	}
+	safeName, err := uniqueUploadName(originalName)
+	if err != nil {
+		return taskUploadResponse{}, fmt.Errorf("allocate upload filename: %w", err)
+	}
+	dir, remote := taskUploadDir(eng, taskID)
+	if err := prepareUploadDir(ctx, eng, dir, remote); err != nil {
+		return taskUploadResponse{}, err
+	}
+	target := joinUploadPath(dir, safeName, remote)
+	if err := eng.env.Exec.WriteFile(ctx, target, data, uploadFileMode); err != nil {
+		return taskUploadResponse{}, fmt.Errorf("write uploaded file %q: %w", target, err)
+	}
+	return taskUploadResponse{Path: target, Name: safeName, Size: int64(len(data))}, nil
+}
+
+// lockTaskUpload follows the lifecycle lock order tasksMu -> mu -> uploadMu,
+// then releases the global locks. Deletion takes the same per-engine lock and
+// bumps uploadGeneration before removing the session and managed files.
+func (s *Server) lockTaskUpload(taskID string, expected *Engine, generation uint64) (*Engine, bool) {
+	s.tasksMu.RLock()
+	s.mu.RLock()
+	eng := s.tasks[taskID]
+	if eng == nil && s.Engine != nil && s.taskID == taskID {
+		eng = s.Engine
+	}
+	if eng == nil {
+		s.mu.RUnlock()
+		s.tasksMu.RUnlock()
+		return nil, false
+	}
+	eng.uploadMu.Lock()
+	s.mu.RUnlock()
+	s.tasksMu.RUnlock()
+	if eng != expected || eng.retired.Load() || eng.uploadGeneration != generation {
+		eng.uploadMu.Unlock()
+		return nil, false
+	}
+	return eng, true
+}
 
 func readTaskUpload(w http.ResponseWriter, r *http.Request, maxBytes int64) (string, []byte, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes+multipartOverheadCap)
@@ -110,17 +168,20 @@ func taskUploadDir(eng *Engine, taskID string) (string, bool) {
 	return filepath.Join(config.ConfigDir(), "uploads", taskID), false
 }
 
-func prepareUploadDir(r *http.Request, eng *Engine, dir string, remote bool) error {
+func prepareUploadDir(ctx context.Context, eng *Engine, dir string, remote bool) error {
 	if !remote {
 		if err := os.MkdirAll(dir, localUploadDirMode); err != nil {
-			return err
+			return fmt.Errorf("create local upload directory %q: %w", dir, err)
 		}
-		return os.Chmod(dir, localUploadDirMode)
+		if err := os.Chmod(dir, localUploadDirMode); err != nil {
+			return fmt.Errorf("set local upload directory mode %q: %w", dir, err)
+		}
+		return nil
 	}
-	if err := eng.env.Exec.MkdirAll(r.Context(), dir, localUploadDirMode); err != nil {
-		return err
+	if err := eng.env.Exec.MkdirAll(ctx, dir, localUploadDirMode); err != nil {
+		return fmt.Errorf("create remote upload directory %q: %w", dir, err)
 	}
-	_, stderr, err := eng.env.Exec.Exec(r.Context(), "chmod 700 "+tools.ShellQuote(dir), "", 10*time.Second)
+	_, stderr, err := eng.env.Exec.Exec(ctx, "chmod 700 "+tools.ShellQuote(dir), "", 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("secure remote upload directory: %s: %w", strings.TrimSpace(stderr), err)
 	}

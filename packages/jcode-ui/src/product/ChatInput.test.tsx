@@ -97,6 +97,12 @@ function textarea(container: HTMLElement): HTMLTextAreaElement {
   return el
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   localStorage.clear()
 })
@@ -580,6 +586,31 @@ describe('file attachments', () => {
     expect(container.querySelector('.jcode-pending-attachments')?.getAttribute('data-count')).toBe('1')
   })
 
+  it('drops a delayed browser upload after an s1 to s2 to s1 transition', async () => {
+    const upload = deferred<{ path: string; name: string; size: number }>()
+    const runtime = createMockRuntime()
+    const uploadDroppedFile = vi.fn(() => upload.promise)
+    const host = makeHost({ uploadDroppedFile })
+    const view = renderComposer(host, runtime)
+    const composer = view.container.querySelector('.jcode-product-composer') as HTMLDivElement
+    fireEvent.drop(composer, {
+      dataTransfer: {
+        types: ['Files'],
+        files: [new File(['notes'], 'notes.pdf', { type: 'application/pdf' })],
+        dropEffect: 'none',
+      },
+    })
+    fireEvent.click(screen.getByLabelText('Send'))
+    await waitFor(() => expect(uploadDroppedFile).toHaveBeenCalledTimes(1))
+
+    view.rerender(<RuntimeProvider runtime={runtime}><ChatInput host={{ ...host, sessionId: 's2' }} /></RuntimeProvider>)
+    view.rerender(<RuntimeProvider runtime={runtime}><ChatInput host={{ ...host, sessionId: 's1' }} /></RuntimeProvider>)
+    await act(async () => upload.resolve({ path: '/managed/notes.pdf', name: 'notes.pdf', size: 5 }))
+
+    expect((runtime as ReturnType<typeof createMockRuntime>).calls.some((call) => call.action === 'sendMessage')).toBe(false)
+    expect(view.container.querySelector('.jcode-pending-attachments')).toBeNull()
+  })
+
   it('keeps supported browser-dropped images on the image attachment path', async () => {
     const { container } = renderComposer(makeHost())
     const composer = container.querySelector('.jcode-product-composer') as HTMLDivElement
@@ -636,5 +667,32 @@ describe('file attachments', () => {
     })
     expect(readDroppedImage).toHaveBeenCalledTimes(2)
     expect(textarea(container).value).toContain('dragged a file into the input')
+  })
+
+  it('drops a delayed native image read after an s1 to s2 to s1 transition', async () => {
+    const image = deferred<{ data: string; media_type: string; name: string } | null>()
+    let onFileDrop: ((event: FileDropEvent) => void) | undefined
+    const host = makeHost({
+      listenForFileDrops: vi.fn(async (listener) => {
+        onFileDrop = listener
+        return () => {}
+      }),
+      readDroppedImage: vi.fn(() => image.promise),
+    })
+    const runtime = createMockRuntime()
+    const view = renderComposer(host, runtime)
+    const composer = view.container.querySelector('.jcode-product-composer') as HTMLDivElement
+    vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 500, bottom: 200, width: 500, height: 200, x: 0, y: 0, toJSON: () => ({}),
+    })
+    await waitFor(() => expect(onFileDrop).toBeTypeOf('function'))
+    act(() => onFileDrop?.({ type: 'drop', paths: ['/tmp/screen.png'], x: 100, y: 100 }))
+
+    view.rerender(<RuntimeProvider runtime={runtime}><ChatInput host={{ ...host, sessionId: 's2' }} /></RuntimeProvider>)
+    view.rerender(<RuntimeProvider runtime={runtime}><ChatInput host={{ ...host, sessionId: 's1' }} /></RuntimeProvider>)
+    await act(async () => image.resolve({ data: 'cG5n', media_type: 'image/png', name: 'screen.png' }))
+
+    expect(view.container.querySelector('.jcode-attachment-list')).toBeNull()
+    expect(textarea(view.container).value).toBe('')
   })
 })

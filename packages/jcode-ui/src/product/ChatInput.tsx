@@ -328,6 +328,12 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const containerRef = useRef<HTMLDivElement>(null)
   const dragDepthRef = useRef(0)
   const currentSessionRef = useRef(currentSessionId)
+  const composerSessionRef = useRef(currentSessionId)
+  const composerGenerationRef = useRef(0)
+  if (composerSessionRef.current !== currentSessionId) {
+    composerSessionRef.current = currentSessionId
+    composerGenerationRef.current += 1
+  }
   currentSessionRef.current = currentSessionId
   const addPopup = useViewportPopup(showAddMenu)
   const modePopup = useViewportPopup(showModePicker)
@@ -516,6 +522,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   // ─── Send / queue ─────────────────────────────────────────────────────────
 
   const send = useCallback(async () => {
+    const composerGeneration = composerGenerationRef.current
     const text = input.trim()
     if (!text && pendingImages.length === 0 && pendingBrowserFiles.length === 0) return
     if (isUploadingFiles || (isRunning && pendingBrowserFiles.length > 0)) return
@@ -548,10 +555,10 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
         } else {
           try {
             const uploaded = await host.uploadDroppedFile(targetSessionID, pending.file)
-            if (currentSessionRef.current !== targetSessionID) return
+            if (currentSessionRef.current !== targetSessionID || composerGenerationRef.current !== composerGeneration) return
             next = { ...pending, uploadedPath: uploaded.path, uploading: false, error: undefined }
           } catch {
-            if (currentSessionRef.current !== targetSessionID) return
+            if (currentSessionRef.current !== targetSessionID || composerGenerationRef.current !== composerGeneration) return
             next = { ...pending, uploading: false, error: strings.fileUploadFailed }
             failed = true
           }
@@ -560,7 +567,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
         setPendingBrowserFiles(uploadedFiles)
       }
       setIsUploadingFiles(false)
-      if (failed || currentSessionRef.current !== targetSessionID) return
+      if (failed || currentSessionRef.current !== targetSessionID || composerGenerationRef.current !== composerGeneration) return
     }
 
     const images: RuntimeChatImage[] | undefined =
@@ -572,6 +579,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
       .filter(Boolean)
       .join('\n\n')
     const body = [text, fileContext].filter(Boolean).join('\n\n') || strings.attachedImages
+    if (currentSessionRef.current !== currentSessionId || composerGenerationRef.current !== composerGeneration) return
     if (isRunning) {
       actions.enqueueMessage(body, images)
     } else {
@@ -668,8 +676,11 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   // ─── Image attachments ────────────────────────────────────────────────────
 
   const addImageFile = useCallback((file: File) => {
+    const targetSessionID = currentSessionRef.current
+    const composerGeneration = composerGenerationRef.current
     const reader = new FileReader()
     reader.onload = () => {
+      if (currentSessionRef.current !== targetSessionID || composerGenerationRef.current !== composerGeneration) return
       const result = reader.result as string
       const commaIdx = result.indexOf(',')
       if (commaIdx < 0) return
@@ -717,6 +728,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
 
   const ingestNativePaths = useCallback(async (paths: string[]) => {
     if (isUploadingFiles) return
+    const targetSessionID = currentSessionRef.current
+    const composerGeneration = composerGenerationRef.current
     const results = await Promise.all(paths.map(async (path) => {
       if (!imageSupport || !host.readDroppedImage) return { path, image: null }
       try {
@@ -725,6 +738,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
         return { path, image: null }
       }
     }))
+    if (currentSessionRef.current !== targetSessionID || composerGenerationRef.current !== composerGeneration) return
     const images = results.flatMap(({ image }) => image ? [{
       data: image.data,
       media_type: image.media_type,
