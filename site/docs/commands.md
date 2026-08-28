@@ -88,10 +88,12 @@ Type these in the TUI input area:
 | `/setting` | Open settings menu |
 | `/ssh` | Open SSH connection wizard |
 | `/resume` | Resume a previous session |
+| `/rename` | Rename this session — opens an editor seeded with the current title and suggests an editable title from the conversation (requires `small_model`); Enter saves, Esc cancels; `/rename <title>` saves directly |
 | `/compact` | Compact conversation context |
 | `/goal` | Set a persistent objective the agent works toward ([Goals](goal.html)) |
 | `/memory` | Show project memory; `/memory sync` to distill, `/memory clear` to wipe ([Project Memory](overview/learned-memory.html)) |
 | `/bg` | Show background tasks |
+| `/task` | Cross-session agent tasks: list / create / read / message / stop / archive ([Task Management](tools/task-management.html)) |
 | `/channel` | Open the channel management panel (WeChat push/messaging) |
 | `/mcp` | List MCP servers and status; `/mcp login <name>` to authenticate via OAuth |
 | `/help` | Show keyboard shortcuts help |

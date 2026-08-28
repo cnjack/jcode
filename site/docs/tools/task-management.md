@@ -6,6 +6,76 @@ nav_order: 4
 
 # Task Management
 
+## Agent Tasks (cross-session)
+
+Background subagent runs and durable work items are recorded in a persistent,
+project-scoped task registry (`~/.jcode/tasks`). Every task gets a stable,
+collision-free reference (`task_<16 hex>`) that survives sessions and restarts,
+so you can pick up work from any later session in the same project.
+
+```text
+Background task started: task_9f2c41ab77e0d3f5 (local id bg_subagent_1)
+Task reference: task_9f2c41ab77e0d3f5 — stable across sessions; use
+task_read/task_get with this ref, task_message to follow up, and mention it
+as @task_9f2c41ab77e0d3f5.
+```
+
+Tasks keep an append-only message timeline. Messages are delivered exactly
+once per idempotency key (safe to retry), and messaging a task that is
+archived or already finished fails with an explicit error instead of silently
+dropping the text. If the process that owned a running task dies, reads
+surface it as `failed` ("owning process exited") rather than spinning forever.
+
+### `@task` mentions (TUI)
+
+Type `@` plus a few characters of a task name (or ref) to get a completion
+popup listing the tasks visible in your project — Tab/Enter accepts and
+inserts the full `@task_…` reference. On submit, each mention is resolved and
+attached to the prompt as a clearly fenced, untrusted-data context block;
+unknown or ambiguous mentions block the send with an explicit error.
+
+Archived tasks never appear in completion and mentions of them report
+"archived". A task from another project is never readable or mentionable.
+
+### `/task` commands (TUI)
+
+| Command | Effect |
+|---|---|
+| `/task` or `/task list` | List this project's tasks with refs and statuses |
+| `/task create <name> [description]` | Create a durable work item |
+| `/task read <ref\|name>` | Status, output, error and message timeline |
+| `/task message <ref\|name> <text>` | Append a message to the task timeline |
+| `/task stop <ref\|name>` | Stop a task running in this session (foreign owners are refused with an explanation) |
+| `/task archive <ref\|name>` | Soft-delete a finished task |
+
+### Agent tools
+
+| Tool | Approval | What it does |
+|---|---|---|
+| `task_list` | Auto | List tasks in this project (cross-session), filterable by status |
+| `task_get` | Auto | Status, output, error and timeline for a ref/name |
+| `task_read` | Auto | Read any task in the persistent registry, including from earlier sessions |
+| `task_create` | Auto | Create a durable work item |
+| `task_message` | Requires approval | Send a message to a task timeline (exactly-once per `idempotency_key`) |
+| `task_stop` | Requires approval | Stop a running task; refuses tasks owned by other sessions with an explicit error |
+
+### Web / Desktop
+
+The same registry is exposed over REST on the engine's server:
+
+| Endpoint | Effect |
+|---|---|
+| `GET /api/agent-tasks?status=…` | List |
+| `POST /api/agent-tasks` `{name, description}` | Create |
+| `GET /api/agent-tasks/{ref}` | Read (timeline included) |
+| `POST /api/agent-tasks/{ref}/messages` `{message, idempotency_key}` | Message |
+| `POST /api/agent-tasks/{ref}/stop` | Stop (live engines only; foreign owners → 409) |
+| `POST /api/agent-tasks/{ref}/archive` | Archive |
+
+Remote (SSH/Docker) and cloud sessions own their own registries on their own
+machine; a local ref is never treated as a remote one — unknown local refs
+report that they may belong to another session, machine, or executor.
+
 ## todowrite
 
 Manage a live task list that tracks progress. The agent uses this to plan and track work.

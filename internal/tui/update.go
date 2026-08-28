@@ -337,6 +337,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			}
 		}
 
+		// /rename editor handling: the textarea holds the editable title.
+		// Enter saves, Esc cancels; all other keys edit (and mark the editor
+		// user-edited so a late suggestion cannot clobber input).
+		if m.renameActive {
+			return m.handleRenameKey(msg.String(), msg, cmds)
+		}
+
 		// Session picker handling
 		if m.pickingSession {
 			switch msg.String() {
@@ -754,6 +761,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 				}
 			case "tab":
+				// Accept @task mention suggestion if active
+				if m.taskSuggestionActive && len(m.taskSuggestions) > 0 && m.taskSuggestionIndex < len(m.taskSuggestions) {
+					m.acceptTaskSuggestion(m.taskSuggestions[m.taskSuggestionIndex])
+					if m.ready {
+						m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
+					}
+					return m, tea.Batch(cmds...)
+				}
 				// Accept command suggestion if active
 				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 && m.cmdSuggestionIndex < len(m.cmdSuggestions) {
 					selected := m.cmdSuggestions[m.cmdSuggestionIndex]
@@ -772,6 +787,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					return m, tea.Batch(cmds...)
 				}
 			case "esc":
+				// Dismiss @task suggestion if active
+				if m.taskSuggestionActive {
+					m.taskSuggestionActive = false
+					m.taskSuggestions = nil
+					m.taskSuggestionIndex = 0
+					return m, tea.Batch(cmds...)
+				}
 				// Dismiss command suggestion if active
 				if m.cmdSuggestionActive {
 					m.cmdSuggestionActive = false
@@ -792,6 +814,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					return m, tea.Batch(cmds...)
 				}
 			case "enter":
+				// If a @task mention suggestion is active, accept it instead of submitting
+				if m.taskSuggestionActive && len(m.taskSuggestions) > 0 && m.taskSuggestionIndex < len(m.taskSuggestions) {
+					m.acceptTaskSuggestion(m.taskSuggestions[m.taskSuggestionIndex])
+					if m.ready {
+						m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
+					}
+					return m, tea.Batch(cmds...)
+				}
 				// If command suggestion is active, accept it instead of submitting
 				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 && m.cmdSuggestionIndex < len(m.cmdSuggestions) {
 					selected := m.cmdSuggestions[m.cmdSuggestionIndex]
@@ -813,6 +843,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				if prompt != "" {
 					// Expand paste references to full content for the agent
 					actualPrompt := m.pasteStore.ExpandRefs(prompt)
+					// Resolve @task mentions into an injection-safe context
+					// block; unresolved mentions block submission with an
+					// explicit error so nothing is silently sent.
+					var mentionErrs []string
+					actualPrompt, mentionErrs = m.expandMentions(actualPrompt)
+					if len(mentionErrs) > 0 {
+						for _, me := range mentionErrs {
+							m.lines = append(m.lines, textLine(toolLabelStyle.Render("  ⚠ "+me)))
+						}
+						m.refreshViewport()
+						return m, tea.Batch(cmds...)
+					}
 					appendHistory(prompt)
 					if len(m.history) == 0 || m.history[len(m.history)-1] != prompt {
 						m.history = append(m.history, prompt)
@@ -854,8 +896,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						return m.handleResumeInput(prompt, cmds)
 					}
 
+					if prompt == "/rename" || strings.HasPrefix(prompt, "/rename ") {
+						return m.handleRenameInput(prompt, cmds)
+					}
+
 					if strings.HasPrefix(prompt, "/bg") {
 						return m.handleBgInput(cmds)
+					}
+
+					if prompt == "/task" || strings.HasPrefix(prompt, "/task ") {
+						return m.handleTaskInput(prompt, cmds)
 					}
 
 					if prompt == "/compact" {
@@ -978,6 +1028,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 				return m, tea.Batch(cmds...)
 			case "up":
+				if m.taskSuggestionActive && len(m.taskSuggestions) > 0 {
+					if m.taskSuggestionIndex > 0 {
+						m.taskSuggestionIndex--
+					}
+					return m, tea.Batch(cmds...)
+				}
 				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 {
 					// Navigate suggestion list up
 					if m.cmdSuggestionIndex > 0 {
@@ -1004,6 +1060,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 				return m, tea.Batch(cmds...)
 			case "down":
+				if m.taskSuggestionActive && len(m.taskSuggestions) > 0 {
+					if m.taskSuggestionIndex < len(m.taskSuggestions)-1 {
+						m.taskSuggestionIndex++
+					}
+					return m, tea.Batch(cmds...)
+				}
 				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 {
 					// Navigate suggestion list down
 					if m.cmdSuggestionIndex < len(m.cmdSuggestions)-1 {
@@ -1254,6 +1316,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case CommandNoticeMsg:
 		m.lines = append(m.lines, textLine("  "+toolLabelStyle.Render(msg.Label+":")+" "+msg.Text))
 		m.refreshViewport()
+
+	case TitleSuggestedMsg:
+		return m.handleTitleSuggested(msg, cmds)
 
 	case ChannelStateMsg:
 		m.channelStates[msg.ChannelID] = msg.State

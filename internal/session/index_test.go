@@ -135,7 +135,7 @@ func TestProjectTimestampLifecycle(t *testing.T) {
 	}
 
 	// An unrelated index rewrite (title update) must leave projects.json intact.
-	if err := updateIndexTitle(project, "uuid-a", "new title"); err != nil {
+	if err := updateIndexTitle(project, "uuid-a", "new title", false); err != nil {
 		t.Fatalf("updateIndexTitle: %v", err)
 	}
 	meta, _ = ListProjectMeta()

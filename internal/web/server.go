@@ -30,6 +30,7 @@ import (
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
+	"github.com/cnjack/jcode/internal/tasks"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
 	"github.com/cnjack/jcode/internal/usage"
@@ -152,6 +153,9 @@ type Server struct {
 	// Run execution reuses the Engine via automationRunner; the periodic
 	// scheduler is owned by command.runWebServer.
 	automations *automation.Store
+	// agentTasks caches the server-level persistent agent-task registry
+	// (internal/tasks) for the bootstrap project. Opened lazily.
+	agentTasks *tasks.Store
 
 	// autoRunMu guards autoRunInflight, the set of automation ids with a manual
 	// run currently in flight on this server. It is the manual-run analogue of the
@@ -457,6 +461,12 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/sessions/activate", s.handleActivateSession)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("GET /api/todos", s.handleGetTodos)
+	mux.HandleFunc("GET /api/agent-tasks", s.handleListAgentTasks)
+	mux.HandleFunc("POST /api/agent-tasks", s.handleCreateAgentTask)
+	mux.HandleFunc("GET /api/agent-tasks/{ref}", s.handleGetAgentTask)
+	mux.HandleFunc("POST /api/agent-tasks/{ref}/messages", s.handleMessageAgentTask)
+	mux.HandleFunc("POST /api/agent-tasks/{ref}/stop", s.handleStopAgentTask)
+	mux.HandleFunc("POST /api/agent-tasks/{ref}/archive", s.handleArchiveAgentTask)
 	mux.HandleFunc("GET /api/goal", s.handleGetGoal)
 	mux.HandleFunc("POST /api/goal", s.handleSetGoal)
 	mux.HandleFunc("DELETE /api/goal", s.handleClearGoal)
