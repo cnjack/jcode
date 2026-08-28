@@ -39,6 +39,7 @@ import (
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
+	"github.com/cnjack/jcode/internal/tasks"
 	"github.com/cnjack/jcode/internal/team"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/toolpolicy"
@@ -87,6 +88,9 @@ type interactiveState struct {
 	mcpReloadMu          sync.Mutex
 	modeSwitchMu         sync.Mutex
 	agentTokenUsage      *internalmodel.TokenUsage
+	// historyMu guards s.history against concurrent readers (the /rename title
+	// suggestion reads it while a turn may be finishing its append).
+	historyMu sync.RWMutex
 
 	sessionResumeWarning  string
 	sessionBaselineCommit string
@@ -97,6 +101,12 @@ type interactiveState struct {
 	// hookStartContext holds SessionStart additionalContext, prepended to the
 	// first user prompt then cleared.
 	hookStartContext string
+
+	// Persistent agent-task registry + in-process background task manager,
+	// shared by the task_* tools, the subagent background path and the TUI.
+	taskStore *tasks.Store
+	taskMgr   *tools.SubagentTaskManager
+	taskHub   *tools.TaskHub
 
 	// WeChat channel
 	wechatClient *weixin.Client
@@ -173,6 +183,8 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		s.env.NewSubagentTool(&tools.SubagentDeps{
 			ChatModel:    s.chatModel,
 			ModelFactory: factory,
+			TaskManager:  s.taskMgr,
+			TaskStore:    s.taskStore,
 			Notifier:     s.subagentNotifier,
 			ProgressFn:   s.subagentProgress,
 			TokenFn:      s.subagentTokenFn,
@@ -180,6 +192,13 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 			Tracer:       s.langfuseTracer,
 			AgentRoles:   agentRoles,
 		}),
+		// Cross-session task registry tools (project-scoped, persistent).
+		tools.NewTaskListTool(s.taskHub),
+		tools.NewTaskGetTool(s.taskHub),
+		tools.NewTaskStopTool(s.taskHub),
+		tools.NewTaskReadTool(s.taskHub),
+		tools.NewTaskCreateTool(s.taskHub),
+		tools.NewTaskMessageTool(s.taskHub),
 		s.env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
 			ModelFactory: factory,
 			Recorder:     s.rec,
@@ -234,6 +253,9 @@ func (s *interactiveState) buildPlanTools() []tool.BaseTool {
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
 		s.env.NewGoalSetTool(), s.env.NewGoalGetTool(), s.env.NewGoalUpdateTool(),
 		tools.NewAskUserTool(s.askUserDeps),
+		tools.NewTaskListTool(s.taskHub),
+		tools.NewTaskGetTool(s.taskHub),
+		tools.NewTaskReadTool(s.taskHub),
 	}
 	plan = append(plan, s.env.NewBrowserPlanTools()...)
 	return append(plan, s.env.NewComputerPlanTools()...)
@@ -773,11 +795,32 @@ func (s *interactiveState) drainModeSwitch(modeSelectCh <-chan mode.SessionMode)
 	}
 }
 
+// appendHistory appends messages to the conversation history under historyMu.
+// Every mutation goes through here so concurrent readers (recentTranscript
+// during approvals, the /rename suggestion snapshot) are race-free.
+func (s *interactiveState) appendHistory(msgs ...adk.Message) {
+	s.historyMu.Lock()
+	defer s.historyMu.Unlock()
+	s.history = append(s.history, msgs...)
+}
+
+// snapshotHistory returns a stable copy of the conversation history for
+// off-turn consumers (e.g. the /rename title suggestion). The copy decouples
+// the reader from later appends; message pointers themselves are treated as
+// immutable once appended.
+func (s *interactiveState) snapshotHistory() []adk.Message {
+	s.historyMu.RLock()
+	defer s.historyMu.RUnlock()
+	out := make([]adk.Message, len(s.history))
+	copy(out, s.history)
+	return out
+}
+
 // recentTranscript snapshots the tail of the conversation for the approval
 // reviewer. Called only during a turn, when st.history is not being mutated
 // concurrently (handlePrompt blocks on runner.Run while approvals happen).
 func (s *interactiveState) recentTranscript() []review.Msg {
-	return review.MsgsFromHistory(s.history)
+	return review.MsgsFromHistory(s.snapshotHistory())
 }
 
 func (s *interactiveState) handlePrompt(userPrompt string) {
@@ -831,12 +874,12 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 	if s.agentTokenUsage == nil {
 		s.agentTokenUsage = &internalmodel.TokenUsage{}
 	}
-	s.history = append(s.history, schema.UserMessage(userPrompt))
+	s.appendHistory(schema.UserMessage(userPrompt))
 	s.history = agent.DrainBgNotifications(s.bgManager, s.history)
 	s.approvalState.OnTurnStart() // reset the per-turn reviewer denial breaker
 	result := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 	if len(result.Messages) > 0 {
-		s.history = append(s.history, result.Messages...)
+		s.appendHistory(result.Messages...)
 	}
 	s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
 	s.handlePlanCompletion(result)
@@ -876,10 +919,10 @@ func (s *interactiveState) handlePlanCompletion(planResult runner.RunResult) {
 		if s.rec != nil {
 			s.rec.RecordUser(revisePrompt)
 		}
-		s.history = append(s.history, schema.UserMessage(revisePrompt))
+		s.appendHistory(schema.UserMessage(revisePrompt))
 		result := runner.Run(s.runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 		if len(result.Messages) > 0 {
-			s.history = append(s.history, result.Messages...)
+			s.appendHistory(result.Messages...)
 		}
 		s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
 		s.handlePlanCompletion(result)
@@ -906,10 +949,10 @@ func (s *interactiveState) handlePlanCompletion(planResult runner.RunResult) {
 	if s.rec != nil {
 		s.rec.RecordUser(execPrompt)
 	}
-	s.history = append(s.history, schema.UserMessage(execPrompt))
+	s.appendHistory(schema.UserMessage(execPrompt))
 	result := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 	if len(result.Messages) > 0 {
-		s.history = append(s.history, result.Messages...)
+		s.appendHistory(result.Messages...)
 	}
 	s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
 
@@ -997,7 +1040,7 @@ func (s *interactiveState) handleResume(uuid string) {
 		s.systemPrompt = st.SystemPrompt
 		envDiff := prompts.BuildEnvDiff(st.EnvInfo, s.platform, s.pwd, s.env.Exec.Label(), s.envInfo)
 		if envDiff != "" {
-			s.history = append(s.history, &schema.Message{
+			s.appendHistory(&schema.Message{
 				Role:    schema.System,
 				Content: envDiff,
 			})
@@ -1263,13 +1306,13 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 		s.cancelFunc = runCancel
 		s.runCtx = runCtx
 		s.agentRunning.Store(true)
-		s.history = append(s.history, schema.UserMessage(prompt))
+		s.appendHistory(schema.UserMessage(prompt))
 		result := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 		runCancel()
 		s.runCtx = nil
 		s.agentRunning.Store(false)
 		if len(result.Messages) > 0 {
-			s.history = append(s.history, result.Messages...)
+			s.appendHistory(result.Messages...)
 		}
 		s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
 	}
@@ -1607,6 +1650,21 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	if err := st.setTopLevelAgent(selectedAgentName); err != nil {
 		return err
 	}
+	// Task registry: persistent, project-scoped, cross-session. Failure to
+	// open degrades gracefully (nil store → tools fall back / error clearly).
+	if taskStore, err := tasks.OpenDefault(pwd); err == nil {
+		st.taskStore = taskStore
+	} else {
+		config.Logger().Printf("[tasks] registry unavailable: %v", err)
+	}
+	st.taskMgr = tools.NewSubagentTaskManager(4, 50)
+	st.taskHub = tools.NewTaskHub(st.taskStore, st.taskMgr, func() string {
+		if st.rec != nil {
+			return st.rec.UUID()
+		}
+		return ""
+	})
+
 	st.sessionResumeWarning = resumeAgentWarning
 	st.systemPrompt = st.withTopLevelAgentPrompt(systemPrompt)
 	if rec != nil {
@@ -1843,7 +1901,32 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 		},
 	}
 
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithComputer(computerCtl), tui.WithApprovalModeChange(func(enabled bool) error {
+	// Wire the `/rename` command to the session-title subsystem: read the
+	// current title (recorder, falling back to the index for resumed
+	// sessions), suggest from the conversation via the small model, and
+	// persist only user-confirmed titles.
+	titleCtl := &tui.TitleController{
+		Current: func() string {
+			if st.rec == nil {
+				return ""
+			}
+			if t := st.rec.Title(); t != "" {
+				return t
+			}
+			if meta, err := session.FindSessionMeta(st.rec.UUID()); err == nil && meta != nil {
+				return meta.Title
+			}
+			return ""
+		},
+		Suggest: func(ctx context.Context) (string, error) {
+			return st.suggestSessionTitle(ctx)
+		},
+		Save: func(title string) (string, error) {
+			return st.setSessionTitle(title)
+		},
+	}
+
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithTaskHub(st.taskHub), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithComputer(computerCtl), tui.WithTitleController(titleCtl), tui.WithApprovalModeChange(func(enabled bool) error {
 		target := mode.Approval
 		if enabled {
 			target = mode.FullAccess

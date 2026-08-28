@@ -34,6 +34,7 @@ import (
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
+	"github.com/cnjack/jcode/internal/tasks"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
 	util "github.com/cnjack/jcode/internal/util"
@@ -591,6 +592,17 @@ func (a *acpAgent) buildAgentSession(
 	// "small" alias); fallback is this session's current model.
 	factory := internalmodel.NewModelFactory(cfg, chatModel)
 	agentRoles := config.LoadAgentRoles(env.Pwd())
+
+	// Persistent, cross-session task registry (same model as the TUI/web).
+	var acpTaskStore *tasks.Store
+	if ts, tsErr := tasks.OpenDefault(pwd); tsErr == nil {
+		acpTaskStore = ts
+	} else {
+		config.Logger().Printf("[tasks] registry unavailable: %v", tsErr)
+	}
+	acpTaskMgr := tools.NewSubagentTaskManager(4, 50)
+	acpTaskHub := tools.NewTaskHub(acpTaskStore, acpTaskMgr, func() string { return string(sessionID) })
+
 	allTools := []tool.BaseTool{
 		// load_skill: ACP puts the skill list in the system prompt (see
 		// skillLoader.Descriptions() below) and the slash-command path literally
@@ -613,12 +625,20 @@ func (a *acpAgent) buildAgentSession(
 		env.NewSubagentTool(&tools.SubagentDeps{
 			ChatModel:    chatModel,
 			ModelFactory: factory,
+			TaskManager:  acpTaskMgr,
+			TaskStore:    acpTaskStore,
 			Recorder:     rec,
 			Tracer:       tracer,
 			Notifier:     acpHandler.OnSubagentEvent,
 			ProgressFn:   acpHandler.OnSubagentProgress,
 			AgentRoles:   agentRoles,
 		}),
+		tools.NewTaskListTool(acpTaskHub),
+		tools.NewTaskGetTool(acpTaskHub),
+		tools.NewTaskStopTool(acpTaskHub),
+		tools.NewTaskReadTool(acpTaskHub),
+		tools.NewTaskCreateTool(acpTaskHub),
+		tools.NewTaskMessageTool(acpTaskHub),
 		env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
 			ModelFactory: factory,
 			Recorder:     rec,

@@ -17,6 +17,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/tasks"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/usage"
 )
@@ -45,12 +46,16 @@ type SubagentDeps struct {
 	ChatModel    model.ToolCallingChatModel
 	ModelFactory *internalmodel.ModelFactory // optional, for multi-model subagents
 	TaskManager  *SubagentTaskManager        // optional, for async background tasks
-	Notifier     SubagentNotifier
-	ProgressFn   SubagentProgressFn        // intermediate tool call/result events
-	TokenFn      SubagentTokenFn           // optional: token usage update after each model turn
-	Recorder     *session.Recorder         // records subagent start/result to session JSONL
-	Tracer       *telemetry.LangfuseTracer // optional: Langfuse tracer for nested spans
-	AgentRoles   map[string]config.AgentRoleConfig
+	// TaskStore, when set, makes every background subagent task a durable
+	// cross-session record (internal/tasks): stable task_<hex> refs, message
+	// timeline, crash recovery. Background execution requires TaskManager.
+	TaskStore  *tasks.Store
+	Notifier   SubagentNotifier
+	ProgressFn SubagentProgressFn        // intermediate tool call/result events
+	TokenFn    SubagentTokenFn           // optional: token usage update after each model turn
+	Recorder   *session.Recorder         // records subagent start/result to session JSONL
+	Tracer     *telemetry.LangfuseTracer // optional: Langfuse tracer for nested spans
+	AgentRoles map[string]config.AgentRoleConfig
 }
 
 type subagentInput struct {
@@ -356,6 +361,38 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 			Model:     modelRef,
 			Depth:     s.env.Depth + 1,
 		}
+		// Durable cross-session record: stable ref + lifecycle mirroring.
+		var ref string
+		if s.deps.TaskStore != nil {
+			sessionID := ""
+			if s.deps.Recorder != nil {
+				sessionID = s.deps.Recorder.UUID()
+			}
+			rec, recErr := s.deps.TaskStore.Create(tasks.CreateInput{
+				Name:      input.Name,
+				Kind:      tasks.KindSubagent,
+				SessionID: sessionID,
+				AgentType: roleName,
+				Model:     modelRef,
+			})
+			if recErr != nil {
+				config.Logger().Printf("[subagent] task registry create failed: %v", recErr)
+			} else {
+				ref = rec.Ref
+				task.Ref = ref
+				// Mark running BEFORE submit: a fast-completing goroutine must
+				// never race a late "running" event on top of a terminal one.
+				if err := s.deps.TaskStore.SetStatus(ref, tasks.StatusRunning, "", ""); err != nil {
+					config.Logger().Printf("[subagent] task registry running %s failed: %v", ref, err)
+				}
+				store := s.deps.TaskStore
+				task.OnFinish = func(status SubagentTaskStatus, output, errMsg string) {
+					if err := store.SetStatus(ref, localToStatus(status), output, errMsg); err != nil {
+						config.Logger().Printf("[subagent] task registry finish %s failed: %v", ref, err)
+					}
+				}
+			}
+		}
 		taskID, _, err := s.deps.TaskManager.Submit(ctx, task, runFn, true)
 		if err != nil {
 			if s.deps.Notifier != nil {
@@ -366,6 +403,10 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		// Record async launch.
 		if s.deps.Recorder != nil {
 			s.deps.Recorder.RecordSubagentAsync(input.Name, taskID, roleName)
+		}
+		if ref != "" {
+			return fmt.Sprintf("Background task started: %s (local id %s)\nTask reference: %s — stable across sessions; use task_read/task_get with this ref, task_message to follow up, and mention it as @%s.",
+				ref, taskID, ref, ref), nil
 		}
 		return fmt.Sprintf("Background task started: %s\nUse task_get with task_id=%q to check status and retrieve result.", taskID, taskID), nil
 	}
@@ -593,11 +634,24 @@ func (s *subagentTool) buildTools(childEnv *Env, agentType string) []tool.BaseTo
 		}
 		// Add task management tools if a TaskManager is available.
 		if s.deps.TaskManager != nil {
+			hub := NewTaskHub(s.deps.TaskStore, s.deps.TaskManager, func() string {
+				if s.deps.Recorder != nil {
+					return s.deps.Recorder.UUID()
+				}
+				return ""
+			})
 			tools = append(tools,
-				NewTaskListTool(s.deps.TaskManager),
-				NewTaskGetTool(s.deps.TaskManager),
-				NewTaskStopTool(s.deps.TaskManager),
+				NewTaskListTool(hub),
+				NewTaskGetTool(hub),
+				NewTaskStopTool(hub),
 			)
+			if s.deps.TaskStore != nil {
+				tools = append(tools,
+					NewTaskReadTool(hub),
+					NewTaskCreateTool(hub),
+					NewTaskMessageTool(hub),
+				)
+			}
 		}
 	}
 

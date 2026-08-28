@@ -31,9 +31,11 @@ func (m Model) getAllCommands() []commandSuggestion {
 		{"/theme", "Switch color theme"},
 		{"/ssh", "SSH connection"},
 		{"/resume", "Resume a previous session"},
+		{"/rename", "Rename this session (suggests a title)"},
 		{"/compact", "Compress conversation context"},
 		{"/goal", "Set a persistent objective (auto-continues)"},
 		{"/bg", "List background tasks"},
+		{"/task", "Cross-session tasks (/task list|create|read|message|stop|archive)"},
 		{"/channel", "Manage channels (WeChat etc.)"},
 		{"/mcp", "List MCP servers / log in (/mcp login <name>)"},
 		{"/browser", "Browser use status (/browser on|off)"},
@@ -85,8 +87,14 @@ func (m *Model) updateSuggestions() {
 		m.cmdSuggestionActive = false
 		m.cmdSuggestions = nil
 		m.cmdSuggestionIndex = 0
+		// @task mention completion: driven by the trailing @token, listing
+		// only tasks visible to this session's project.
+		m.updateTaskSuggestions()
 		return
 	}
+	m.taskSuggestionActive = false
+	m.taskSuggestions = nil
+	m.taskSuggestionIndex = 0
 	all := m.getAllCommands()
 	matches := filterCommands(all, val)
 	if len(matches) == 0 || (len(matches) == 1 && matches[0].cmd == val) {
@@ -118,6 +126,11 @@ func (m Model) inputAreaView() string {
 		}
 	}
 
+	// 1c. /rename editor hint (only while the title editor is open).
+	if m.renameActive {
+		parts = append(parts, m.renameHintLine())
+	}
+
 	// 2. Input content: textarea or special prompts
 	switch {
 	case m.planReviewActive:
@@ -125,6 +138,12 @@ func (m Model) inputAreaView() string {
 	case m.askUserActive:
 		parts = append(parts, m.askUserPromptView())
 	default:
+		if m.taskSuggestionActive && len(m.taskSuggestions) > 0 {
+			suggestionView := m.renderTaskSuggestions()
+			if suggestionView != "" {
+				parts = append(parts, suggestionView)
+			}
+		}
 		if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 {
 			suggestionView := m.renderCommandSuggestions()
 			if suggestionView != "" {

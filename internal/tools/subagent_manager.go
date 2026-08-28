@@ -34,6 +34,17 @@ type SubagentTask struct {
 	Started   time.Time
 	Ended     time.Time
 	Cancel    context.CancelFunc
+
+	// Ref is the durable cross-session task reference (internal/tasks).
+	// Empty for legacy in-process-only tasks.
+	Ref string
+	// OnFinish, when set, is invoked exactly once with the task's final
+	// state (completed/failed/stopped) so a persistent registry can mirror
+	// the lifecycle. It must not block and must not re-enter the manager.
+	OnFinish func(status SubagentTaskStatus, output, errMsg string)
+
+	// finished guards the exactly-once OnFinish contract.
+	finished bool
 }
 
 // SubagentNotification is produced when a background task changes state.
@@ -88,7 +99,9 @@ func (m *SubagentTaskManager) Submit(
 			task.Status = TaskStatusFailed
 			task.Error = fmt.Sprintf("max parallel limit (%d) reached", m.maxParallel)
 			task.Ended = time.Now()
+			finish := m.finishOnceLocked(task)
 			m.mu.Unlock()
+			finish()
 			return task.ID, "", fmt.Errorf("%s", task.Error)
 		}
 	}
@@ -104,7 +117,6 @@ func (m *SubagentTaskManager) runSync(ctx context.Context, task *SubagentTask, r
 	m.setStatus(task.ID, TaskStatusRunning)
 	result, err := runFn(ctx)
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	task.Ended = time.Now()
 	if err != nil {
 		task.Status = TaskStatusFailed
@@ -114,6 +126,9 @@ func (m *SubagentTaskManager) runSync(ctx context.Context, task *SubagentTask, r
 		task.Output = result
 	}
 	m.evictOldest()
+	finish := m.finishOnceLocked(task)
+	m.mu.Unlock()
+	finish()
 	return task.ID, result, err
 }
 
@@ -134,7 +149,6 @@ func (m *SubagentTaskManager) runAsync(ctx context.Context, task *SubagentTask, 
 				return
 			}
 			m.mu.Lock()
-			defer m.mu.Unlock()
 			task.Ended = time.Now()
 			task.Status = TaskStatusFailed
 			task.Error = fmt.Sprintf("panic: %v", r)
@@ -146,11 +160,13 @@ func (m *SubagentTaskManager) runAsync(ctx context.Context, task *SubagentTask, 
 				Summary:   "error: " + task.Error,
 			})
 			m.evictOldest()
+			finish := m.finishOnceLocked(task)
+			m.mu.Unlock()
+			finish()
 			config.Logger().Printf("[task-manager] async task %s panicked: %v", task.ID, r)
 		}()
 		result, err := runFn(childCtx)
 		m.mu.Lock()
-		defer m.mu.Unlock()
 		task.Ended = time.Now()
 		if err != nil {
 			if task.Status == TaskStatusStopped {
@@ -178,6 +194,9 @@ func (m *SubagentTaskManager) runAsync(ctx context.Context, task *SubagentTask, 
 			Summary:   summary,
 		})
 		m.evictOldest()
+		finish := m.finishOnceLocked(task)
+		m.mu.Unlock()
+		finish()
 		config.Logger().Printf("[task-manager] async task %s finished status=%s", task.ID, task.Status)
 	}()
 
@@ -215,19 +234,31 @@ func (m *SubagentTaskManager) List(statusFilter SubagentTaskStatus) []*SubagentT
 	return out
 }
 
-// Stop cancels a running background task.
-func (m *SubagentTaskManager) Stop(taskID string) error {
+// Stop cancels a running background task. idOrRef may be the process-local
+// task ID (bg_subagent_N) or the durable task reference (task_<hex>).
+func (m *SubagentTaskManager) Stop(idOrRef string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	t, ok := m.tasks[taskID]
+	t, ok := m.tasks[idOrRef]
 	if !ok {
-		return fmt.Errorf("task %q not found", taskID)
+		for _, cand := range m.tasks {
+			if cand.Ref != "" && cand.Ref == idOrRef {
+				t = cand
+				ok = true
+				break
+			}
+		}
+	}
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("task %q not found", idOrRef)
 	}
 	if t.Status != TaskStatusRunning && t.Status != TaskStatusPending {
-		return fmt.Errorf("task %q is not running (status=%s)", taskID, t.Status)
+		m.mu.Unlock()
+		return fmt.Errorf("task %q is not running (status=%s)", idOrRef, t.Status)
 	}
 	t.Status = TaskStatusStopped
 	t.Ended = time.Now()
+	t.Error = "stopped by user"
 	if t.Cancel != nil {
 		t.Cancel()
 	}
@@ -238,8 +269,54 @@ func (m *SubagentTaskManager) Stop(taskID string) error {
 		Status:    TaskStatusStopped,
 		Summary:   "stopped by user",
 	})
-	config.Logger().Printf("[task-manager] stopped task %s", taskID)
+	finish := m.finishOnceLocked(t)
+	m.mu.Unlock()
+	finish()
+	config.Logger().Printf("[task-manager] stopped task %s", idOrRef)
 	return nil
+}
+
+// FindByRef returns a copy-safe snapshot of the live task bound to a durable
+// task reference, if it is still tracked by this process.
+func (m *SubagentTaskManager) FindByRef(ref string) (*SubagentTask, error) {
+	if ref == "" {
+		return nil, fmt.Errorf("empty task reference")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, t := range m.tasks {
+		if t.Ref == ref {
+			cp := *t
+			cp.Cancel = nil
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("no live task with reference %q in this session", ref)
+}
+
+// Resolve accepts either a process-local task ID (bg_subagent_N) or a
+// durable task reference (task_<hex>) and returns the matching live task.
+func (m *SubagentTaskManager) Resolve(idOrRef string) (*SubagentTask, error) {
+	if t, err := m.Get(idOrRef); err == nil {
+		return t, nil
+	}
+	return m.FindByRef(idOrRef)
+}
+
+// finishOnceLocked claims the task's OnFinish callback under m.mu and
+// returns a thunk that is safe to invoke after unlocking. The callback must
+// never run under the lock: it writes to the persistent registry, which can
+// be slower than the in-memory manager tolerates.
+// Caller must hold m.mu.
+func (m *SubagentTaskManager) finishOnceLocked(t *SubagentTask) func() {
+	if t.finished || t.OnFinish == nil {
+		t.finished = true
+		return func() {}
+	}
+	t.finished = true
+	status, output, errMsg := t.Status, t.Output, t.Error
+	cb := t.OnFinish
+	return func() { cb(status, output, errMsg) }
 }
 
 // DrainNotifications returns and clears all pending notifications.

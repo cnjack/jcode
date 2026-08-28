@@ -99,6 +99,7 @@ type Engine struct {
 	// --- per-task execution context ---
 	env           *tools.Env // fresh per task; todo/goal/bg hang off it
 	todoStore     *tools.TodoStore
+	taskHub       *tools.TaskHub
 	approvalState *runner.ApprovalState
 
 	// --- per-task accounting + event emission ---
@@ -142,6 +143,7 @@ type EngineConfig struct {
 	Agent           *adk.ChatModelAgent
 	Env             *tools.Env
 	TodoStore       *tools.TodoStore
+	TaskHub         *tools.TaskHub // per-task persistent agent-task registry handle
 	Recorder        *session.Recorder
 	TokenUsage      *model.TokenUsage
 	ApprovalState   *runner.ApprovalState
@@ -190,6 +192,7 @@ func newEngine(c *EngineConfig) *Engine {
 		agent:           c.Agent,
 		env:             c.Env,
 		todoStore:       c.TodoStore,
+		taskHub:         c.TaskHub,
 		recorder:        c.Recorder,
 		tokenUsage:      tu,
 		approvalState:   c.ApprovalState,

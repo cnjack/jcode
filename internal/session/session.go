@@ -407,6 +407,11 @@ type SessionMeta struct {
 	Unread    bool   `json:"unread,omitempty"`
 	Status    string `json:"status,omitempty"`     // idle/running/done/error (set by the web layer)
 	UpdatedAt string `json:"updated_at,omitempty"` // RFC3339
+	// TitleUserSet marks a title the user chose explicitly (TUI /rename, web
+	// rename). Once set, automatic title writers (the async LLM refiner) must
+	// not overwrite it — an in-flight suggestion can never clobber what the
+	// user just saved, in this or any other transport's process.
+	TitleUserSet bool `json:"title_user_set,omitempty"`
 	// Automation metadata. A run launched by an automation is a normal session
 	// tagged here: AutomationID is the correlation key for the "Recent runs"
 	// list, and the main task list excludes any session with AutomationID set so
@@ -645,6 +650,10 @@ type Recorder struct {
 	resuming bool
 	title    string
 	hasTitle bool // true after title has been generated or when resuming
+	// userTitle is true once the user renamed this session explicitly (e.g.
+	// TUI /rename). Later automatic SetTitleFor calls are then dropped so an
+	// in-flight LLM suggestion cannot overwrite the user's choice.
+	userTitle bool
 	// titleRefiner, when set, is invoked once with the first user message after
 	// the truncated fallback title is persisted. Implementations spawn their own
 	// goroutine for slow work (e.g. LLM title generation) and call SetTitle.
@@ -852,11 +861,23 @@ func (r *Recorder) SetTitleRefiner(fn func(firstUserMsg string)) {
 	r.mu.Unlock()
 }
 
+// Title returns the session's current title. It is "" for a recorder that has
+// not titled a session yet (before the first message) and may also be "" for a
+// resumed recorder whose title lives only in the index — callers that need the
+// persisted title should fall back to FindSessionMeta.
+func (r *Recorder) Title() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.title
+}
+
 // SetTitleFor overrides the session title and persists it to the shared index
 // — but only while the recorder still records session id. A title computed for
 // one session (e.g. by the async LLM refiner) must never clobber another
 // session's index entry after SetUUID re-points this recorder (the TUI /resume
-// path reuses the live recorder). Empty titles are ignored.
+// path reuses the live recorder). Empty titles are ignored, and so is any
+// automatic write after the user renamed the session explicitly (see
+// SetUserTitle).
 func (r *Recorder) SetTitleFor(id, title string) {
 	title = strings.TrimSpace(title)
 	if title == "" || id == "" {
@@ -868,11 +889,49 @@ func (r *Recorder) SetTitleFor(id, title string) {
 		config.Logger().Printf("[session] dropping stale title for %s (recorder now on %s)", id, r.uuid)
 		return
 	}
+	if r.userTitle {
+		r.mu.Unlock()
+		config.Logger().Printf("[session] dropping automatic title for %s (user set the title)", id)
+		return
+	}
 	r.title = title
 	r.hasTitle = true
 	project := r.project
 	r.mu.Unlock()
-	_ = updateIndexTitle(project, id, title)
+	_ = updateIndexTitle(project, id, title, false)
+}
+
+// SetUserTitle persists an explicit, user-issued rename (TUI /rename) for
+// session id and marks it user-owned: every later automatic SetTitleFor —
+// including one from a refiner goroutine still in flight — is dropped, and the
+// index write refuses to clobber the user title even across processes.
+// Returns a descriptive error when the id is stale (the recorder was re-pointed
+// by /resume), the session has no index entry yet (nothing recorded), or the
+// index write fails.
+func (r *Recorder) SetUserTitle(id, title string) error {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return fmt.Errorf("title must not be empty")
+	}
+	r.mu.Lock()
+	if r.uuid != id {
+		current := r.uuid
+		r.mu.Unlock()
+		return fmt.Errorf("session changed (was %s, recorder now on %s): rename cancelled", id, current)
+	}
+	if !r.hasTitle && !r.resuming && r.file == nil {
+		r.mu.Unlock()
+		return fmt.Errorf("session has no messages yet: send a message before renaming")
+	}
+	r.title = title
+	r.hasTitle = true
+	r.userTitle = true
+	project := r.project
+	r.mu.Unlock()
+	if err := updateIndexTitle(project, id, title, true); err != nil {
+		return fmt.Errorf("saving title: %w", err)
+	}
+	return nil
 }
 
 // RecordAssistant appends an assistant message entry.
@@ -1686,7 +1745,12 @@ func generateTitle(content string) string {
 }
 
 // updateIndexTitle updates the title of a session in the shared index file.
-func updateIndexTitle(project, uuid, title string) error {
+// userSet distinguishes an explicit user rename from an automatic write (the
+// async LLM refiner): once a session's meta carries TitleUserSet, automatic
+// writes are dropped inside the same locked section — so an in-flight
+// suggestion from any process cannot clobber the title the user saved. A user
+// write always wins and sets the flag.
+func updateIndexTitle(project, uuid, title string, userSet bool) error {
 	indexMu.Lock()
 	defer indexMu.Unlock()
 	indexPath, err := config.SessionsIndexPath()
@@ -1702,11 +1766,23 @@ func updateIndexTitle(project, uuid, title string) error {
 		return err
 	}
 	metas := idx.Sessions[project]
+	found := false
 	for i := range metas {
 		if metas[i].UUID == uuid {
+			found = true
+			if metas[i].TitleUserSet && !userSet {
+				config.Logger().Printf("[session] dropping automatic title for %s (user set the title)", uuid)
+				return nil
+			}
 			metas[i].Title = title
+			if userSet {
+				metas[i].TitleUserSet = true
+			}
 			break
 		}
+	}
+	if !found {
+		return fmt.Errorf("session %s not found in index", uuid)
 	}
 	idx.Sessions[project] = metas
 	newData, err := json.MarshalIndent(idx, "", "  ")

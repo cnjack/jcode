@@ -251,6 +251,14 @@ var noApprovalNeeded = map[string]bool{
 	"team_send_message":          true,
 	"team_list":                  true,
 	"team_delete":                true,
+	// Task registry read tier: listing, reading and creating durable task
+	// records only touches the project-scoped local registry — no execution,
+	// no external side effects. Messaging a task (task_message) is NOT here:
+	// it can carry content into another session's context, so it stays gated.
+	"task_list":   true,
+	"task_get":    true,
+	"task_read":   true,
+	"task_create": true,
 	// Browser read-only tier: inspection never mutates external state.
 	"browser_snapshot":   true,
 	"browser_screenshot": true,

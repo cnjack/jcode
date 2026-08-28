@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -218,6 +219,24 @@ type Model struct {
 	cmdSuggestionIndex  int
 	cmdSuggestions      []commandSuggestion
 
+	// Persistent agent-task registry (cross-session @task mentions and the
+	// /task command family).
+	taskHub              *tools.TaskHub
+	taskSuggestions      []taskSuggestion
+	taskSuggestionActive bool
+	taskSuggestionIndex  int
+
+	// ─── /rename editor state ───
+	// renameActive is true while the inline title editor is open (/rename).
+	// The main textarea holds the editable title; these fields track editor
+	// lifecycle so a late suggestion can never clobber user input or leak
+	// after a cancel.
+	renameActive     bool
+	renameSuggesting bool   // a suggestion request is in flight
+	renameEdited     bool   // user typed — late suggestions are dropped
+	renameNotice     string // transient status line ("suggesting…", failure reason)
+	titleCtl         *TitleController
+
 	// Mouse text selection state
 
 	// Team state
@@ -421,7 +440,7 @@ func (m *Model) confirmCancelAgent() {
 }
 
 func (m Model) inputActive() bool {
-	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt || m.sshHostKeyPrompt) && !m.pickingModel && !m.managingModels && !m.pickingTheme && !m.showingSetting && !m.showingHelp && !m.showingTranscript && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
+	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt || m.sshHostKeyPrompt || m.renameActive) && !m.pickingModel && !m.managingModels && !m.pickingTheme && !m.showingSetting && !m.showingHelp && !m.showingTranscript && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
 
 // ModelOption configures a Model before the BubbleTea program starts.
@@ -556,6 +575,30 @@ type ComputerController struct {
 func WithComputer(cc *ComputerController) ModelOption {
 	return func(m *Model) {
 		m.computer = cc
+	}
+}
+
+// TitleController lets the TUI read, suggest, and rename the current session's
+// title without depending on the session recorder (which lives in the command
+// layer). Nil when titles are unavailable in this context.
+type TitleController struct {
+	// Current returns the session's current title ("" before the first
+	// message or when recording is off).
+	Current func() string
+	// Suggest generates an editable title suggestion from the current
+	// conversation (small model). It must be safe to call while a turn is
+	// running and must never write the title itself.
+	Suggest func(ctx context.Context) (string, error)
+	// Save sanitizes and persists an explicit user rename and returns the
+	// stored title. Errors describe why nothing was saved.
+	Save func(title string) (string, error)
+}
+
+// WithTitleController wires the `/rename` command to the session-title
+// subsystem. Without it, /rename reports that renaming is unavailable.
+func WithTitleController(tc *TitleController) ModelOption {
+	return func(m *Model) {
+		m.titleCtl = tc
 	}
 }
 
