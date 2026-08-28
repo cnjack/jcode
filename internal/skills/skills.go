@@ -21,14 +21,26 @@ type Skill struct {
 	Body        string // full markdown content (Layer 2, on-demand)
 	Builtin     bool   // true if embedded in binary
 	Path        string // filesystem path (empty for built-in)
-	Source      string // provenance: builtin | agents | user | project
+	Source      string // provenance: builtin | agents | user | project | managed
 }
+
+const (
+	// EnvManagedSkillsDir points at a Cloud-managed skill root. The path must
+	// be absolute. Skills loaded from this root have the highest precedence.
+	EnvManagedSkillsDir = "JCODE_MANAGED_SKILLS_DIR"
+	// EnvReservedSkills is a comma/whitespace-separated list of skill names
+	// owned by the managed runtime. Lower-precedence sources cannot provide
+	// these names, even when the managed root is unavailable.
+	EnvReservedSkills = "JCODE_RESERVED_SKILLS"
+)
 
 // Loader discovers and caches skills from built-in embeds and user directories.
 type Loader struct {
-	mu       sync.RWMutex
-	skills   map[string]*Skill
-	disabled map[string]bool // skill names hidden from the agent
+	mu               sync.RWMutex
+	skills           map[string]*Skill
+	disabled         map[string]bool // skill names hidden from the agent
+	managedSkillsDir string
+	reservedSkills   map[string]bool
 }
 
 //go:embed builtin
@@ -45,15 +57,18 @@ func NewLoader() *Loader {
 // commands, and the load_skill tool, but remain visible via All() for management UIs.
 func NewLoaderWithDisabled(disabled []string) *Loader {
 	l := &Loader{
-		skills:   make(map[string]*Skill),
-		disabled: make(map[string]bool, len(disabled)),
+		skills:           make(map[string]*Skill),
+		disabled:         make(map[string]bool, len(disabled)),
+		managedSkillsDir: strings.TrimSpace(os.Getenv(EnvManagedSkillsDir)),
+		reservedSkills:   parseReservedSkills(os.Getenv(EnvReservedSkills)),
 	}
 	for _, name := range disabled {
 		l.disabled[name] = true
 	}
 	l.loadBuiltin()
-	l.ScanAgentsSkills()
-	l.ScanUserSkills()
+	l.scanAgentsSkills()
+	l.scanUserSkills()
+	l.refreshManagedSkills()
 	return l
 }
 
@@ -104,14 +119,19 @@ func (l *Loader) loadBuiltin() {
 // Each subdirectory (or symlink to a directory) containing a SKILL.md is treated as a skill.
 // User skills override built-in skills with the same name.
 func (l *Loader) ScanUserSkills() {
-	dir := filepath.Join(config.ConfigDir(), "skills")
-	l.scanDir(dir, "user")
+	l.scanUserSkills()
+	l.refreshManagedSkills()
 }
 
 // ScanAgentsSkills scans ~/.agents/skills/ for agent-defined skills.
 // Each subdirectory (or symlink to a directory) containing a SKILL.md is treated as a skill.
 // Agent skills are loaded before user skills, so user skills can override them.
 func (l *Loader) ScanAgentsSkills() {
+	l.scanAgentsSkills()
+	l.refreshManagedSkills()
+}
+
+func (l *Loader) scanAgentsSkills() {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return
@@ -120,10 +140,16 @@ func (l *Loader) ScanAgentsSkills() {
 	l.scanDir(dir, "agents")
 }
 
+func (l *Loader) scanUserSkills() {
+	dir := filepath.Join(config.ConfigDir(), "skills")
+	l.scanDir(dir, "user")
+}
+
 // ScanProjectSkills scans <projectDir>/.jcode/skills/ for project-local skills.
 func (l *Loader) ScanProjectSkills(projectDir string) {
 	dir := filepath.Join(projectDir, ".jcode", "skills")
 	l.scanDir(dir, "project")
+	l.refreshManagedSkills()
 }
 
 // scanDir scans a directory for skill subdirectories (including symlinks to directories).
@@ -149,10 +175,94 @@ func (l *Loader) scanDir(dir, source string) {
 		sk := parseSkill(skillName, string(data), false, fullPath)
 		sk.Source = source
 		l.mu.Lock()
-		l.skills[sk.Name] = sk
+		blocked := source != "managed" && l.conflictsWithReservedSkillLocked(sk)
+		if !blocked {
+			l.skills[sk.Name] = sk
+		}
 		l.mu.Unlock()
-		config.Logger().Printf("[skills] loaded %s skill: %s from %s", source, sk.Name, sk.Path)
+		if blocked {
+			config.Logger().Printf(
+				"[skills] ignored %s skill %q from %s: name or slash trigger is reserved",
+				source,
+				sk.Name,
+				sk.Path,
+			)
+		} else {
+			config.Logger().Printf("[skills] loaded %s skill: %s from %s", source, sk.Name, sk.Path)
+		}
 	}
+}
+
+// refreshManagedSkills removes stale managed skills, hides all lower-priority
+// definitions of reserved names, then loads the managed root last. Reserved
+// names stay hidden when the root is missing or invalid (fail closed).
+func (l *Loader) refreshManagedSkills() {
+	if l.managedSkillsDir == "" && len(l.reservedSkills) == 0 {
+		return
+	}
+
+	l.mu.Lock()
+	for name, sk := range l.skills {
+		if sk.Source == "managed" || l.reservedSkills[name] {
+			delete(l.skills, name)
+		}
+	}
+	l.mu.Unlock()
+
+	if l.managedSkillsDir == "" {
+		config.Logger().Printf(
+			"[skills] %s is required when %s is set; reserved skills remain hidden",
+			EnvManagedSkillsDir,
+			EnvReservedSkills,
+		)
+		return
+	}
+	if !filepath.IsAbs(l.managedSkillsDir) {
+		config.Logger().Printf(
+			"[skills] %s must be an absolute path (got %q); reserved skills remain hidden",
+			EnvManagedSkillsDir,
+			l.managedSkillsDir,
+		)
+		return
+	}
+	info, err := os.Stat(l.managedSkillsDir)
+	if err != nil {
+		config.Logger().Printf(
+			"[skills] managed skill root %q is unavailable: %v; reserved skills remain hidden",
+			l.managedSkillsDir,
+			err,
+		)
+		return
+	}
+	if !info.IsDir() {
+		config.Logger().Printf(
+			"[skills] managed skill root %q is not a directory; reserved skills remain hidden",
+			l.managedSkillsDir,
+		)
+		return
+	}
+	l.scanDir(l.managedSkillsDir, "managed")
+}
+
+func (l *Loader) conflictsWithReservedSkillLocked(skill *Skill) bool {
+	if l.reservedSkills[skill.Name] {
+		return true
+	}
+	triggerName := strings.TrimPrefix(strings.TrimSpace(skill.Slash), "/")
+	return triggerName != "" && triggerName != "false" && l.reservedSkills[triggerName]
+}
+
+func parseReservedSkills(raw string) map[string]bool {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	reserved := make(map[string]bool, len(fields))
+	for _, name := range fields {
+		if name = strings.TrimSpace(name); name != "" {
+			reserved[name] = true
+		}
+	}
+	return reserved
 }
 
 // Rescan re-scans all skill sources (preserving built-ins).
@@ -165,11 +275,13 @@ func (l *Loader) Rescan(projectDir string) {
 		}
 	}
 	l.mu.Unlock()
-	l.ScanAgentsSkills()
-	l.ScanUserSkills()
+	l.scanAgentsSkills()
+	l.scanUserSkills()
 	if projectDir != "" {
-		l.ScanProjectSkills(projectDir)
+		dir := filepath.Join(projectDir, ".jcode", "skills")
+		l.scanDir(dir, "project")
 	}
+	l.refreshManagedSkills()
 }
 
 // Get returns a skill by name, or nil if not found.
