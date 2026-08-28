@@ -1357,6 +1357,16 @@ func SessionsIndexPath() (string, error) {
 	return filepath.Join(dir, "session.json"), nil
 }
 
+// TasksDir returns the root of the persistent agent-task registry
+// (~/.jcode/tasks). Task records are laid out per project below this root.
+func TasksDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(home, configDir, "tasks"), nil
+}
+
 // UsageDir returns the path to the usage-statistics directory (~/.jcode/usage).
 func UsageDir() (string, error) {
 	home, err := os.UserHomeDir()

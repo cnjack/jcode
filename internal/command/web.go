@@ -43,6 +43,7 @@ import (
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
+	"github.com/cnjack/jcode/internal/tasks"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
 	"github.com/cnjack/jcode/internal/usage"
@@ -621,6 +622,24 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			}
 		}
 
+		// Per-task persistent task registry. Local and remote tasks both
+		// record locally, keyed by the task's workspace path (remote paths
+		// get their own namespace — a local ref never collides with a
+		// remote one).
+		var webTaskStore *tasks.Store
+		if ts, tsErr := tasks.OpenDefault(taskPwd); tsErr == nil {
+			webTaskStore = ts
+		} else {
+			config.Logger().Printf("[tasks] registry unavailable for %s: %v", taskPwd, tsErr)
+		}
+		webTaskMgr := tools.NewSubagentTaskManager(4, 50)
+		webTaskHub := tools.NewTaskHub(webTaskStore, webTaskMgr, func() string {
+			if trec != nil {
+				return trec.UUID()
+			}
+			return ""
+		})
+
 		buildAllTools := func(
 			cm model.ToolCallingChatModel,
 			agentCfg *config.Config,
@@ -662,6 +681,8 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				tenv.NewSubagentTool(&tools.SubagentDeps{
 					ChatModel:    cm,
 					ModelFactory: factory,
+					TaskManager:  webTaskMgr,
+					TaskStore:    webTaskStore,
 					Recorder:     trec,
 					Notifier: func(name, agentType string, done bool, result string, err error) {
 						twh.OnSubagentEvent(name, agentType, done, result, err)
@@ -677,6 +698,12 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					Loader:       taskFlowLoader,
 					AgentRoles:   agentRoles,
 				}),
+				tools.NewTaskListTool(webTaskHub),
+				tools.NewTaskGetTool(webTaskHub),
+				tools.NewTaskStopTool(webTaskHub),
+				tools.NewTaskReadTool(webTaskHub),
+				tools.NewTaskCreateTool(webTaskHub),
+				tools.NewTaskMessageTool(webTaskHub),
 				tools.NewAskUserTool(&tools.AskUserDeps{
 					BatchRequestFn: twh.RequestAskUser,
 				}),
@@ -737,6 +764,12 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					BatchRequestFn: twh.RequestAskUser,
 				}),
 			}
+			// Plan mode keeps the read-only task registry tools.
+			plan = append(plan,
+				tools.NewTaskListTool(webTaskHub),
+				tools.NewTaskGetTool(webTaskHub),
+				tools.NewTaskReadTool(webTaskHub),
+			)
 			// Plan mode gets the read-only browser subset (look, don't change).
 			plan = append(plan, tenv.NewBrowserPlanTools()...)
 			plan = append(plan, tenv.NewComputerPlanTools()...)
@@ -1114,6 +1147,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			Agent:           ag,
 			Env:             tenv,
 			TodoStore:       tenv.TodoStore,
+			TaskHub:         webTaskHub,
 			Recorder:        trec,
 			TokenUsage:      ttok,
 			ApprovalState:   tappr,

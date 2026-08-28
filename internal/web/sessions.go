@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/mode"
+	"github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 )
 
@@ -146,6 +147,17 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
+	// Sanitize a rename before touching the index so a rejected title rejects
+	// the whole request atomically (same shared rule as TUI /rename and the
+	// async generator; a rename that cleans up to nothing never blanks a title).
+	var cleanedTitle string
+	if req.Title != nil {
+		cleanedTitle = model.SanitizeTitle(*req.Title)
+		if cleanedTitle == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title must not be empty"})
+			return
+		}
+	}
 	meta, err := session.UpdateSessionMeta(id, func(m *session.SessionMeta) {
 		if req.Pinned != nil {
 			m.Pinned = *req.Pinned
@@ -157,7 +169,10 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 			m.Unread = *req.Unread
 		}
 		if req.Title != nil {
-			m.Title = *req.Title
+			m.Title = cleanedTitle
+			// User-chosen titles are sticky: the async LLM refiner (this or
+			// any other process) must not clobber them later.
+			m.TitleUserSet = true
 		}
 		// Deliberately do NOT bump UpdatedAt here. UpdatedAt is the "last activity"
 		// key the sidebar sorts by, and activity means a real turn (a user prompt →
