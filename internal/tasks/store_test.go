@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-func newTestStore(t *testing.T, project string) *Store {
+func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := NewStore(t.TempDir(), project)
+	s, err := NewStore(t.TempDir(), "/proj/a")
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestNewRefUnique(t *testing.T) {
 }
 
 func TestCreateGetRoundTrip(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	rec := mustCreate(t, s, CreateInput{Name: "explore-auth", Description: "look at auth", Kind: KindSubagent, SessionID: "sess-1"})
 	if !ValidateRef(rec.Ref) {
 		t.Fatalf("bad ref %q", rec.Ref)
@@ -74,7 +74,7 @@ func TestCreateGetRoundTrip(t *testing.T) {
 }
 
 func TestCreateIdempotentByKey(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	first := mustCreate(t, s, CreateInput{Name: "one", Key: "op-123"})
 	second := mustCreate(t, s, CreateInput{Name: "one", Key: "op-123"})
 	if first.Ref != second.Ref {
@@ -87,7 +87,7 @@ func TestCreateIdempotentByKey(t *testing.T) {
 }
 
 func TestConcurrentCreateDistinctRefs(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	const n = 32
 	var wg sync.WaitGroup
 	refs := make(chan string, n)
@@ -154,7 +154,7 @@ func TestCrossProjectPermissionDenied(t *testing.T) {
 }
 
 func TestMessageExactlyOnce(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	rec := mustCreate(t, s, CreateInput{Name: "m"})
 	// Retried delivery with the same key lands exactly once.
 	for i := 0; i < 3; i++ {
@@ -180,7 +180,7 @@ func TestMessageExactlyOnce(t *testing.T) {
 }
 
 func TestMessageConcurrentDuplicateSingleAppend(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	rec := mustCreate(t, s, CreateInput{Name: "m"})
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
@@ -201,7 +201,7 @@ func TestMessageConcurrentDuplicateSingleAppend(t *testing.T) {
 }
 
 func TestMessageTerminalAndArchivedErrors(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	rec := mustCreate(t, s, CreateInput{Name: "done"})
 	if err := s.SetStatus(rec.Ref, StatusCompleted, "all good", ""); err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func TestMessageTerminalAndArchivedErrors(t *testing.T) {
 }
 
 func TestArchiveRunningRefused(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	rec := mustCreate(t, s, CreateInput{Name: "busy"})
 	if err := s.SetStatus(rec.Ref, StatusRunning, "", ""); err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestArchiveRunningRefused(t *testing.T) {
 }
 
 func TestNotFoundIncludesGuidance(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	_, err := s.Get("task_0000000000000000")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
@@ -255,7 +255,7 @@ func TestNotFoundIncludesGuidance(t *testing.T) {
 }
 
 func TestResolveRefShortRefAndName(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	rec := mustCreate(t, s, CreateInput{Name: "build-widgets"})
 	short := strings.TrimPrefix(rec.Ref, "task_")
 
@@ -274,7 +274,7 @@ func TestResolveRefShortRefAndName(t *testing.T) {
 }
 
 func TestResolveAmbiguousName(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	mustCreate(t, s, CreateInput{Name: "dup"})
 	mustCreate(t, s, CreateInput{Name: "dup"})
 	_, err := s.Resolve("dup")
@@ -287,7 +287,7 @@ func TestResolveAmbiguousName(t *testing.T) {
 }
 
 func TestZombieRunningTaskCorrected(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	// PID 1 always exists; fabricate an impossible-high pid that cannot exist.
 	deadPID := 1 << 30
 	rec, err := s.Create(CreateInput{Name: "orphan", OwnerPID: deadPID, Hostname: s.host})
@@ -368,7 +368,7 @@ func TestTwoStoreInstancesShareRegistry(t *testing.T) {
 }
 
 func TestTornTrailingLineTolerated(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	rec := mustCreate(t, s, CreateInput{Name: "torn"})
 	// Simulate a crash mid-append: half a JSON line at the end of the log.
 	f, err := os.OpenFile(s.taskPath(rec.Ref), os.O_APPEND|os.O_WRONLY, 0o600)
@@ -389,7 +389,7 @@ func TestTornTrailingLineTolerated(t *testing.T) {
 }
 
 func TestSetStatusLifecycle(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	rec := mustCreate(t, s, CreateInput{Name: "lifecycle", Kind: KindSubagent})
 	_ = s.SetStatus(rec.Ref, StatusRunning, "", "")
 	got, _ := s.Get(rec.Ref)
@@ -404,7 +404,7 @@ func TestSetStatusLifecycle(t *testing.T) {
 }
 
 func TestListFilterAndOrder(t *testing.T) {
-	s := newTestStore(t, "/proj/a")
+	s := newTestStore(t)
 	a := mustCreate(t, s, CreateInput{Name: "a"})
 	mustCreate(t, s, CreateInput{Name: "b"})
 	_ = s.SetStatus(a.Ref, StatusRunning, "", "")

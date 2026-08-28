@@ -10,10 +10,10 @@ import (
 	"github.com/cnjack/jcode/internal/tasks"
 )
 
-func newTestHub(t *testing.T, project string) *TaskHub {
+func newTestHub(t *testing.T) *TaskHub {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	store, err := tasks.NewStore(t.TempDir(), project)
+	store, err := tasks.NewStore(t.TempDir(), "/proj/tools")
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -23,7 +23,7 @@ func newTestHub(t *testing.T, project string) *TaskHub {
 // The eino tool interface is exercised via the concrete tool types below.
 
 func TestTaskCreateReadMessageTools(t *testing.T) {
-	hub := newTestHub(t, "/proj/tools")
+	hub := newTestHub(t)
 
 	create := NewTaskCreateTool(hub)
 	out, err := create.InvokableRun(context.Background(), `{"name":"audit-db","description":"check db schema"}`)
@@ -35,6 +35,9 @@ func TestTaskCreateReadMessageTools(t *testing.T) {
 	}
 	// Extract the ref from the output.
 	refStart := strings.Index(out, "task_")
+	if refStart < 0 {
+		t.Fatalf("no ref in create output: %s", out)
+	}
 	ref := out[refStart:]
 	if i := strings.IndexAny(ref, " \n"); i > 0 {
 		ref = ref[:i]
@@ -65,7 +68,7 @@ func TestTaskCreateReadMessageTools(t *testing.T) {
 }
 
 func TestTaskMessageCompletedTaskError(t *testing.T) {
-	hub := newTestHub(t, "/proj/tools")
+	hub := newTestHub(t)
 	rec, err := hub.Store.Create(tasks.CreateInput{Name: "done-task"})
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +86,7 @@ func TestTaskMessageCompletedTaskError(t *testing.T) {
 }
 
 func TestTaskListFromRegistry(t *testing.T) {
-	hub := newTestHub(t, "/proj/tools")
+	hub := newTestHub(t)
 	_, err := hub.Store.Create(tasks.CreateInput{Name: "alpha", SessionID: "sess-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +106,7 @@ func TestTaskListFromRegistry(t *testing.T) {
 }
 
 func TestTaskStopSemantics(t *testing.T) {
-	hub := newTestHub(t, "/proj/tools")
+	hub := newTestHub(t)
 	stop := NewTaskStopTool(hub)
 
 	// 1. Live task in this process: stop by ref.
@@ -159,7 +162,7 @@ func TestTaskStopSemantics(t *testing.T) {
 }
 
 func TestTaskGetPrefersRegistry(t *testing.T) {
-	hub := newTestHub(t, "/proj/tools")
+	hub := newTestHub(t)
 	rec, err := hub.Store.Create(tasks.CreateInput{Name: "cross-session", SessionID: "old-session"})
 	if err != nil {
 		t.Fatal(err)

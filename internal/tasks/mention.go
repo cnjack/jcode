@@ -64,11 +64,11 @@ func sanitize(s string) string {
 	return s
 }
 
-func truncateStr(s string, max int) string {
-	if len(s) <= max {
+func truncateStr(s string) string {
+	if len(s) <= maxTimelineBody {
 		return s
 	}
-	return s[:max] + "…[truncated]"
+	return s[:maxTimelineBody] + "…[truncated]"
 }
 
 // RenderMentionContext renders resolved task records as a clearly delimited
@@ -86,13 +86,13 @@ func RenderMentionContext(recs []*Record) string {
 		fmt.Fprintf(&b, "\n%s ref=%s status=%s kind=%s session=%s owner_host=%s\n",
 			sanitize(rec.Name), rec.Ref, rec.Status, rec.Kind, rec.SessionID, rec.Hostname)
 		if rec.Description != "" {
-			fmt.Fprintf(&b, "description: %s\n", truncateStr(sanitize(rec.Description), maxTimelineBody))
+			fmt.Fprintf(&b, "description: %s\n", truncateStr(sanitize(rec.Description)))
 		}
 		if rec.Error != "" {
-			fmt.Fprintf(&b, "error: %s\n", truncateStr(sanitize(rec.Error), maxTimelineBody))
+			fmt.Fprintf(&b, "error: %s\n", truncateStr(sanitize(rec.Error)))
 		}
 		if rec.Output != "" {
-			fmt.Fprintf(&b, "output: %s\n", truncateStr(sanitize(rec.Output), maxTimelineBody))
+			fmt.Fprintf(&b, "output: %s\n", truncateStr(sanitize(rec.Output)))
 		}
 		if len(rec.Timeline) > 0 {
 			b.WriteString("timeline (latest last):\n")
@@ -105,7 +105,7 @@ func RenderMentionContext(recs []*Record) string {
 				if role == "" {
 					role = "unknown"
 				}
-				fmt.Fprintf(&b, "  [%s] %s\n", role, truncateStr(sanitize(ev.Body), maxTimelineBody))
+				fmt.Fprintf(&b, "  [%s] %s\n", role, truncateStr(sanitize(ev.Body)))
 			}
 		}
 	}

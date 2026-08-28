@@ -764,6 +764,12 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					BatchRequestFn: twh.RequestAskUser,
 				}),
 			}
+			// Plan mode keeps the read-only task registry tools.
+			plan = append(plan,
+				tools.NewTaskListTool(webTaskHub),
+				tools.NewTaskGetTool(webTaskHub),
+				tools.NewTaskReadTool(webTaskHub),
+			)
 			// Plan mode gets the read-only browser subset (look, don't change).
 			plan = append(plan, tenv.NewBrowserPlanTools()...)
 			plan = append(plan, tenv.NewComputerPlanTools()...)

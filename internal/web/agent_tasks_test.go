@@ -141,7 +141,7 @@ func TestAgentTaskErrorsMapped(t *testing.T) {
 
 func TestAgentTaskStopLiveAndRemote(t *testing.T) {
 	s := newAgentTaskTestServer(t)
-	store, err := tasks.OpenDefault(s.Engine.pwd)
+	store, err := tasks.OpenDefault(s.pwd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestAgentTaskStopLiveAndRemote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Engine.taskHub = tools.NewTaskHub(nil, mgr, nil)
+	s.taskHub = tools.NewTaskHub(nil, mgr, nil)
 
 	rec, req := agentTaskRequest(t, http.MethodPost, "/api/agent-tasks/"+live.Ref+"/stop", nil)
 	req.SetPathValue("ref", live.Ref)

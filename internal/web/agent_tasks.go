@@ -20,7 +20,7 @@ func (s *Server) agentTasksStore() *tasks.Store {
 	if s.agentTasks != nil {
 		return s.agentTasks
 	}
-	store, err := tasks.OpenDefault(s.Engine.pwd)
+	store, err := tasks.OpenDefault(s.pwd)
 	if err != nil {
 		// Cached as nil on failure: handlers report "unavailable" instead of
 		// retrying the filesystem on every request.
@@ -70,8 +70,8 @@ func (s *Server) handleCreateAgentTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionID := ""
-	if s.Engine != nil && s.Engine.recorder != nil {
-		sessionID = s.Engine.recorder.UUID()
+	if s.recorder != nil {
+		sessionID = s.recorder.UUID()
 	}
 	rec, err := store.Create(tasks.CreateInput{
 		Name:        req.Name,
@@ -123,8 +123,8 @@ func (s *Server) handleMessageAgentTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	sessionID := "web"
-	if s.Engine != nil && s.Engine.recorder != nil {
-		sessionID = s.Engine.recorder.UUID()
+	if s.recorder != nil {
+		sessionID = s.recorder.UUID()
 	}
 	rec, err := store.Resolve(ref)
 	if err != nil {

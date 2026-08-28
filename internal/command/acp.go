@@ -704,6 +704,12 @@ func (a *acpAgent) buildAgentSession(
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
 		env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),
 	}
+	// Plan mode keeps the read-only task registry tools.
+	planTools = append(planTools,
+		tools.NewTaskListTool(acpTaskHub),
+		tools.NewTaskGetTool(acpTaskHub),
+		tools.NewTaskReadTool(acpTaskHub),
+	)
 	planTools = append(planTools, env.NewComputerPlanTools()...)
 
 	normalPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
