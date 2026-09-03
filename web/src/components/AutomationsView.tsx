@@ -450,6 +450,7 @@ function AutomationEditor({
       onClick={onClose}
     >
       <form
+        noValidate
         onClick={(e) => e.stopPropagation()}
         onSubmit={onSubmit}
         role="dialog"
