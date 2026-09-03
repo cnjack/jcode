@@ -15,6 +15,10 @@ const (
 	TriggerSchedule TriggerType = "schedule"
 	// TriggerManual never fires automatically; only via an explicit run.
 	TriggerManual TriggerType = "manual"
+	// TriggerOnce fires exactly once at a pinned wall-clock time (Trigger.At),
+	// then the scheduler auto-disarms it (Enabled=false) — the definition is
+	// kept so the run record and prompt stay reviewable/editable.
+	TriggerOnce TriggerType = "once"
 )
 
 // Cadence is the recurrence granularity for a scheduled trigger.
@@ -24,6 +28,10 @@ const (
 	CadenceHourly Cadence = "hourly"
 	CadenceDaily  Cadence = "daily"
 	CadenceWeekly Cadence = "weekly"
+	// CadenceCron fires on a 5-field cron expression (Trigger.Expr), evaluated
+	// in the host's local timezone. Covers schedules the structured cadences
+	// cannot express (weekday sets, sub-hour intervals, day-of-month pins).
+	CadenceCron Cadence = "cron"
 )
 
 // Trigger describes when an automation fires. Times are interpreted in the
@@ -34,6 +42,8 @@ type Trigger struct {
 	Hour    int         `json:"hour,omitempty"`    // 0-23, used by daily/weekly
 	Minute  int         `json:"minute,omitempty"`  // 0-59, used by all cadences
 	Weekday int         `json:"weekday,omitempty"` // 0=Sun..6=Sat, used by weekly
+	Expr    string      `json:"expr,omitempty"`    // 5-field cron expression (schedule + cron)
+	At      string      `json:"at,omitempty"`      // RFC3339 pinned time (once)
 }
 
 // Run terminal-status values (mirrored onto session.SessionMeta.TerminalStatus).

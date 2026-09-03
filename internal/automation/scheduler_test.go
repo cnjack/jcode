@@ -200,6 +200,112 @@ func TestSchedulerTick_SkipWhenInflight(t *testing.T) {
 	}
 }
 
+// A once trigger fires exactly once via the scheduler and is then
+// auto-disarmed (Enabled=false) — the definition is kept for review.
+func TestSchedulerTick_OnceFiresThenDisarms(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	// Create with a future pin, then age it to already-due (Create rejects
+	// past times by design).
+	at := time.Now().Add(-time.Minute)
+	a, _ := s.Create(Automation{Name: "one-shot", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: time.Now().Add(time.Hour).Format(time.RFC3339)}, Enabled: true})
+	if _, err := s.Update(a.ID, func(x *Automation) { x.Trigger.At = at.Format(time.RFC3339) }); err != nil {
+		t.Fatal(err)
+	}
+	r := &fakeRunner{sid: "sess1"}
+	sch := NewScheduler(s, r)
+
+	// Seed, then make it due.
+	sch.tick(context.Background())
+	_ = s.UpdateState(a.ID, func(rs *RunState) {
+		rs.NextRunAt = at.Format(time.RFC3339)
+		rs.LastFiredSlot = ""
+	})
+	sch.tick(context.Background())
+	waitFor(t, func() bool { return r.count() == 1 }, 2*time.Second)
+	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess }, 2*time.Second)
+
+	got := s.Get(a.ID)
+	if got.Enabled {
+		t.Fatal("fired once-trigger must be auto-disarmed")
+	}
+
+	// No further ticks fire it again.
+	sch.tick(context.Background())
+	time.Sleep(50 * time.Millisecond)
+	if r.count() != 1 {
+		t.Fatalf("once fired %d times, want 1", r.count())
+	}
+}
+
+// A manual "Run Now" of a once automation is a preview: it must NOT consume
+// the scheduled fire.
+func TestExecuteRun_ManualRunDoesNotDisarmOnce(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	at := time.Now().Add(time.Hour)
+	a, _ := s.Create(Automation{Name: "one-shot", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: at.Format(time.RFC3339)}, Enabled: true})
+
+	if _, err := ExecuteRun(context.Background(), s, &fakeRunner{sid: "s"}, a, KindManual); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Get(a.ID).Enabled {
+		t.Fatal("manual run must not disarm a once trigger")
+	}
+}
+
+// An expired once (pinned time already past) never fires and the scheduler
+// must not rewrite its state on every tick (the seeding branch skips without
+// writing when ComputeNextRun reports no future fire).
+func TestSchedulerTick_ExpiredOnce_NoFireNoWrites(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	// Create bypasses the past-time gate via a future time, then we age it.
+	at := time.Now().Add(time.Minute)
+	a, _ := s.Create(Automation{Name: "expired", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: at.Format(time.RFC3339)}, Enabled: true})
+	past := time.Now().Add(-time.Hour)
+	_, _ = s.Update(a.ID, func(x *Automation) { x.Trigger.At = past.Format(time.RFC3339) })
+
+	sch := NewScheduler(s, &fakeRunner{sid: "s"})
+	for i := 0; i < 3; i++ {
+		sch.tick(context.Background())
+	}
+	time.Sleep(30 * time.Millisecond)
+
+	st := s.State(a.ID)
+	if st.LastStatus != "" || st.NextRunAt != "" || st.LastFiredSlot != "" {
+		t.Fatalf("expired once must stay untouched, got state %+v", st)
+	}
+	if !s.Get(a.ID).Enabled {
+		t.Fatal("expired once must not be auto-disabled by the scheduler")
+	}
+}
+
+// The cron cadence wires through the scheduler's NextRunAt advance math.
+func TestSchedulerTick_CronFiresAndAdvances(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	a, _ := s.Create(Automation{Name: "cron", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerSchedule, Cadence: CadenceCron, Expr: "30 9 * * *"}, Enabled: true})
+	r := &fakeRunner{sid: "sess1"}
+	sch := NewScheduler(s, r)
+
+	due := time.Now().Add(-time.Minute)
+	_ = s.UpdateState(a.ID, func(rs *RunState) {
+		rs.NextRunAt = due.Format(time.RFC3339)
+		rs.LastFiredSlot = ""
+	})
+	sch.tick(context.Background())
+	waitFor(t, func() bool { return r.count() == 1 }, 2*time.Second)
+
+	next, ok := ComputeNextRun(due, a.Trigger)
+	if !ok {
+		t.Fatal("cron trigger must have a next fire")
+	}
+	if got := s.State(a.ID).NextRunAt; got != next.Format(time.RFC3339) {
+		t.Fatalf("cron NextRunAt advanced to %q, want %q", got, next.Format(time.RFC3339))
+	}
+}
+
 // reconcileStale must reset scheduled zombies unconditionally, reset only
 // clearly-stale manual zombies (older than manualRunStaleWindow), and leave a
 // fresh manual run — which may be live in another process — untouched.

@@ -33,7 +33,7 @@ import {
   DocumentDuplicateIcon,
 } from '@heroicons/react/24/outline'
 import { api } from '../lib/api'
-import { triggerKindLabel } from '../lib/automation'
+import { toDatetimeLocal, toLocalRFC3339, triggerKindLabel } from '../lib/automation'
 import type {
   Automation,
   AutomationCadence,
@@ -49,7 +49,7 @@ import type {
 type View = 'list' | 'templates'
 type StatusFilter = 'all' | 'success' | 'failed'
 type CardState = 'running' | 'error' | 'success' | 'paused'
-type FormTrigger = 'manual' | 'hourly' | 'daily' | 'weekly'
+type FormTrigger = 'manual' | 'hourly' | 'daily' | 'weekly' | 'once' | 'cron'
 
 const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
@@ -91,19 +91,37 @@ function relTimeFromNow(iso: string, t: TFunction): string {
 
 function nextRunLabel(a: AutomationItem, t: TFunction): string {
   if (a.trigger.type === 'manual') {
-    const last = a.state.last_run_at
-    if (!last) return t('automations.notRunYet')
-    const rel = relTime(last, t)
-    if (a.state.last_status === 'success') return t('automations.lastRunOk', { time: rel })
-    if (a.state.last_status === 'error') return t('automations.lastRunFailed', { time: rel })
-    return rel
+    return lastRunLabel(a, t)
   }
   const next = a.state.next_run_at
-  return next ? t('automations.nextRunIn', { time: relTimeFromNow(next, t) }) : a.human_schedule
+  if (!next || new Date(next).getTime() <= Date.now()) {
+    // An expired one-shot has no future fire — show the last-run outcome.
+    return a.trigger.type === 'once' ? lastRunLabel(a, t) : a.human_schedule
+  }
+  return t('automations.nextRunIn', { time: relTimeFromNow(next, t) })
+}
+
+function lastRunLabel(a: AutomationItem, t: TFunction): string {
+  const last = a.state.last_run_at
+  if (!last) return t('automations.notRunYet')
+  const rel = relTime(last, t)
+  if (a.state.last_status === 'success') return t('automations.lastRunOk', { time: rel })
+  if (a.state.last_status === 'error') return t('automations.lastRunFailed', { time: rel })
+  return rel
 }
 
 function runLabel(r: AutomationRun): string {
   return r.start_time ? new Date(r.start_time).toLocaleString() : ''
+}
+
+/** Whether the meta row shows "next run" (future fire) or falls back to "last run". */
+function usesNextRun(a: AutomationItem): boolean {
+  if (a.trigger.type === 'manual') return false
+  if (a.trigger.type === 'once') {
+    const next = a.state.next_run_at
+    return !!next && new Date(next).getTime() > Date.now()
+  }
+  return true
 }
 
 function modeLabel(mode: string | undefined, t: TFunction): string {
@@ -124,6 +142,9 @@ function CadenceChip({ a }: { a: AutomationItem | AutomationTemplate }) {
   if (trig.type === 'manual') {
     label = t('automations.cadence.manual')
     Icon = HandRaisedIcon
+  } else if (trig.type === 'once') {
+    label = t('automations.cadence.once')
+    Icon = ClockIcon
   } else if (trig.cadence === 'hourly') {
     label = t('automations.cadence.hourly')
     Icon = ClockIcon
@@ -132,6 +153,9 @@ function CadenceChip({ a }: { a: AutomationItem | AutomationTemplate }) {
     Icon = CalendarDaysIcon
   } else if (trig.cadence === 'weekly') {
     label = t('automations.cadence.weekly')
+    Icon = CalendarDaysIcon
+  } else if (trig.cadence === 'cron') {
+    label = t('automations.cadence.cron')
     Icon = CalendarDaysIcon
   }
   return (
@@ -215,71 +239,95 @@ interface FormValues {
   hour: number
   minute: number
   weekday: number
+  /** 5-field cron expression (trigger === 'cron'). */
+  cronExpr: string
+  /** datetime-local input value (trigger === 'once'). */
+  onceAt: string
   projectPath: string
   mode: string
   prompt: string
   enabled: boolean
 }
 
-function buildForm(editing: AutomationItem | null, prefill: Partial<AutomationCreate> | null): FormValues {
-  if (editing) {
-    return {
-      name: editing.name,
-      trigger:
-        editing.trigger.type === 'manual'
-          ? 'manual'
-          : ((editing.trigger.cadence as FormTrigger) || 'daily'),
-      hour: editing.trigger.hour ?? 9,
-      minute: editing.trigger.minute ?? 0,
-      weekday: editing.trigger.weekday ?? 1,
-      projectPath: editing.project_path,
-      mode: editing.mode || 'full_access',
-      prompt: editing.prompt,
-      enabled: editing.enabled,
-    }
+/** Fill trigger-related form fields from a trigger value (mutates + returns base). */
+function applyTrigger(trig: AutomationTrigger, base: FormValues): FormValues {
+  if (trig.type === 'manual') {
+    base.trigger = 'manual'
+  } else if (trig.type === 'once') {
+    base.trigger = 'once'
+    base.onceAt = toDatetimeLocal(trig.at)
+  } else if (trig.cadence === 'cron') {
+    base.trigger = 'cron'
+    base.cronExpr = trig.expr || ''
+  } else {
+    base.trigger = (trig.cadence as FormTrigger) || 'daily'
+    base.hour = trig.hour ?? 9
+    base.minute = trig.minute ?? 0
+    base.weekday = trig.weekday ?? 1
   }
-  const base: FormValues = {
+  return base
+}
+
+function buildForm(editing: AutomationItem | null, prefill: Partial<AutomationCreate> | null): FormValues {
+  const blank: FormValues = {
     name: '',
     trigger: 'daily',
     hour: 9,
     minute: 0,
     weekday: 1,
+    cronExpr: '',
+    onceAt: '',
     projectPath: '',
     mode: 'full_access',
     prompt: '',
     enabled: true,
   }
-  if (prefill) {
-    if (prefill.name) base.name = prefill.name
-    if (prefill.prompt) base.prompt = prefill.prompt
-    if (prefill.mode) base.mode = prefill.mode
-    if (prefill.project_path) base.projectPath = prefill.project_path
-    if (prefill.trigger) {
-      base.trigger =
-        prefill.trigger.type === 'manual'
-          ? 'manual'
-          : ((prefill.trigger.cadence as FormTrigger) || 'daily')
-      if (prefill.trigger.hour != null) base.hour = prefill.trigger.hour
-      if (prefill.trigger.minute != null) base.minute = prefill.trigger.minute
-      if (prefill.trigger.weekday != null) base.weekday = prefill.trigger.weekday
-    }
+  if (editing) {
+    return applyTrigger(editing.trigger, {
+      ...blank,
+      name: editing.name,
+      projectPath: editing.project_path,
+      mode: editing.mode || 'full_access',
+      prompt: editing.prompt,
+      enabled: editing.enabled,
+    })
   }
-  return base
+  if (prefill) {
+    if (prefill.name) blank.name = prefill.name
+    if (prefill.prompt) blank.prompt = prefill.prompt
+    if (prefill.mode) blank.mode = prefill.mode
+    if (prefill.project_path) blank.projectPath = prefill.project_path
+    if (prefill.trigger) applyTrigger(prefill.trigger, blank)
+  }
+  return blank
 }
 
 function buildPayload(form: FormValues, runNow: boolean): AutomationCreate {
-  const trigger: AutomationTrigger =
-    form.trigger === 'manual'
-      ? { type: 'manual' }
-      : {
-          type: 'schedule',
-          cadence: form.trigger as AutomationCadence,
-          hour: form.hour,
-          minute: form.minute,
-          weekday: form.weekday,
-        }
+  let trigger: AutomationTrigger
+  let mode = form.mode
+  switch (form.trigger) {
+    case 'manual':
+      trigger = { type: 'manual' }
+      break
+    case 'once': {
+      const at = form.onceAt ? new Date(form.onceAt) : null
+      trigger = { type: 'once', at: at && !Number.isNaN(at.getTime()) ? toLocalRFC3339(at) : undefined }
+      break
+    }
+    case 'cron':
+      trigger = { type: 'schedule', cadence: 'cron', expr: form.cronExpr.trim() }
+      break
+    default:
+      trigger = {
+        type: 'schedule',
+        cadence: form.trigger as AutomationCadence,
+        hour: form.hour,
+        minute: form.minute,
+        weekday: form.weekday,
+      }
+  }
   // A scheduled automation runs unattended, so it must auto-approve.
-  const mode = form.trigger === 'manual' ? form.mode : 'full_access'
+  if (form.trigger !== 'manual') mode = 'full_access'
   return {
     name: form.name.trim(),
     prompt: form.prompt.trim(),
@@ -316,6 +364,9 @@ function AutomationEditor({
   const isSchedule = form.trigger !== 'manual'
   const showHour = form.trigger === 'daily' || form.trigger === 'weekly'
   const showWeekday = form.trigger === 'weekly'
+  const showMinute = isSchedule && form.trigger !== 'once' && form.trigger !== 'cron'
+  const showOnceAt = form.trigger === 'once'
+  const showCronExpr = form.trigger === 'cron'
 
   function update<K extends keyof FormValues>(key: K, value: FormValues[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -333,6 +384,14 @@ function AutomationEditor({
     }
     if (!form.projectPath.trim()) {
       setError(t('automations.editor.errProject'))
+      return
+    }
+    if (form.trigger === 'once' && !form.onceAt) {
+      setError(t('automations.editor.errOnceAt'))
+      return
+    }
+    if (form.trigger === 'cron' && !form.cronExpr.trim()) {
+      setError(t('automations.editor.errCronExpr'))
       return
     }
     setSaving(true)
@@ -406,9 +465,38 @@ function AutomationEditor({
                 <option value="daily">{t('automations.cadence.daily')}</option>
                 <option value="weekly">{t('automations.cadence.weekly')}</option>
                 <option value="hourly">{t('automations.cadence.hourly')}</option>
+                <option value="cron">{t('automations.cadence.cron')}</option>
+                <option value="once">{t('automations.cadence.once')}</option>
                 <option value="manual">{t('automations.cadence.manual')}</option>
               </select>
             </label>
+
+            {showOnceAt && (
+              <label className="flex flex-1 min-w-0 flex-col gap-1.5">
+                <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.onceAt')}</span>
+                <input
+                  type="datetime-local"
+                  value={form.onceAt}
+                  onChange={(e) => update('onceAt', e.target.value)}
+                  className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
+                />
+              </label>
+            )}
+
+            {showCronExpr && (
+              <label className="flex flex-1 min-w-0 flex-col gap-1.5">
+                <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.cadence.cron')}</span>
+                <input
+                  value={form.cronExpr}
+                  onChange={(e) => update('cronExpr', e.target.value)}
+                  placeholder="*/15 * * * *"
+                  className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 font-mono text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
+                />
+                <span className="text-[11px] text-[var(--color-muted-foreground)]">
+                  {t('automations.editor.cronHint')}
+                </span>
+              </label>
+            )}
 
             {showWeekday && (
               <label className="flex flex-1 min-w-0 flex-col gap-1.5">
@@ -444,7 +532,7 @@ function AutomationEditor({
               </label>
             )}
 
-            {isSchedule && (
+            {showMinute && (
               <label className="flex flex-1 min-w-0 flex-col gap-1.5">
                 <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.minute')}</span>
                 <select
@@ -745,12 +833,12 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                           </span>
                           <span className="truncate text-xs text-[var(--color-foreground)]">{a.human_schedule}</span>
                           <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]">
-                            {a.trigger.type === 'manual' ? t('automations.meta.lastRun') : t('automations.meta.nextRun')}
+                            {usesNextRun(a) ? t('automations.meta.nextRun') : t('automations.meta.lastRun')}
                           </span>
                           <span
                             className={
                               'truncate text-xs ' +
-                              (a.trigger.type !== 'manual' && a.enabled
+                              (usesNextRun(a) && a.enabled
                                 ? 'font-semibold tabular-nums text-[var(--color-primary)]'
                                 : 'text-[var(--color-foreground)]')
                             }

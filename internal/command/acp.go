@@ -608,6 +608,8 @@ func (a *acpAgent) buildAgentSession(
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
 		env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),
 		env.NewAutomationCreateTool(),
+		env.NewAutomationListTool(),
+		env.NewAutomationDeleteTool(),
 		env.NewSwitchEnvTool(),
 		env.NewCheckBackgroundTool(bgManager),
 		env.NewSubagentTool(&tools.SubagentDeps{
@@ -683,6 +685,7 @@ func (a *acpAgent) buildAgentSession(
 		env.NewGrepTool(),
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
 		env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),
+		env.NewAutomationListTool(),
 	}
 	planTools = append(planTools, env.NewComputerPlanTools()...)
 

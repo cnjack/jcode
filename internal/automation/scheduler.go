@@ -134,7 +134,9 @@ func (s *Scheduler) reconcileStale() {
 func (s *Scheduler) tick(ctx context.Context) {
 	now := nowFunc()
 	for _, a := range s.store.List() {
-		if !a.Enabled || a.Trigger.Type != TriggerSchedule {
+		// Manual triggers never auto-fire; schedule and once do.
+		auto := a.Trigger.Type == TriggerSchedule || a.Trigger.Type == TriggerOnce
+		if !a.Enabled || !auto {
 			continue
 		}
 		st := s.store.State(a.ID)
@@ -142,8 +144,15 @@ func (s *Scheduler) tick(ctx context.Context) {
 		next, err := time.Parse(time.RFC3339, st.NextRunAt)
 		if st.NextRunAt == "" || err != nil {
 			// First time we see it (or unparseable): seed NextRunAt, don't fire.
+			// A trigger with no future fire (an expired once, or a corrupt
+			// never-firing expression) is skipped WITHOUT writing — writing ""
+			// here would re-persist the same state on every tick forever.
+			seed, ok := ComputeNextRun(now, a.Trigger)
+			if !ok {
+				continue
+			}
 			_ = s.store.UpdateState(a.ID, func(rs *RunState) {
-				rs.NextRunAt = nextRunString(now, a.Trigger)
+				rs.NextRunAt = seed.Format(time.RFC3339)
 			})
 			continue
 		}
@@ -233,6 +242,16 @@ func ExecuteRun(ctx context.Context, store *Store, runner Runner, a *Automation,
 	claimed, _ := store.TryMarkRunning(a.ID)
 	if !claimed {
 		return "", fmt.Errorf("a run is already in progress for automation %q", a.ID)
+	}
+
+	// A once trigger is consumed by its scheduled fire: disarm the definition
+	// as soon as the run is claimed, so a re-enable can never race a completion
+	// callback and re-fire the consumed slot. The run itself still executes and
+	// records normally. Manual runs are a preview — they never consume it.
+	if kind == KindScheduled && a.Trigger.Type == TriggerOnce {
+		if _, err := store.SetEnabled(a.ID, false); err != nil {
+			config.Logger().Printf("[automation] once disarm failed for %s: %v", a.ID, err)
+		}
 	}
 
 	sessionID, err := safeStartRun(ctx, runner, a, kind)

@@ -92,9 +92,11 @@ func NewWebCmd() *cobra.Command {
 // cannot run unattended. Automation runs (scheduled, and manual runs that may be
 // headless) drop them via dropInteractiveTools so an agent calling ask_user in a
 // run with no watching client can't block on the WS channel forever, stalling
-// the run until the liveness ceiling cancels it.
+// the run until the liveness ceiling cancels it. automation_delete is here for
+// the same human-gate reason: an unattended run must never remove the user's
+// automations (mirrors the propose-only gate on automation_create).
 var interactiveToolNames = map[string]struct{}{
-	"ask_user": {}, "generate_image": {},
+	"ask_user": {}, "generate_image": {}, "automation_delete": {},
 }
 
 // dropInteractiveTools returns tools minus any whose name is in
@@ -657,6 +659,8 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				tenv.NewTodoWriteTool(), tenv.NewTodoReadTool(),
 				tenv.NewGoalSetTool(), tenv.NewGoalGetTool(), tenv.NewGoalUpdateTool(),
 				tenv.NewAutomationCreateTool(),
+				tenv.NewAutomationListTool(),
+				tenv.NewAutomationDeleteTool(),
 				tenv.NewSwitchEnvTool(),
 				tenv.NewCheckBackgroundTool(tbg),
 				tenv.NewSubagentTool(&tools.SubagentDeps{
@@ -733,6 +737,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				tenv.NewGrepTool(),
 				tenv.NewTodoWriteTool(), tenv.NewTodoReadTool(),
 				tenv.NewGoalSetTool(), tenv.NewGoalGetTool(), tenv.NewGoalUpdateTool(),
+				tenv.NewAutomationListTool(),
 				tools.NewAskUserTool(&tools.AskUserDeps{
 					BatchRequestFn: twh.RequestAskUser,
 				}),

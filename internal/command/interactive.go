@@ -169,6 +169,8 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
 		s.env.NewGoalSetTool(), s.env.NewGoalGetTool(), s.env.NewGoalUpdateTool(),
 		s.env.NewAutomationCreateTool(),
+		s.env.NewAutomationListTool(),
+		s.env.NewAutomationDeleteTool(),
 		s.env.NewCheckBackgroundTool(s.bgManager),
 		s.env.NewSubagentTool(&tools.SubagentDeps{
 			ChatModel:    s.chatModel,
@@ -233,6 +235,7 @@ func (s *interactiveState) buildPlanTools() []tool.BaseTool {
 		s.env.NewGrepTool(),
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
 		s.env.NewGoalSetTool(), s.env.NewGoalGetTool(), s.env.NewGoalUpdateTool(),
+		s.env.NewAutomationListTool(),
 		tools.NewAskUserTool(s.askUserDeps),
 	}
 	plan = append(plan, s.env.NewBrowserPlanTools()...)

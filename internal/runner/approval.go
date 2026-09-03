@@ -241,6 +241,7 @@ var noApprovalNeeded = map[string]bool{
 	"grep":                       true,
 	"load_skill":                 true,
 	"goal_get":                   true,
+	"automation_list":            true,
 	"todowrite":                  true,
 	"todoread":                   true,
 	"ask_user":                   true,
