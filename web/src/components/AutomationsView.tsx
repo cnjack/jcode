@@ -108,7 +108,12 @@ function nextRunLabel(a: AutomationItem, t: TFunction): string {
     return lastRunLabel(a, t)
   }
   const next = a.state.next_run_at
-  return next ? t('automations.nextRunIn', { time: relTimeFromNow(next, t) }) : a.human_schedule
+  if (!next || new Date(next).getTime() <= Date.now()) {
+    // Overdue slot awaiting the next tick — a relative "in {time}" would be
+    // wrong, so fall back to the timeless schedule string.
+    return a.human_schedule
+  }
+  return t('automations.nextRunIn', { time: relTimeFromNow(next, t) })
 }
 
 function lastRunLabel(a: AutomationItem, t: TFunction): string {
@@ -402,16 +407,15 @@ function AutomationEditor({
       setError(t('automations.editor.errOnceAt'))
       return
     }
-    // New one-shots must point at a future instant (the API enforces the same
-    // gate); editing an expired one stays allowed so its record is fixable.
-    if (
-      !editing &&
-      form.trigger === 'once' &&
-      form.onceAt &&
-      new Date(form.onceAt).getTime() <= Date.now()
-    ) {
-      setError(t('automations.editor.errOnceAtPast'))
-      return
+    // New one-shots must not point before the current minute (the API's gate);
+    // editing an expired one stays allowed so its record is fixable.
+    if (!editing && form.trigger === 'once' && form.onceAt) {
+      const minuteFloor = new Date()
+      minuteFloor.setSeconds(0, 0)
+      if (new Date(form.onceAt).getTime() < minuteFloor.getTime()) {
+        setError(t('automations.editor.errOnceAtPast'))
+        return
+      }
     }
     if (form.trigger === 'cron' && !form.cronExpr.trim()) {
       setError(t('automations.editor.errCronExpr'))

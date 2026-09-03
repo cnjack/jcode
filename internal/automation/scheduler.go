@@ -147,13 +147,15 @@ func (s *Scheduler) tick(ctx context.Context) {
 		if st.NextRunAt == "" || err != nil {
 			// First sight (or state reset). A once trigger seeds LATE-DELIVERY:
 			// it fires exactly once even if its pinned time already passed
-			// (same-minute picks, scheduler downtime) — unless it was already
-			// consumed (LastFiredSlot set by its fire). Recurring triggers with
-			// no future fire (corrupt expression) are skipped WITHOUT writing —
-			// writing "" here would re-persist the same state every tick.
+			// (same-minute picks, scheduler downtime). The consumed-slot latch
+			// blocks re-seeding only while it matches the CURRENT pin —
+			// retargeting At to a new time re-arms the one-shot. Recurring
+			// triggers with no future fire (corrupt expression) are skipped
+			// WITHOUT writing — writing "" here would re-persist the same
+			// state every tick.
 			if a.Trigger.Type == TriggerOnce {
-				if st.LastFiredSlot == "" {
-					if at, perr := time.Parse(time.RFC3339, a.Trigger.At); perr == nil {
+				if at, perr := time.Parse(time.RFC3339, a.Trigger.At); perr == nil {
+					if st.LastFiredSlot != SlotKey(at) {
 						_ = s.store.UpdateState(a.ID, func(rs *RunState) {
 							rs.NextRunAt = at.Format(time.RFC3339)
 						})

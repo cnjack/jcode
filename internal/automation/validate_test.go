@@ -114,6 +114,22 @@ func TestStore_OncePastTime_CreateRejected_UpdateAllowed(t *testing.T) {
 		t.Fatal("create with past once time must be rejected")
 	}
 
+	// The minute-floor slack: a pin inside the CURRENT minute whose seconds
+	// already elapsed (datetime-local pick submitted late) is accepted — the
+	// scheduler's late-delivery seeding fires it on the next tick.
+	now := nowFunc()
+	currentMinute := now.Truncate(time.Minute)
+	if now.Sub(currentMinute) > time.Second { // only assert when meaningfully "past"
+		a, err := s.Create(Automation{Name: "floor", Prompt: "p", ProjectPath: t.TempDir(),
+			Trigger: Trigger{Type: TriggerOnce, At: currentMinute.Format(time.RFC3339)}, Enabled: true})
+		if err != nil {
+			t.Fatalf("same-minute pin must be accepted: %v", err)
+		}
+		if _, err := s.Update(a.ID, func(x *Automation) { x.Name = "renamed" }); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	future := nowFunc().Add(time.Hour).Format(time.RFC3339)
 	a, err := s.Create(Automation{Name: "future", Prompt: "p", ProjectPath: t.TempDir(),
 		Trigger: Trigger{Type: TriggerOnce, At: future}, Enabled: true})

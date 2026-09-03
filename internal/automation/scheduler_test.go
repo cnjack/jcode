@@ -282,7 +282,8 @@ func TestSchedulerTick_OnceLateDelivery(t *testing.T) {
 		t.Fatal("late-delivered once must be disarmed after firing")
 	}
 
-	// Re-enable the consumed definition: seeding must not re-arm it.
+	// Re-enable the consumed definition WITHOUT retargeting: seeding must not
+	// re-arm it (consume latch matches the pin).
 	if _, err := s.SetEnabled(a.ID, true); err != nil {
 		t.Fatal(err)
 	}
@@ -292,6 +293,30 @@ func TestSchedulerTick_OnceLateDelivery(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if r.count() != 1 {
 		t.Fatalf("consumed once fired again (%d runs), want exactly 1", r.count())
+	}
+
+	// Retargeting At to a new future time and re-enabling DOES re-arm: the
+	// consume latch is per-pin, not per-definition.
+	future := time.Now().Add(time.Hour)
+	if _, err := s.Update(a.ID, func(x *Automation) {
+		x.Trigger.At = future.Format(time.RFC3339)
+		x.Enabled = true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sch.tick(context.Background()) // seeds the new pin
+	if got := s.State(a.ID).NextRunAt; got != future.Format(time.RFC3339) {
+		t.Fatalf("retargeted once not re-seeded: %q", got)
+	}
+	// Force the seeded automation due on a fresh (unconsumed) slot, then tick
+	// → fires and re-disarms.
+	due := time.Now().Add(-time.Minute)
+	_ = s.UpdateState(a.ID, func(rs *RunState) { rs.NextRunAt = due.Format(time.RFC3339) })
+	sch.tick(context.Background())
+	waitFor(t, func() bool { return r.count() == 2 }, 2*time.Second)
+	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess }, 2*time.Second)
+	if s.Get(a.ID).Enabled {
+		t.Fatal("retargeted fire must re-disarm after running")
 	}
 }
 
