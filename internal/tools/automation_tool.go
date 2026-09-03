@@ -135,15 +135,19 @@ func triggerFromCadence(in automationCreateInput) (automation.Trigger, error) {
 	}
 }
 
-// parseFlexibleTime accepts RFC3339 or a local "YYYY-MM-DD HH:MM" (also with
-// seconds, or a "T" separator) so the model doesn't need to know the host's
-// UTC offset to say "tomorrow 9am".
+// parseFlexibleTime accepts RFC3339 (with or without nanoseconds) or a local
+// "YYYY-MM-DD HH:MM[:SS]" (with space or "T" separator) so the model doesn't
+// need to know the host's UTC offset to say "tomorrow 9am", and datetime-local
+// style values with seconds still parse.
 func parseFlexibleTime(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
 		return t, nil
 	}
-	for _, layout := range []string{"2006-01-02 15:04", "2006-01-02T15:04", "2006-01-02 15:04:05"} {
+	for _, layout := range []string{
+		"2006-01-02 15:04", "2006-01-02T15:04",
+		"2006-01-02 15:04:05", "2006-01-02T15:04:05",
+	} {
 		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
 			return t, nil
 		}
@@ -267,8 +271,9 @@ func boolText(b bool) string {
 
 func truncateText(s string, n int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(r[:n]) + "…"
 }

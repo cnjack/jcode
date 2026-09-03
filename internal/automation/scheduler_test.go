@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -254,30 +255,68 @@ func TestExecuteRun_ManualRunDoesNotDisarmOnce(t *testing.T) {
 	}
 }
 
-// An expired once (pinned time already past) never fires and the scheduler
-// must not rewrite its state on every tick (the seeding branch skips without
-// writing when ComputeNextRun reports no future fire).
-func TestSchedulerTick_ExpiredOnce_NoFireNoWrites(t *testing.T) {
+// Late delivery: a once whose pinned time passed while the scheduler wasn't
+// looking (created for the current minute, scheduler downtime) still fires —
+// exactly once — on the next tick, then is disarmed. Re-enabling the consumed
+// definition must NOT fire it again.
+func TestSchedulerTick_OnceLateDelivery(t *testing.T) {
 	s, _ := NewStoreDir(t.TempDir())
-	// Create bypasses the past-time gate via a future time, then we age it.
-	at := time.Now().Add(time.Minute)
-	a, _ := s.Create(Automation{Name: "expired", Prompt: "p", ProjectPath: t.TempDir(),
-		Trigger: Trigger{Type: TriggerOnce, At: at.Format(time.RFC3339)}, Enabled: true})
 	past := time.Now().Add(-time.Hour)
-	_, _ = s.Update(a.ID, func(x *Automation) { x.Trigger.At = past.Format(time.RFC3339) })
+	a, _ := s.Create(Automation{Name: "late", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: time.Now().Add(time.Hour).Format(time.RFC3339)}, Enabled: true})
+	// Simulate a pin that expired before any scheduler saw it.
+	if _, err := s.Update(a.ID, func(x *Automation) { x.Trigger.At = past.Format(time.RFC3339) }); err != nil {
+		t.Fatal(err)
+	}
+	r := &fakeRunner{sid: "sess1"}
+	sch := NewScheduler(s, r)
+
+	sch.tick(context.Background()) // seeds NextRunAt=At (late delivery)
+	if got := s.State(a.ID).NextRunAt; got != past.Format(time.RFC3339) {
+		t.Fatalf("late-delivery seed = %q, want pinned At", got)
+	}
+	sch.tick(context.Background())
+	waitFor(t, func() bool { return r.count() == 1 }, 2*time.Second)
+	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess }, 2*time.Second)
+	if s.Get(a.ID).Enabled {
+		t.Fatal("late-delivered once must be disarmed after firing")
+	}
+
+	// Re-enable the consumed definition: seeding must not re-arm it.
+	if _, err := s.SetEnabled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		sch.tick(context.Background())
+	}
+	time.Sleep(50 * time.Millisecond)
+	if r.count() != 1 {
+		t.Fatalf("consumed once fired again (%d runs), want exactly 1", r.count())
+	}
+}
+
+// A consumed once (LastFiredSlot set, still enabled — e.g. disarm failed) is
+// inert: the scheduler neither fires nor rewrites its state.
+func TestSchedulerTick_ConsumedOnce_NoFireNoWrites(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	hourAgo := time.Now().Add(-time.Hour)
+	a, _ := s.Create(Automation{Name: "consumed", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: time.Now().Add(time.Hour).Format(time.RFC3339)}, Enabled: true})
+	if _, err := s.Update(a.ID, func(x *Automation) {
+		x.Trigger.At = hourAgo.Format(time.RFC3339)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.UpdateState(a.ID, func(rs *RunState) { rs.LastFiredSlot = SlotKey(hourAgo) })
 
 	sch := NewScheduler(s, &fakeRunner{sid: "s"})
+	before := s.State(a.ID)
 	for i := 0; i < 3; i++ {
 		sch.tick(context.Background())
 	}
 	time.Sleep(30 * time.Millisecond)
-
-	st := s.State(a.ID)
-	if st.LastStatus != "" || st.NextRunAt != "" || st.LastFiredSlot != "" {
-		t.Fatalf("expired once must stay untouched, got state %+v", st)
-	}
-	if !s.Get(a.ID).Enabled {
-		t.Fatal("expired once must not be auto-disabled by the scheduler")
+	if s.State(a.ID) != before {
+		t.Fatalf("consumed once state changed: %+v -> %+v", before, s.State(a.ID))
 	}
 }
 
@@ -303,6 +342,94 @@ func TestSchedulerTick_CronFiresAndAdvances(t *testing.T) {
 	}
 	if got := s.State(a.ID).NextRunAt; got != next.Format(time.RFC3339) {
 		t.Fatalf("cron NextRunAt advanced to %q, want %q", got, next.Format(time.RFC3339))
+	}
+}
+
+// The scheduled claim of a due once must not consume the trigger when it is
+// refused (a manual run already claimed it): the slot stays re-fireable and a
+// later tick runs it.
+func TestExecuteRun_OnceRefusedClaimStaysFireable(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	a, _ := s.Create(Automation{Name: "raced", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: time.Now().Add(time.Hour).Format(time.RFC3339)}, Enabled: true})
+	past := time.Now().Add(-time.Minute)
+	if _, err := s.Update(a.ID, func(x *Automation) { x.Trigger.At = past.Format(time.RFC3339) }); err != nil {
+		t.Fatal(err)
+	}
+
+	// A manual run holds the claim; the scheduled fire is refused.
+	if ok, _ := s.TryMarkRunning(a.ID); !ok {
+		t.Fatal("setup claim failed")
+	}
+	if _, err := ExecuteRun(context.Background(), s, &fakeRunner{sid: "sched"}, a, KindScheduled); err == nil {
+		t.Fatal("expected refused scheduled claim")
+	}
+	// Nothing consumed: still armed, pinned time intact, slot not stamped.
+	got := s.Get(a.ID)
+	if !got.Enabled || got.Trigger.At == "" {
+		t.Fatalf("refused claim must not consume the trigger: %+v", got)
+	}
+	if st := s.State(a.ID); st.LastFiredSlot != "" {
+		t.Fatalf("refused claim stamped the slot: %+v", st)
+	}
+
+	// Once the manual run releases, the next scheduled claim fires.
+	_ = s.UpdateState(a.ID, func(rs *RunState) { rs.LastStatus = StatusSuccess })
+	if _, err := ExecuteRun(context.Background(), s, &fakeRunner{sid: "sched2"}, a, KindScheduled); err != nil {
+		t.Fatal(err)
+	}
+	if s.Get(a.ID).Enabled {
+		t.Fatal("successful scheduled fire must disarm")
+	}
+}
+
+// A due once whose project vanished is skipped, NOT consumed: the pinned time
+// stays and it retries on later ticks until the project is back or the
+// consecutive-fail auto-disable trips.
+func TestSchedulerTick_OnceMissingProjectRetries(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	missing := filepath.Join(t.TempDir(), "vanished")
+	a, _ := s.Create(Automation{Name: "gone", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: time.Now().Add(time.Hour).Format(time.RFC3339)}, Enabled: true})
+	past := time.Now().Add(-time.Minute)
+	if _, err := s.Update(a.ID, func(x *Automation) {
+		x.Trigger.At = past.Format(time.RFC3339)
+		x.ProjectPath = missing
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := &fakeRunner{}
+	sch := NewScheduler(s, r)
+
+	// Each retry cycle is two ticks (re-seed the pin, then skip it), so run
+	// enough cycles for ConsecutiveFails to reach the auto-disable threshold.
+	for i := 0; i < AutoDisableThreshold*2+1; i++ {
+		sch.tick(context.Background())
+	}
+	if r.count() != 0 {
+		t.Fatal("must never run with a missing project")
+	}
+	got := s.Get(a.ID)
+	if got.Enabled {
+		t.Fatal("repeated skips should trip the auto-disable")
+	}
+	if st := s.State(a.ID); st.LastFiredSlot != "" {
+		t.Fatalf("skips must not consume the once slot: %+v", st)
+	}
+}
+
+// A crashed scheduled once-run is a SCHEDULER zombie: reconcileStale resets it
+// unconditionally on election, not with the 2-hour manual heuristic.
+func TestReconcileStale_OnceIsScheduledClass(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	a, _ := s.Create(Automation{Name: "zombie once", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: time.Now().Add(time.Hour).Format(time.RFC3339)}, Enabled: true})
+	_ = s.UpdateState(a.ID, func(rs *RunState) { rs.LastStatus = StatusRunning })
+
+	NewScheduler(s, &fakeRunner{}).reconcileStale()
+
+	if got := s.State(a.ID).LastStatus; got != StatusInterrupted {
+		t.Fatalf("crashed once-run not reset: %s", got)
 	}
 }
 

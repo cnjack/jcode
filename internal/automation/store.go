@@ -220,8 +220,9 @@ func (s *Store) Create(a Automation) (*Automation, error) {
 	}
 	// Once triggers must still be reachable: reject a pinned time that is
 	// already before the current wall-clock minute at CREATE time only. The
-	// minute floor gives form submissions slack (a "now"-ish pick a few
-	// seconds in the past still fires on the next tick); Update deliberately
+	// minute floor gives form submissions slack — anything the floor accepts
+	// fires on the next tick via the scheduler's late-delivery seeding, so a
+	// "now"-ish pick a few seconds in the past still runs. Update deliberately
 	// skips this check so an expired once-automation stays editable.
 	if a.Trigger.Type == TriggerOnce {
 		at, err := time.Parse(time.RFC3339, a.Trigger.At)

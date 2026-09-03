@@ -93,12 +93,22 @@ function nextRunLabel(a: AutomationItem, t: TFunction): string {
   if (a.trigger.type === 'manual') {
     return lastRunLabel(a, t)
   }
-  const next = a.state.next_run_at
-  if (!next || new Date(next).getTime() <= Date.now()) {
-    // An expired one-shot has no future fire — show the last-run outcome.
-    return a.trigger.type === 'once' ? lastRunLabel(a, t) : a.human_schedule
+  if (a.trigger.type === 'once') {
+    // Prefer the scheduler's seeded slot; fall back to the pinned time while
+    // it is still future (unseeded first 30s, or due-but-not-yet-fired), and
+    // only show the last-run outcome once the pin itself is past.
+    const next = a.state.next_run_at
+    if (next && new Date(next).getTime() > Date.now()) {
+      return t('automations.nextRunIn', { time: relTimeFromNow(next, t) })
+    }
+    const at = a.trigger.at
+    if (a.enabled && at && new Date(at).getTime() > Date.now()) {
+      return t('automations.nextRunIn', { time: relTimeFromNow(at, t) })
+    }
+    return lastRunLabel(a, t)
   }
-  return t('automations.nextRunIn', { time: relTimeFromNow(next, t) })
+  const next = a.state.next_run_at
+  return next ? t('automations.nextRunIn', { time: relTimeFromNow(next, t) }) : a.human_schedule
 }
 
 function lastRunLabel(a: AutomationItem, t: TFunction): string {
@@ -119,7 +129,9 @@ function usesNextRun(a: AutomationItem): boolean {
   if (a.trigger.type === 'manual') return false
   if (a.trigger.type === 'once') {
     const next = a.state.next_run_at
-    return !!next && new Date(next).getTime() > Date.now()
+    if (next && new Date(next).getTime() > Date.now()) return true
+    const at = a.trigger.at
+    return a.enabled && !!at && new Date(at).getTime() > Date.now()
   }
   return true
 }
@@ -390,6 +402,17 @@ function AutomationEditor({
       setError(t('automations.editor.errOnceAt'))
       return
     }
+    // New one-shots must point at a future instant (the API enforces the same
+    // gate); editing an expired one stays allowed so its record is fixable.
+    if (
+      !editing &&
+      form.trigger === 'once' &&
+      form.onceAt &&
+      new Date(form.onceAt).getTime() <= Date.now()
+    ) {
+      setError(t('automations.editor.errOnceAtPast'))
+      return
+    }
     if (form.trigger === 'cron' && !form.cronExpr.trim()) {
       setError(t('automations.editor.errCronExpr'))
       return
@@ -476,6 +499,7 @@ function AutomationEditor({
                 <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.onceAt')}</span>
                 <input
                   type="datetime-local"
+                  min={toDatetimeLocal(new Date().toISOString())}
                   value={form.onceAt}
                   onChange={(e) => update('onceAt', e.target.value)}
                   className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"

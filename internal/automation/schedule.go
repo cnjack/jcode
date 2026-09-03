@@ -87,7 +87,9 @@ func HumanSchedule(t Trigger) string {
 		return "Manual"
 	case TriggerOnce:
 		if at, err := time.Parse(time.RFC3339, t.At); err == nil {
-			return fmt.Sprintf("Once at %s", at.Format("2006-01-02 15:04"))
+			// Render in the host's local timezone — agents may pass UTC and
+			// everything else on this surface is documented as local time.
+			return fmt.Sprintf("Once at %s", at.In(time.Local).Format("2006-01-02 15:04"))
 		}
 		return "Once"
 	}

@@ -162,6 +162,7 @@ export default {
       errPrompt: 'Prompt is required.',
       errProject: 'A project is required (no-project automations cannot run unattended).',
       errOnceAt: 'A fire time is required for a one-shot automation.',
+      errOnceAtPast: 'The fire time must be in the future.',
       errCronExpr: 'A cron expression is required.',
       onceAt: 'Date & time',
       cronHint: '5 fields: minute hour day-of-month month day-of-week, in local time. E.g. "*/15 * * * *" every 15 minutes, "0 9 * * 1-5" weekdays at 9am.',

@@ -175,6 +175,37 @@ func TestAutomationDeleteTool(t *testing.T) {
 	}
 }
 
+func TestParseFlexibleTime(t *testing.T) {
+	ref := time.Date(2026, 9, 4, 15, 4, 5, 0, time.Local)
+	cases := []struct {
+		in    string
+		want  time.Time
+		exact bool // exact match (local-zone forms); otherwise same wall clock
+	}{
+		{in: "2026-09-04T15:04:05+08:00", want: ref, exact: false}, // offset form: instant equality via parse
+		{in: "2026-09-04 15:04", want: time.Date(2026, 9, 4, 15, 4, 0, 0, time.Local), exact: true},
+		{in: "2026-09-04T15:04", want: time.Date(2026, 9, 4, 15, 4, 0, 0, time.Local), exact: true},
+		{in: "2026-09-04 15:04:05", want: ref, exact: true},
+		{in: "2026-09-04T15:04:05", want: ref, exact: true},
+		{in: "2026-09-04T15:04:05.123456+00:00", want: ref.Add(-0), exact: false},
+	}
+	for _, c := range cases {
+		got, err := parseFlexibleTime(c.in)
+		if err != nil {
+			t.Errorf("parseFlexibleTime(%q): %v", c.in, err)
+			continue
+		}
+		if c.exact && !got.Equal(c.want) {
+			t.Errorf("parseFlexibleTime(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	for _, bad := range []string{"", "tomorrow", "2026-13-01 10:00", "15:04"} {
+		if _, err := parseFlexibleTime(bad); err == nil {
+			t.Errorf("parseFlexibleTime(%q): expected error", bad)
+		}
+	}
+}
+
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)

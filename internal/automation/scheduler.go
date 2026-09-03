@@ -114,12 +114,14 @@ func (s *Scheduler) reconcileStale() {
 		if st.LastStatus != StatusRunning {
 			continue
 		}
-		if a.Trigger.Type != TriggerSchedule {
-			// Manual (or non-scheduled) run: a live one in another process has a
-			// recent, valid LastRunAt (ExecuteRun stamps it atomically when it
-			// claims the run). Leave those alone; reset only runs older than the
-			// window — and also an empty/garbled LastRunAt, which can't be a live
-			// run and would otherwise stay stuck at "running" forever.
+		// Scheduled runs — schedule AND once, both auto-fired — are reset
+		// unconditionally: winning the election lock proves the prior
+		// SCHEDULER owner is gone. Manual runs need a time heuristic instead —
+		// one may be executing right now in a DIFFERENT process (manual runs
+		// bypass the election), so resetting a fresh one would briefly show a
+		// bogus "interrupted" for a live cross-process run; only runs older
+		// than manualRunStaleWindow are treated as zombies.
+		if a.Trigger.Type != TriggerSchedule && a.Trigger.Type != TriggerOnce {
 			if t, err := time.Parse(time.RFC3339, st.LastRunAt); err == nil && now.Sub(t) < manualRunStaleWindow {
 				continue
 			}
@@ -143,10 +145,22 @@ func (s *Scheduler) tick(ctx context.Context) {
 
 		next, err := time.Parse(time.RFC3339, st.NextRunAt)
 		if st.NextRunAt == "" || err != nil {
-			// First time we see it (or unparseable): seed NextRunAt, don't fire.
-			// A trigger with no future fire (an expired once, or a corrupt
-			// never-firing expression) is skipped WITHOUT writing — writing ""
-			// here would re-persist the same state on every tick forever.
+			// First sight (or state reset). A once trigger seeds LATE-DELIVERY:
+			// it fires exactly once even if its pinned time already passed
+			// (same-minute picks, scheduler downtime) — unless it was already
+			// consumed (LastFiredSlot set by its fire). Recurring triggers with
+			// no future fire (corrupt expression) are skipped WITHOUT writing —
+			// writing "" here would re-persist the same state every tick.
+			if a.Trigger.Type == TriggerOnce {
+				if st.LastFiredSlot == "" {
+					if at, perr := time.Parse(time.RFC3339, a.Trigger.At); perr == nil {
+						_ = s.store.UpdateState(a.ID, func(rs *RunState) {
+							rs.NextRunAt = at.Format(time.RFC3339)
+						})
+					}
+				}
+				continue
+			}
 			seed, ok := ComputeNextRun(now, a.Trigger)
 			if !ok {
 				continue
@@ -198,10 +212,17 @@ func (s *Scheduler) fire(ctx context.Context, a *Automation, slot string, now ti
 	s.inflight[a.ID] = true
 	s.mu.Unlock()
 
-	_ = s.store.UpdateState(a.ID, func(rs *RunState) {
-		rs.LastFiredSlot = slot
-		rs.NextRunAt = nextRunString(now, a.Trigger)
-	})
+	// A once trigger's slot is only consumed AFTER the run is claimed (inside
+	// ExecuteRun). Writing it here would let a racing manual "Run Now" claim
+	// swallow the one-shot's only fire: the scheduled claim is refused but the
+	// slot and NextRunAt are already gone. Recurring triggers advance eagerly —
+	// their next occurrence exists regardless of who runs this one.
+	if a.Trigger.Type != TriggerOnce {
+		_ = s.store.UpdateState(a.ID, func(rs *RunState) {
+			rs.LastFiredSlot = slot
+			rs.NextRunAt = nextRunString(now, a.Trigger)
+		})
+	}
 
 	go func() {
 		defer func() {
@@ -245,13 +266,25 @@ func ExecuteRun(ctx context.Context, store *Store, runner Runner, a *Automation,
 	}
 
 	// A once trigger is consumed by its scheduled fire: disarm the definition
-	// as soon as the run is claimed, so a re-enable can never race a completion
-	// callback and re-fire the consumed slot. The run itself still executes and
-	// records normally. Manual runs are a preview — they never consume it.
+	// and stamp its consumed slot only AFTER the run is claimed, so a refused
+	// claim (a racing manual run) leaves the one-shot armed and re-fireable.
+	// The run itself still executes and records normally. Manual runs are a
+	// preview — they never consume it.
 	if kind == KindScheduled && a.Trigger.Type == TriggerOnce {
-		if _, err := store.SetEnabled(a.ID, false); err != nil {
-			config.Logger().Printf("[automation] once disarm failed for %s: %v", a.ID, err)
+		consumedSlot := SlotKey(nowFunc())
+		if at, perr := time.Parse(time.RFC3339, a.Trigger.At); perr == nil {
+			consumedSlot = SlotKey(at)
 		}
+		if _, derr := store.SetEnabled(a.ID, false); derr != nil {
+			config.Logger().Printf("[automation] once disarm failed for %s: %v", a.ID, derr)
+			_ = store.UpdateState(a.ID, func(rs *RunState) {
+				rs.LastError = truncate("auto-disarm failed: "+derr.Error(), 300)
+			})
+		}
+		_ = store.UpdateState(a.ID, func(rs *RunState) {
+			rs.LastFiredSlot = consumedSlot
+			rs.NextRunAt = ""
+		})
 	}
 
 	sessionID, err := safeStartRun(ctx, runner, a, kind)

@@ -24,7 +24,8 @@ func (t catalogTestTool) Info(context.Context) (*schema.ToolInfo, error) {
 var allCommandBuiltinNames = []string{
 	"write", "read", "grep", "edit", "execute", "check_background",
 	"todowrite", "todoread", "ask_user", "load_skill", "subagent",
-	"goal_set", "goal_get", "goal_update", "automation_create", "workflow_run",
+	"goal_set", "goal_get", "goal_update", "automation_create", "automation_list",
+	"automation_delete", "workflow_run",
 	"switch_env", "memory_note", "team_create", "team_spawn", "team_send_message",
 	"team_list", "team_delete", "browser_open", "browser_snapshot",
 	"browser_screenshot", "browser_act", "browser_read", "browser_tabs", "browser_eval",
@@ -45,13 +46,15 @@ func TestBuildCommandToolPlanMatrix(t *testing.T) {
 	}
 	webPlanDirect := []string{"ask_user", "execute", "grep", "read", "show_artifact", "todoread", "todowrite"}
 	normalDeferred := []string{
-		"automation_create", "browser_act", "browser_eval", "browser_open", "browser_read",
+		"automation_create", "automation_delete", "automation_list",
+		"browser_act", "browser_eval", "browser_open", "browser_read",
 		"browser_screenshot", "browser_snapshot", "browser_tabs", "computer_act", "computer_apps",
 		"computer_open", "computer_read", "computer_screenshot", "computer_snapshot",
 		"goal_get", "goal_set", "goal_update", "memory_note", "switch_env", "team_create",
 		"team_delete", "team_list", "team_send_message", "team_spawn", "workflow_run",
 	}
 	planDeferred := []string{
+		"automation_list",
 		"browser_open", "browser_read", "browser_screenshot", "browser_snapshot", "browser_tabs",
 		"computer_apps", "computer_open", "computer_screenshot", "computer_snapshot",
 		"goal_get", "goal_update",

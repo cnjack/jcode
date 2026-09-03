@@ -153,6 +153,7 @@ export default {
       errPrompt: '提示詞為必填項。',
       errProject: '專案為必填項（無專案的自動化無法無人值守執行）。',
       errOnceAt: '單次自動化必須指定觸發時間。',
+      errOnceAtPast: '觸發時間必須是未來時間。',
       errCronExpr: '必須填寫 cron 運算式。',
       onceAt: '日期與時間',
       cronHint: '5 個欄位：分鐘 小時 日 月 星期，依本地時間。例如 "*/15 * * * *" 每 15 分鐘，"0 9 * * 1-5" 工作日每天 9 點。',

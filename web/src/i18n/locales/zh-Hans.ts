@@ -149,6 +149,7 @@ export default {
       errPrompt: '提示词为必填项。',
       errProject: '项目为必填项（无项目的自动化无法无人值守运行）。',
       errOnceAt: '单次自动化必须指定触发时间。',
+      errOnceAtPast: '触发时间必须是未来时间。',
       errCronExpr: '必须填写 cron 表达式。',
       onceAt: '日期与时间',
       cronHint: '5 个字段：分钟 小时 日 月 星期，按本地时间。例如 "*/15 * * * *" 每 15 分钟，"0 9 * * 1-5" 工作日每天 9 点。',

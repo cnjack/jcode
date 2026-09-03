@@ -158,15 +158,16 @@ func TestNextCronFire_Timezone(t *testing.T) {
 func TestNextCronFire_DST_Transitions(t *testing.T) {
 	loc := mustLoad(t, "America/New_York")
 
-	// Spring forward 2026-03-08: 02:30 does not exist. time.Date normalizes
-	// it to a real instant later that morning; it must still be same-day and future.
+	// Spring forward 2026-03-08: 02:30 does not exist. Go's time.Date
+	// interprets the missing wall clock in the POST-transition offset
+	// (02:30 EDT = 06:30 UTC), yielding a real same-day instant. Pin it.
 	after := time.Date(2026, 3, 8, 0, 0, 0, 0, loc)
 	got, ok := NextCronFire(after, mustParseCron(t, "30 2 * * *"))
 	if !ok {
 		t.Fatal("spring-forward: expected ok")
 	}
-	if !got.After(after) || got.Day() != 8 {
-		t.Fatalf("spring-forward: got %v", got)
+	if want := time.Date(2026, 3, 8, 6, 30, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("spring-forward: got %v want normalized %v", got, want)
 	}
 
 	// Fall back 2026-11-01: 01:30 occurs twice; time.Date picks the first.
@@ -216,12 +217,14 @@ func TestComputeNextRun_CronCadence(t *testing.T) {
 }
 
 func TestHumanScheduleAndBadge_OnceAndCron(t *testing.T) {
+	localAt := time.Date(2026, 9, 4, 15, 0, 0, 0, time.Local).Format(time.RFC3339)
 	cases := []struct {
 		tr    Trigger
 		human string
 		badge string
 	}{
-		{Trigger{Type: TriggerOnce, At: "2026-09-04T15:00:00Z"}, "Once at 2026-09-04 15:00", "Once"},
+		// At renders in the host's local timezone regardless of stored offset.
+		{Trigger{Type: TriggerOnce, At: localAt}, "Once at 2026-09-04 15:00", "Once"},
 		{Trigger{Type: TriggerOnce}, "Once", "Once"},
 		{Trigger{Type: TriggerSchedule, Cadence: CadenceCron, Expr: "*/15 * * * *"}, `Cron "*/15 * * * *"`, "Cron"},
 	}

@@ -45,6 +45,8 @@ var commandToolPolicies = map[string]commandToolPolicy{
 	"goal_update": deferredPolicy("session.goal", allModes, "session"),
 
 	"automation_create": deferredPolicy("automation", normalMode, "write"),
+	"automation_list":   deferredPolicy("automation", allModes, "read"),
+	"automation_delete": deferredPolicy("automation", normalMode, "write"),
 	"workflow_run":      deferredPolicy("delegation.workflow", normalMode, "orchestration"),
 	"switch_env":        deferredPolicy("environment", normalMode, "environment"),
 	"memory_note":       deferredPolicy("memory", normalMode, "write"),
