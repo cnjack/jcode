@@ -48,6 +48,7 @@ import (
 	"github.com/cnjack/jcode/internal/usage"
 	util "github.com/cnjack/jcode/internal/util"
 	"github.com/cnjack/jcode/internal/web"
+	managedworkspace "github.com/cnjack/jcode/internal/workspace"
 )
 
 // estimateToolTokens approximates a tool's contribution to the context window
@@ -92,11 +93,12 @@ func NewWebCmd() *cobra.Command {
 // cannot run unattended. Automation runs (scheduled, and manual runs that may be
 // headless) drop them via dropInteractiveTools so an agent calling ask_user in a
 // run with no watching client can't block on the WS channel forever, stalling
-// the run until the liveness ceiling cancels it. automation_delete is here for
-// the same human-gate reason: an unattended run must never remove the user's
-// automations (mirrors the propose-only gate on automation_create).
+// the run until the liveness ceiling cancels it. automation_create/delete and
+// switch_env are also excluded: an unattended run must never recursively create
+// enabled automations, remove existing ones, or wait forever on the
+// always-interactive environment switch.
 var interactiveToolNames = map[string]struct{}{
-	"ask_user": {}, "generate_image": {}, "automation_delete": {},
+	"ask_user": {}, "generate_image": {}, "automation_create": {}, "automation_delete": {}, "switch_env": {},
 }
 
 // dropInteractiveTools returns tools minus any whose name is in
@@ -503,6 +505,9 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		if taskID != "" && trec != nil {
 			trec.SetUUID(taskID)
 		}
+		if trec != nil {
+			tenv.SessionIDFn = trec.UUID
+		}
 		imageLedger, imageLedgerErr := newImageUsageLedger(trec)
 		if imageLedgerErr != nil {
 			config.Logger().Printf("[image] initialize web usage ledger: %v", imageLedgerErr)
@@ -596,12 +601,13 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		currentTaskMCPTools := func(
 			agentCfg *config.Config,
 			planMode bool,
+			headless bool,
 		) ([]tool.BaseTool, error) {
 			activeProvider, activeModel := agentCfg.GetProviderModel()
 			return configuredProviderMCPTools(
 				ctx, agentCfg, trec, providerSearchLedger, mcpToolsPtr.Load(),
 				planMode, webTaskBillableAllowed(
-					session.SessionToolWebSearch, exec != nil, excludeInteractive,
+					session.SessionToolWebSearch, exec != nil, excludeInteractive || headless,
 				),
 				activeChatProviderRuntimeConfigLoader(
 					providerRuntimeLoader, activeProvider, activeModel,
@@ -627,6 +633,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			cm model.ToolCallingChatModel,
 			agentCfg *config.Config,
 			planMode bool,
+			headless bool,
 		) []tool.BaseTool {
 			// One factory serves subagent + workflow model overrides (incl.
 			// the "small" alias); fallback is this task's current model.
@@ -719,12 +726,12 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					Recorder:     trec,
 					Service:      artifactService,
 					Emit:         twh.Emit,
-					ForceNoFocus: excludeInteractive,
+					ForceNoFocus: excludeInteractive || headless,
 				}))
 			}
 			// Automation runs are unattended — drop interactive tools that would
 			// otherwise block on a human who isn't there (see dropInteractiveTools).
-			if excludeInteractive {
+			if excludeInteractive || headless {
 				all = dropInteractiveTools(all)
 			}
 			return all
@@ -772,6 +779,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			cm model.ToolCallingChatModel,
 			ctxLimit int,
 			planMode bool,
+			headless bool,
 			roleName string,
 			activeProvider string,
 			activeModel string,
@@ -861,13 +869,19 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				prompt = planPrompt
 				toolList = buildPlanTools()
 			} else {
-				toolList = buildAllTools(cm, agentCfg, false)
+				toolList = buildAllTools(cm, agentCfg, false, headless)
 			}
 			prompt = withCustomAgentPrompt(prompt, roleName, selectedRole)
+			approvalFn := tappr.RequestApproval
+			if headless {
+				headlessApproval := runner.NewApprovalStateWithMode(taskPwd, mode.FullAccess)
+				headlessApproval.SetHandler(tnotify)
+				approvalFn = headlessApproval.RequestApproval
+			}
 
 			// Snapshot MCP exactly once so the candidate catalog and runtime plan
 			// cannot observe different reload generations while an agent is built.
-			currentMCPTools, mcpErr := currentTaskMCPTools(agentCfg, planMode)
+			currentMCPTools, mcpErr := currentTaskMCPTools(agentCfg, planMode, headless)
 			if mcpErr != nil {
 				config.Logger().Printf("[provider-search] web task %s MCP catalog filtered: %v", trec.UUID(), mcpErr)
 			}
@@ -879,7 +893,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				if allowMCP {
 					toolList = append(toolList, currentMCPTools...)
 				}
-				return agent.NewAgent(ctx, cm, toolList, prompt, tappr.RequestApproval, middlewares, handlers)
+				return agent.NewAgent(ctx, cm, toolList, prompt, approvalFn, middlewares, handlers)
 			}
 
 			toolMode := agent.ToolModeNormal
@@ -901,7 +915,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				cm,
 				toolPlan,
 				prompt,
-				tappr.RequestApproval,
+				approvalFn,
 				middlewares,
 				handlers,
 			)
@@ -939,7 +953,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				config.ApplyEnvOverlay(agentCfg)
 			}
 			projectActiveChatModel(agentCfg, activeProvider, activeModel)
-			toolList := buildAllTools(cm, agentCfg, planMode)
+			toolList := buildAllTools(cm, agentCfg, planMode, false)
 			toolMode := agent.ToolModeNormal
 			if planMode {
 				toolList = buildPlanTools()
@@ -947,7 +961,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			} else if _, ok := config.LoadAgentRoles(taskPwd)[roleName]; roleName != "" && !ok {
 				return web.ToolSearchCounts{}
 			}
-			currentMCPTools, mcpErr := currentTaskMCPTools(agentCfg, planMode)
+			currentMCPTools, mcpErr := currentTaskMCPTools(agentCfg, planMode, false)
 			if mcpErr != nil {
 				return web.ToolSearchCounts{}
 			}
@@ -972,7 +986,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			cmMu.Lock()
 			plan, roleName := currentPlanMode, currentRole
 			cmMu.Unlock()
-			ag, err := makeAgent(cm, ctxLimit, plan, roleName, prov, mod)
+			ag, err := makeAgent(cm, ctxLimit, plan, false, roleName, prov, mod)
 			if err != nil {
 				return nil, err // don't poison the cache with a model whose agent failed to build
 			}
@@ -1001,13 +1015,28 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				}
 				return ag, createErr
 			}
-			ag, makeErr := makeAgent(cm, ctxLimit, planMode, roleName, activeProvider, activeModel)
+			ag, makeErr := makeAgent(cm, ctxLimit, planMode, false, roleName, activeProvider, activeModel)
 			if makeErr != nil {
 				cmMu.Lock()
 				currentPlanMode = previousPlanMode
 				cmMu.Unlock()
 			}
 			return ag, makeErr
+		}
+
+		rebuildForAutomation := func() (*adk.ChatModelAgent, error) {
+			cmMu.Lock()
+			cm, ctxLimit, roleName := currentCM, currentCtxLimit, currentRole
+			activeProvider, activeModel := currentProvider, currentModel
+			cmMu.Unlock()
+			if cm == nil {
+				var modelErr error
+				cm, ctxLimit, modelErr = newChatModel(activeProvider, activeModel)
+				if modelErr != nil {
+					return nil, modelErr
+				}
+			}
+			return makeAgent(cm, ctxLimit, false, true, roleName, activeProvider, activeModel)
 		}
 
 		rebuildForRole := func(
@@ -1029,7 +1058,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					return nil, modelErr
 				}
 			}
-			ag, makeErr := makeAgent(cm, ctxLimit, planMode, roleName, targetProvider, targetModel)
+			ag, makeErr := makeAgent(cm, ctxLimit, planMode, false, roleName, targetProvider, targetModel)
 			if makeErr != nil {
 				return nil, makeErr
 			}
@@ -1070,7 +1099,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				}
 				projectActiveChatModel(currentCfg, activeProvider, activeModel)
 			}
-			currentMCPTools, _ := currentTaskMCPTools(currentCfg, planMode)
+			currentMCPTools, _ := currentTaskMCPTools(currentCfg, planMode, false)
 			for _, t := range currentMCPTools {
 				b.MCPToolsTokens += estimateToolTokens(ctx, t)
 			}
@@ -1079,7 +1108,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					return b
 				}
 				total := 0
-				toolList := buildAllTools(cm, currentCfg, planMode)
+				toolList := buildAllTools(cm, currentCfg, planMode, false)
 				if planMode {
 					toolList = buildPlanTools()
 				}
@@ -1110,26 +1139,27 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		}
 
 		return &web.EngineConfig{
-			TaskID:          taskID,
-			Pwd:             taskPwd,
-			WorkspaceKind:   session.NormalizeWorkspaceKind(workspaceKind),
-			Mode:            startMode.String(),
-			ProviderName:    providerName,
-			ModelName:       modelName,
-			Agent:           ag,
-			Env:             tenv,
-			TodoStore:       tenv.TodoStore,
-			Recorder:        trec,
-			TokenUsage:      ttok,
-			ApprovalState:   tappr,
-			Handler:         twh,
-			EventHandler:    tnotify,
-			BreakdownFn:     breakdownFn,
-			ToolSearchStats: toolSearchStats,
-			CreateAgent:     createAgent,
-			RebuildForMode:  rebuildForMode,
-			RebuildForRole:  rebuildForRole,
-			FlowLoader:      taskFlowLoader,
+			TaskID:               taskID,
+			Pwd:                  taskPwd,
+			WorkspaceKind:        session.NormalizeWorkspaceKind(workspaceKind),
+			Mode:                 startMode.String(),
+			ProviderName:         providerName,
+			ModelName:            modelName,
+			Agent:                ag,
+			Env:                  tenv,
+			TodoStore:            tenv.TodoStore,
+			Recorder:             trec,
+			TokenUsage:           ttok,
+			ApprovalState:        tappr,
+			Handler:              twh,
+			EventHandler:         tnotify,
+			BreakdownFn:          breakdownFn,
+			ToolSearchStats:      toolSearchStats,
+			CreateAgent:          createAgent,
+			RebuildForMode:       rebuildForMode,
+			RebuildForAutomation: rebuildForAutomation,
+			RebuildForRole:       rebuildForRole,
+			FlowLoader:           taskFlowLoader,
 			// Recorders the engine creates later (lazy create / session switch
 			// in chat.go) get the same title hook as trec above.
 			RecorderInit: func(r *session.Recorder) {
@@ -1197,6 +1227,13 @@ type webServerRuntime struct {
 	buildTask       webTaskBuilder
 }
 
+func automationWorkspaceKind(path string) session.WorkspaceKind {
+	if managedworkspace.ValidateScratchPath(path) == nil {
+		return session.WorkspaceScratch
+	}
+	return session.WorkspaceProject
+}
+
 // startWebServer owns the transport lifecycle after runWebServer has assembled
 // the process-wide dependencies and per-task engine factory.
 func startWebServer(runtime webServerRuntime) error {
@@ -1220,15 +1257,16 @@ func startWebServer(runtime webServerRuntime) error {
 	bootNotifying, _ := bootEC.EventHandler.(*handler.NotifyingHandler)
 
 	srv := web.NewServer(&web.ServerConfig{
-		Port:           runtime.port,
-		Host:           runtime.host,
-		OpenBrowser:    runtime.openBrowser,
-		Pwd:            runtime.pwd,
-		Version:        Version,
-		Agent:          bootEC.Agent,
-		CreateAgent:    bootEC.CreateAgent,
-		RebuildForMode: bootEC.RebuildForMode,
-		RebuildForRole: bootEC.RebuildForRole,
+		Port:                 runtime.port,
+		Host:                 runtime.host,
+		OpenBrowser:          runtime.openBrowser,
+		Pwd:                  runtime.pwd,
+		Version:              Version,
+		Agent:                bootEC.Agent,
+		CreateAgent:          bootEC.CreateAgent,
+		RebuildForMode:       bootEC.RebuildForMode,
+		RebuildForAutomation: bootEC.RebuildForAutomation,
+		RebuildForRole:       bootEC.RebuildForRole,
 		NewEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
 			return runtime.buildTask(taskID, taskPwd, modeStr, nil, false, session.WorkspaceProject)
 		},
@@ -1241,7 +1279,7 @@ func startWebServer(runtime webServerRuntime) error {
 			return runtime.buildTask(taskID, remotePwd, modeStr, exec, false, session.WorkspaceProject)
 		},
 		NewAutomationEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
-			return runtime.buildTask(taskID, taskPwd, modeStr, nil, true, session.WorkspaceProject)
+			return runtime.buildTask(taskID, taskPwd, modeStr, nil, true, automationWorkspaceKind(taskPwd))
 		},
 		WorkspaceKind:      session.WorkspaceProject,
 		InitialMode:        runtime.startupMode,

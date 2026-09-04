@@ -7,15 +7,32 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/cnjack/jcode/internal/session"
+	managedworkspace "github.com/cnjack/jcode/internal/workspace"
 )
 
 // stubTool is a minimal tool.BaseTool (Info only) for testing tool-set filtering
 // without standing up a real Env / model.
 type stubTool struct {
 	name string
+}
+
+func TestAutomationWorkspaceKindPreservesNoProjectRuns(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	scratch, err := managedworkspace.CreateScratch(time.Date(2026, 9, 4, 0, 0, 0, 0, time.Local))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := automationWorkspaceKind(scratch); got != session.WorkspaceScratch {
+		t.Fatalf("scratch automation kind=%q, want scratch", got)
+	}
+	if got := automationWorkspaceKind(t.TempDir()); got != session.WorkspaceProject {
+		t.Fatalf("project automation kind=%q, want project", got)
+	}
 }
 
 func TestShowArtifactCandidateIsRegisteredOnlyByWebTransport(t *testing.T) {
@@ -87,15 +104,16 @@ func TestDropInteractiveToolsKeepsAllWhenNoInteractive(t *testing.T) {
 	}
 }
 
-// automation_delete must be dropped from unattended runs alongside ask_user:
-// an unattended automation can propose automations (always disabled) but must
-// never be able to delete the user's automations. automation_list is read-only
-// and stays.
-func TestDropInteractiveTools_RemovesAutomationDelete(t *testing.T) {
+// automation_create/delete must be dropped from unattended runs alongside
+// ask_user: an unattended automation must never recursively create enabled
+// automations or delete existing ones. automation_list is read-only and stays.
+func TestDropInteractiveTools_RemovesAutomationMutations(t *testing.T) {
 	all := []tool.BaseTool{
 		stubTool{name: "read"},
 		stubTool{name: "ask_user"},
+		stubTool{name: "automation_create"},
 		stubTool{name: "automation_delete"},
+		stubTool{name: "switch_env"},
 		stubTool{name: "automation_list"},
 	}
 	got := dropInteractiveTools(all)
@@ -107,7 +125,7 @@ func TestDropInteractiveTools_RemovesAutomationDelete(t *testing.T) {
 		}
 		names = append(names, info.Name)
 	}
-	for _, banned := range []string{"ask_user", "automation_delete"} {
+	for _, banned := range []string{"ask_user", "automation_create", "automation_delete", "switch_env"} {
 		for _, n := range names {
 			if n == banned {
 				t.Fatalf("%s must be dropped from unattended runs; got %v", banned, names)

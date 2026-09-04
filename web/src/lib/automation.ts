@@ -1,6 +1,7 @@
 // Automation types — mirror internal/automation + internal/web/automation_api.go.
 
 import type { TFunction } from 'i18next'
+import type { WorkspaceKind } from './types'
 
 export type AutomationCadence = 'hourly' | 'daily' | 'weekly' | 'cron'
 
@@ -22,6 +23,8 @@ export interface Automation {
   prompt: string
   trigger: AutomationTrigger
   project_path: string
+  context_policy?: 'isolated' | 'conversation'
+  owner_session_id?: string
   mode: string
   provider?: string
   model?: string
@@ -44,6 +47,7 @@ export interface AutomationItem extends Automation {
   human_schedule: string
   badge: string
   state: AutomationRunState
+  workspace_kind: WorkspaceKind
 }
 
 export interface AutomationRun {

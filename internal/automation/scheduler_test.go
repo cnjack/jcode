@@ -16,6 +16,13 @@ type fakeRunner struct {
 	err   error
 }
 
+type readinessRunner struct {
+	fakeRunner
+	ready bool
+}
+
+func (r *readinessRunner) CanStart(*Automation) bool { return r.ready }
+
 func (f *fakeRunner) StartRun(_ context.Context, _ *Automation, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -198,6 +205,31 @@ func TestSchedulerTick_SkipWhenInflight(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if r.count() != 0 {
 		t.Fatal("overlap guard failed: fired while a run was in flight")
+	}
+}
+
+func TestSchedulerTick_ReadinessKeepsOnceUnclaimed(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	a, _ := s.Create(Automation{Name: "busy owner", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: time.Now().Add(time.Hour).Format(time.RFC3339)}, Enabled: true})
+	if err := s.UpdateState(a.ID, func(st *RunState) {
+		st.NextRunAt = time.Now().Add(-time.Minute).Format(time.RFC3339)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := &readinessRunner{ready: false}
+	sch := NewScheduler(s, r)
+	sch.tick(context.Background())
+	time.Sleep(30 * time.Millisecond)
+	if r.count() != 0 || !s.Get(a.ID).Enabled || s.State(a.ID).LastStatus == StatusRunning {
+		t.Fatalf("unready once was consumed: runs=%d definition=%+v state=%+v", r.count(), s.Get(a.ID), s.State(a.ID))
+	}
+
+	r.ready = true
+	sch.tick(context.Background())
+	waitFor(t, func() bool { return r.count() == 1 })
+	if s.Get(a.ID).Enabled {
+		t.Fatal("ready once was not consumed")
 	}
 }
 

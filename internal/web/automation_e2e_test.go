@@ -13,6 +13,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/session"
+	managedworkspace "github.com/cnjack/jcode/internal/workspace"
 )
 
 // ---- once + cron trigger HTTP coverage ----
@@ -95,6 +96,153 @@ func TestAutomationAPI_CreateCron(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("bad cron %q: status %d", expr, rec.Code)
 		}
+	}
+}
+
+func TestAutomationAPI_ConversationOwnerMustExistAndMatchProject(t *testing.T) {
+	project := t.TempDir()
+	secondProject := t.TempDir()
+	seedIndex(t, map[string][]session.SessionMeta{
+		project: {
+			{UUID: "owner-session", Project: project},
+			{UUID: "automation-run", Project: project, AutomationID: "another-automation"},
+		},
+		secondProject: {{UUID: "second-owner", Project: secondProject}},
+	})
+	scratch, err := managedworkspace.CreateScratch(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratchRecorder, err := session.NewRecorder(scratch, "openai", "gpt-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratchRecorder.SetUUID("scratch-owner")
+	scratchRecorder.SetWorkspaceKind(session.WorkspaceScratch)
+	scratchRecorder.RecordUser("scratch owner")
+	scratchRecorder.Close()
+	s := newAutomationTestServer(t)
+	post := func(owner, automationProject string) *httptest.ResponseRecorder {
+		body := `{"name":"Bound","prompt":"p","project_path":"` + automationProject +
+			`","context_policy":"conversation","owner_session_id":"` + owner +
+			`","trigger":{"type":"manual"},"enabled":true}`
+		rec := httptest.NewRecorder()
+		s.handleCreateAutomation(rec, httptest.NewRequest(http.MethodPost, "/api/automations", strings.NewReader(body)))
+		return rec
+	}
+
+	if rec := post("missing", project); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing owner status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := post("owner-session", t.TempDir()); rec.Code != http.StatusBadRequest {
+		t.Fatalf("wrong project status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec := post("owner-session", project)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid owner status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	updateRec := httptest.NewRecorder()
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/automations/"+created.ID,
+		strings.NewReader(`{"project_path":"`+t.TempDir()+`"}`))
+	updateReq.SetPathValue("id", created.ID)
+	s.handleUpdateAutomation(updateRec, updateReq)
+	if updateRec.Code != http.StatusBadRequest {
+		t.Fatalf("conversation project move status=%d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	updateOwner := func(owner string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/automations/"+created.ID,
+			strings.NewReader(`{"owner_session_id":"`+owner+`"}`))
+		req.SetPathValue("id", created.ID)
+		s.handleUpdateAutomation(rec, req)
+		return rec
+	}
+	if ok, err := s.automations.TryMarkRunning(created.ID); err != nil || !ok {
+		t.Fatalf("claim automation: ok=%v err=%v", ok, err)
+	}
+	if rec := updateOwner("second-owner"); rec.Code != http.StatusConflict {
+		t.Fatalf("running owner switch status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := s.automations.UpdateState(created.ID, func(state *automation.RunState) {
+		state.LastStatus = automation.StatusSuccess
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := updateOwner("second-owner"); rec.Code != http.StatusOK {
+		t.Fatalf("owner switch status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := s.automations.Get(created.ID); got.OwnerSessionID != "second-owner" || got.ProjectPath != secondProject {
+		t.Fatalf("owner switch did not derive project: %+v", got)
+	}
+	if rec := updateOwner("scratch-owner"); rec.Code != http.StatusOK {
+		t.Fatalf("scratch owner switch status=%d body=%s", rec.Code, rec.Body.String())
+	} else {
+		var item struct {
+			OwnerSessionID string                `json:"owner_session_id"`
+			ProjectPath    string                `json:"project_path"`
+			WorkspaceKind  session.WorkspaceKind `json:"workspace_kind"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.OwnerSessionID != "scratch-owner" || item.ProjectPath != scratch || item.WorkspaceKind != session.WorkspaceScratch {
+			t.Fatalf("scratch owner response=%+v", item)
+		}
+	}
+	if rec := updateOwner("missing"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing owner switch status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := updateOwner("automation-run"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("automation-run owner switch status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := s.automations.Get(created.ID); got.OwnerSessionID != "scratch-owner" || got.ProjectPath != scratch {
+		t.Fatalf("failed owner switch changed definition: %+v", got)
+	}
+}
+
+func TestAutomationAPI_NoProjectWorkspaceIsExposedAndLocked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	scratch, err := managedworkspace.CreateScratch(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newAutomationTestServer(t)
+	body := `{"name":"Scratch","prompt":"p","project_path":"` + scratch +
+		`","trigger":{"type":"manual"},"enabled":true}`
+	rec := httptest.NewRecorder()
+	s.handleCreateAutomation(rec, httptest.NewRequest(http.MethodPost, "/api/automations", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create scratch automation status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID            string                `json:"id"`
+		WorkspaceKind session.WorkspaceKind `json:"workspace_kind"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.WorkspaceKind != session.WorkspaceScratch {
+		t.Fatalf("workspace_kind=%q, want %q", created.WorkspaceKind, session.WorkspaceScratch)
+	}
+
+	updateRec := httptest.NewRecorder()
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/automations/"+created.ID,
+		strings.NewReader(`{"project_path":"`+t.TempDir()+`"}`))
+	updateReq.SetPathValue("id", created.ID)
+	s.handleUpdateAutomation(updateRec, updateReq)
+	if updateRec.Code != http.StatusBadRequest {
+		t.Fatalf("scratch project move status=%d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	if !strings.Contains(updateRec.Body.String(), "no-project automation cannot move") {
+		t.Fatalf("scratch project move body=%s", updateRec.Body.String())
 	}
 }
 

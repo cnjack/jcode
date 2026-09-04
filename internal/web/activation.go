@@ -113,6 +113,20 @@ type activationResult struct {
 	Focused       bool                  `json:"focused"`
 }
 
+// effectiveSessionWorkspaceKind repairs the legacy automation-run classification
+// where a JCode-managed scratch path was persisted as a normal project. The
+// underlying session file remains readable, but every runtime/UI projection
+// treats it as no-project. New runs are written correctly at creation time.
+func effectiveSessionWorkspaceKind(meta *session.SessionMeta) session.WorkspaceKind {
+	if meta != nil && meta.AutomationID != "" && managedworkspace.ValidateScratchPath(meta.Project) == nil {
+		return session.WorkspaceScratch
+	}
+	if meta == nil {
+		return session.WorkspaceProject
+	}
+	return session.NormalizeWorkspaceKind(meta.WorkspaceKind)
+}
+
 func activationSnapshot(eng *Engine, kind conversationKind, activated bool) activationResult {
 	provider, modelName, modeName := eng.modelSnapshot()
 	project := engineProject(eng)
@@ -239,7 +253,7 @@ func (s *Server) ensureConversationLocked(
 	workspaceKind := requestedKind
 	switch {
 	case meta != nil:
-		workspaceKind = session.NormalizeWorkspaceKind(meta.WorkspaceKind)
+		workspaceKind = effectiveSessionWorkspaceKind(meta)
 	case workspaceKind == "":
 		workspaceKind = session.WorkspaceProject
 		if sessionID == "" && projectPath == "" {

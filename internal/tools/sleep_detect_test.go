@@ -1,6 +1,9 @@
 package tools
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSleepDetect_LongSleepBlocked(t *testing.T) {
 	// X-19: sleep 60 blocked
@@ -10,6 +13,11 @@ func TestSleepDetect_LongSleepBlocked(t *testing.T) {
 	}
 	if reason == "" {
 		t.Fatal("expected a reason message")
+	}
+	for _, want := range []string{"Do not split", "polling loop", "automation_create"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("block reason missing %q: %q", want, reason)
+		}
 	}
 }
 

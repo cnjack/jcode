@@ -43,11 +43,49 @@ func TestAutomationCreateTool_UsesEnvStore(t *testing.T) {
 		t.Fatalf("want 1 automation in the live store, got %d", len(list))
 	}
 	got := list[0]
-	if got.Enabled {
-		t.Fatal("agent-created automation must be DISABLED (human-in-the-loop)")
+	if !got.Enabled {
+		t.Fatal("agent-created automation must be enabled immediately")
 	}
 	if got.Source != automation.SourceAgent {
 		t.Fatalf("source = %q, want %q", got.Source, automation.SourceAgent)
+	}
+	if !strings.Contains(out, "Created enabled automation") || !strings.Contains(out, "active now") {
+		t.Fatalf("create output does not report the armed state: %q", out)
+	}
+}
+
+func TestAutomationCreateToolPromptRoutesDelayedWorkAwayFromShellSleep(t *testing.T) {
+	env, _ := newAutomationTestEnv(t)
+	info, err := env.NewAutomationCreateTool().Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"after a delay", "in 3 minutes check CPU usage", "cadence=\"once\"", "shell sleep", "created ENABLED", "bound to that conversation"} {
+		if !strings.Contains(info.Desc, want) {
+			t.Errorf("automation_create description missing %q: %q", want, info.Desc)
+		}
+	}
+}
+
+func TestAutomationCreateTool_BindsCurrentConversation(t *testing.T) {
+	env, store := newAutomationTestEnv(t)
+	env.SessionIDFn = func() string { return "session-owner" }
+	project := env.Pwd()
+	out, err := env.NewAutomationCreateTool().InvokableRun(context.Background(),
+		`{"name":"Continue","prompt":"check again","cadence":"manual","project_path":"`+project+`"}`)
+	if err != nil {
+		t.Fatalf("create conversation automation: %v (%s)", err, out)
+	}
+	got := store.List()[0]
+	if got.ContextPolicy != automation.ContextConversation || got.OwnerSessionID != "session-owner" || !got.Enabled {
+		t.Fatalf("conversation binding = %+v", got)
+	}
+	if !strings.Contains(out, "continue this conversation") {
+		t.Fatalf("conversation binding missing from output: %q", out)
+	}
+	if _, err := env.NewAutomationCreateTool().InvokableRun(context.Background(),
+		`{"name":"Wrong project","prompt":"p","cadence":"manual","project_path":"`+t.TempDir()+`"}`); err == nil {
+		t.Fatal("conversation-bound automation accepted another project")
 	}
 }
 
@@ -135,7 +173,7 @@ func TestAutomationListTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"automations: 2", "Nightly", "Daily at 09:00", "enabled: true", "Once", "Once at"} {
+	for _, want := range []string{"automations: 2", "Nightly", "Daily at 09:00", "enabled: true", "context: isolated", "Once", "Once at"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list output missing %q:\n%s", want, out)
 		}

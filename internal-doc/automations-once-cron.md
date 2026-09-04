@@ -14,9 +14,9 @@ most common natural-language asks:
   automation in v1 (three automations for Mon/Wed/Fri); `*/15 * * * *` is
   inexpressible (hourly fires once per hour).
 
-The agent can also only *propose* automations (`automation_create`): it cannot
-enumerate or cancel them, so "what automations do I have?" / "delete the weekly
-one" have no agent path (UI/REST only).
+The agent could create automations (`automation_create`) but could not enumerate
+or cancel them, so "what automations do I have?" / "delete the weekly one" had
+no agent path (UI/REST only).
 
 ## New trigger shapes
 
@@ -64,6 +64,41 @@ standard Vixie/POSIX behaviour, mirroring kimi-code's implementation:
   `SlotKey`/`LastFiredSlot` guard), bounded at 5 years. Expressions with no
   fire in the window (`0 0 31 2 *`) are rejected at validation.
 
+## Conversation context
+
+Automations have an explicit context policy:
+
+- `isolated` (the backward-compatible default for old records and manual API/UI
+  creation) starts a fresh headless run session for every fire.
+- `conversation` stores `owner_session_id`. Agent-created automations bind to
+  the current top-level session and inject an `<automation-fire>` user turn into
+  that conversation when they fire. Cold conversations are restored from their
+  persisted, possibly compacted history before the turn starts.
+
+Conversation runs use a one-turn full-access agent with unattended-only tools;
+the conversation's visible mode and interactive agent are not changed. A busy
+conversation is serialized: the automation waits for the active turn rather
+than writing history concurrently.
+
+No-project sessions keep their scratch identity across both policies. A
+conversation-bound fire stays in the owner session; a legacy/isolated run built
+under a managed scratch path is recorded as `workspace_kind=scratch` and remains
+visible only in Automations > Recent runs, never as a synthetic project in the
+conversation sidebar. Legacy automation-run records that were persisted as
+`project` are normalized to scratch when restored.
+
+Deleting a conversation with related automations requires an explicit policy:
+
+- `delete` removes the related definitions and run state before deleting the
+  conversation;
+- `detach` keeps each definition and its enabled state, clears
+  `owner_session_id`, and changes it to `isolated` so no dangling context
+  reference remains.
+
+The delete API returns `409 conversation_has_automations` when no policy is
+supplied. The Web UI presents both choices plus Cancel and lists every related
+definition, including paused or already-fired one-shots.
+
 ## Scheduler integration
 
 The tick loop is untouched structurally — it already advances `NextRunAt` via
@@ -80,7 +115,7 @@ The tick loop is untouched structurally — it already advances `NextRunAt` via
 
 | Tool | Approval | Notes |
 |---|---|---|
-| `automation_create` (extended) | prompt | cadence gains `cron` + `once`; new `cron_expr` / `at` params. Still proposes DISABLED (`source="agent"`) — the human-in-the-loop gate is unchanged. Description gains herd-avoidance guidance (avoid `:00`/`:30` when approximate). |
+| `automation_create` (extended) | prompt | Directly exposed in normal mode. Cadence gains `cron` + `once`; new `cron_expr` / `at` params. Creates ENABLED (`source="agent"`) and binds to the current conversation when a session id is available. Its routing prompt reserves delayed/future/recurring work for automations and forbids shell sleep/background substitutes. Description retains herd-avoidance guidance (avoid `:00`/`:30` when approximate). |
 | `automation_list` (new) | auto-approve | read-only; one record per automation (id, name, schedule, enabled, next/last run, mode, project, prompt preview). Added to plan-mode lists. |
 | `automation_delete` (new) | prompt | deletes by id; not-found is a model-correctable error. **Excluded from automation (unattended) runs** via `interactiveToolNames` — an unattended run must never delete automations, same reasoning as `ask_user`. |
 
@@ -92,17 +127,32 @@ The tick loop is untouched structurally — it already advances `NextRunAt` via
   editing an existing once/cron automation round-trips without corruption.
 - Cadence chip + `next_run_at` display handle the new kinds (an expired once
   falls back to last-run display).
+- The project field is a project picker for isolated definitions. Conversation-
+  bound definitions are locked to their owner; managed scratch owners display
+  only “No project” (never the internal `~/.jcode/workspace/...` path). The API
+  also rejects moving a conversation-bound or no-project definition, so the UI
+  lock is not the enforcement boundary.
+- Conversation-bound definitions display their owner title on the card and in
+  the editor. The owner can be switched to another persisted conversation; the
+  server derives `project_path` from that session atomically with the owner
+  change, and rejects switches while the automation itself is running. The UI
+  can open the selected conversation directly.
+- Editor choices use the app's token-driven select-only listbox instead of
+  native `<select>` popovers, which are rendered by macOS/Tauri outside the app
+  theme. The listbox supports keyboard navigation, typeahead, Escape, focus
+  restoration, and opening upward near a viewport edge.
 - i18n: `cadence.once` / `cadence.cron` / `editor.onceAt` / `editor.cronHint`
   in all five locales.
 
 ## Non-goals
 
-- In-session prompt re-injection (kimi-style session reminders) — a different
-  transport problem; would go through the background/steer path, not the
-  automation store.
+- Mid-turn steering into an already-running conversation. Conversation-bound
+  automations keep the trigger pending until the owner is idle, then inject the
+  next turn into that session.
 - Second-interval crons, timezone-per-automation, `@macros`, named days/months.
-- Agent-side enable/disable — deliberately out of scope: arming stays a
-  human-only action (PRD human-in-the-loop gate).
+- Agent-side toggling of existing definitions remains out of scope. New
+  automations created through `automation_create` are enabled by default; the
+  host's normal write-approval policy gates their creation.
 
 ## Test plan
 
@@ -116,4 +166,6 @@ The tick loop is untouched structurally — it already advances `NextRunAt` via
 - `internal/tools`: create once/cron (incl. rejections), list, delete paths.
 - `internal/web`: HTTP create once/cron incl. 400s; **integration e2e** —
   POST /api/automations → real Store → real Scheduler tick → fake Runner
-  executes → auto-disarmed, run recorded via the API.
+  executes → auto-disarmed, run recorded via the API; conversation-bound runs
+  retain owner history; session deletion requires delete/detach and rejects
+  in-flight related automations.

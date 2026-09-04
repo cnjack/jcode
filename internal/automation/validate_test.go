@@ -41,6 +41,12 @@ func TestValidateAutomation_Rejections(t *testing.T) {
 		{"relative project", func(a *Automation) { a.ProjectPath = "relative/dir" }},
 		{"dot project", func(a *Automation) { a.ProjectPath = "." }},
 		{"bad mode", func(a *Automation) { a.Mode = "yolo" }},
+		{"bad context policy", func(a *Automation) { a.ContextPolicy = "shared" }},
+		{"conversation missing owner", func(a *Automation) { a.ContextPolicy = ContextConversation }},
+		{"isolated with owner", func(a *Automation) {
+			a.ContextPolicy = ContextIsolated
+			a.OwnerSessionID = "session-1"
+		}},
 		{"bad trigger type", func(a *Automation) { a.Trigger.Type = "weird" }},
 		{"bad cadence", func(a *Automation) { a.Trigger.Cadence = "fortnightly" }},
 		{"bad minute", func(a *Automation) { a.Trigger.Minute = 99 }},
@@ -55,6 +61,15 @@ func TestValidateAutomation_Rejections(t *testing.T) {
 		if err := ValidateAutomation(&a); err == nil {
 			t.Errorf("%s: expected validation error", c.name)
 		}
+	}
+}
+
+func TestValidateAutomation_ConversationContext(t *testing.T) {
+	a := validAutomation()
+	a.ContextPolicy = ContextConversation
+	a.OwnerSessionID = "session-1"
+	if err := ValidateAutomation(&a); err != nil {
+		t.Fatalf("conversation context should be valid: %v", err)
 	}
 }
 

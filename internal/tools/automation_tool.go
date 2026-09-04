@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,17 +26,17 @@ type automationCreateInput struct {
 	ProjectPath string `json:"project_path"` // defaults to the current working directory
 }
 
-// NewAutomationCreateTool creates the automation_create tool. The agent can
-// PROPOSE an automation from natural language, but the automation is always
-// created DISABLED with source="agent": only the user can arm it (enable it) on
-// the Automations page. This human-in-the-loop gate means a prompt-injected
-// agent can never silently stand up a recurring, unattended, auto-approving run.
+// NewAutomationCreateTool creates and enables an automation from natural
+// language. The host's normal write-approval policy still gates the tool call;
+// once approved (or in full-access mode), the automation is immediately armed.
 func (e *Env) NewAutomationCreateTool() tool.InvokableTool {
 	info := &schema.ToolInfo{
 		Name: "automation_create",
-		Desc: `Propose a new automation (a scheduled or one-shot agent task) for the user.
+		Desc: `Create and immediately enable a new automation (a scheduled or one-shot agent task) for the user.
 
-The automation is created DISABLED and will NOT run until the user reviews it and enables it on the Automations page — you cannot arm it yourself. Use this when the user asks to run something on a recurring schedule (e.g. "every morning summarize new issues"), at a pinned future time ("tomorrow 9am, run the smoke test"), or to save a reusable manual task.
+Use this whenever the user asks to do work after a delay (for example, "in 3 minutes check CPU usage"), at a pinned future time ("tomorrow 9am, run the smoke test"), on a recurring schedule ("every morning summarize new issues"), or to save a reusable manual task. Never implement delayed or recurring user work with shell sleep, polling loops, or background commands. For a relative delay, determine the corresponding local wall-clock time and pass it as at with cadence="once".
+
+The automation is created ENABLED and becomes active immediately. When invoked from a conversation, it is bound to that conversation and future fires continue with its current context; contexts without a session fall back to isolated runs. The host applies its normal approval policy before this mutating tool runs.
 
 cadence must be one of:
 - "hourly" (uses minute)
@@ -82,6 +83,17 @@ func (t *automationCreateTool) InvokableRun(_ context.Context, argumentsInJSON s
 	if project == "" {
 		project = t.env.Pwd()
 	}
+	contextPolicy := automation.ContextIsolated
+	ownerSessionID := ""
+	if t.env.SessionIDFn != nil {
+		ownerSessionID = strings.TrimSpace(t.env.SessionIDFn())
+		if ownerSessionID != "" {
+			if filepath.Clean(project) != filepath.Clean(t.env.Pwd()) {
+				return "", fmt.Errorf("conversation-bound automation must use the current project %q", t.env.Pwd())
+			}
+			contextPolicy = automation.ContextConversation
+		}
+	}
 
 	// Write through the server's live store so the new automation is immediately
 	// visible to the REST API and scheduler (a throwaway store would only touch
@@ -92,20 +104,26 @@ func (t *automationCreateTool) InvokableRun(_ context.Context, argumentsInJSON s
 		return "", fmt.Errorf("automation store unavailable")
 	}
 	created, err := store.Create(automation.Automation{
-		Name:        in.Name,
-		Prompt:      in.Prompt,
-		Trigger:     trigger,
-		ProjectPath: project,
-		Mode:        "full_access",
-		Source:      automation.SourceAgent,
-		Enabled:     false, // human-in-the-loop: the user must enable it
+		Name:           in.Name,
+		Prompt:         in.Prompt,
+		Trigger:        trigger,
+		ProjectPath:    project,
+		ContextPolicy:  contextPolicy,
+		OwnerSessionID: ownerSessionID,
+		Mode:           "full_access",
+		Source:         automation.SourceAgent,
+		Enabled:        true,
 	})
 	if err != nil {
 		return "", err
 	}
+	contextMessage := "Future fires will run in isolated sessions."
+	if created.ContextPolicy == automation.ContextConversation {
+		contextMessage = "Future fires will continue this conversation with its current context."
+	}
 	return fmt.Sprintf(
-		"Proposed automation %q (%s) — created DISABLED. Ask the user to review and enable it on the Automations page; it will not run until they do. (id: %s)",
-		created.Name, automation.HumanSchedule(created.Trigger), created.ID), nil
+		"Created enabled automation %q (%s). It is active now. %s (id: %s)",
+		created.Name, automation.HumanSchedule(created.Trigger), contextMessage, created.ID), nil
 }
 
 func triggerFromCadence(in automationCreateInput) (automation.Trigger, error) {
@@ -199,6 +217,13 @@ func (t *automationListTool) InvokableRun(_ context.Context, _ string, _ ...tool
 	records := make([]string, 0, len(list))
 	for _, a := range list {
 		st := store.State(a.ID)
+		contextLabel := string(a.ContextPolicy)
+		if contextLabel == "" {
+			contextLabel = string(automation.ContextIsolated)
+		}
+		if a.ContextPolicy == automation.ContextConversation {
+			contextLabel += ":" + a.OwnerSessionID
+		}
 		records = append(records, strings.Join([]string{
 			"id: " + a.ID,
 			"name: " + a.Name,
@@ -206,6 +231,7 @@ func (t *automationListTool) InvokableRun(_ context.Context, _ string, _ ...tool
 			"enabled: " + boolText(a.Enabled),
 			"mode: " + a.Mode,
 			"project: " + a.ProjectPath,
+			"context: " + contextLabel,
 			"next_run_at: " + st.NextRunAt,
 			"last_status: " + st.LastStatus,
 			"prompt: " + truncateText(a.Prompt, 160),

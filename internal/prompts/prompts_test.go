@@ -66,6 +66,15 @@ func TestBasePromptsUseRequestSchemasAsToolSourceOfTruth(t *testing.T) {
 	}
 }
 
+func TestSystemPromptRoutesScheduledWorkToAutomation(t *testing.T) {
+	prompt := GetSystemPrompt("darwin", t.TempDir(), "local", nil, "")
+	for _, want := range []string{"automation_create", "after a delay", "recurring schedule", "shell sleep", "background command"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("system prompt missing automation routing guidance %q", want)
+		}
+	}
+}
+
 func TestBasePromptsDiscourageRedundantSuccessfulToolCalls(t *testing.T) {
 	prompts := map[string]string{
 		"system": GetSystemPrompt("darwin", t.TempDir(), "local", nil, ""),

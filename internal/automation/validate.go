@@ -45,6 +45,18 @@ func ValidateAutomation(a *Automation) error {
 	if err := validateProjectPath(a.ProjectPath); err != nil {
 		return err
 	}
+	switch a.ContextPolicy {
+	case "", ContextIsolated:
+		if strings.TrimSpace(a.OwnerSessionID) != "" {
+			return fmt.Errorf("isolated automation cannot have an owner session")
+		}
+	case ContextConversation:
+		if strings.TrimSpace(a.OwnerSessionID) == "" {
+			return fmt.Errorf("conversation automation requires owner_session_id")
+		}
+	default:
+		return fmt.Errorf("invalid context_policy %q (want isolated|conversation)", a.ContextPolicy)
+	}
 	return validateTrigger(a.Trigger)
 }
 

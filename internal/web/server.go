@@ -269,54 +269,55 @@ type CloudSupervisor interface {
 
 // ServerConfig holds the configuration for creating a new Server.
 type ServerConfig struct {
-	Port                int
-	Host                string
-	OpenBrowser         bool
-	Pwd                 string
-	WorkspaceKind       session.WorkspaceKind
-	Version             string
-	Agent               *adk.ChatModelAgent
-	CreateAgent         func(providerName, modelName string) (*adk.ChatModelAgent, error)
-	RebuildForMode      func(planMode bool) (*adk.ChatModelAgent, error)
-	RebuildForRole      func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
-	NewEngine           func(taskID, pwd, mode string) (*EngineConfig, error)                                             // factory for new concurrent task engines (local)
-	NewScratchEngine    func(taskID, pwd, mode string) (*EngineConfig, error)                                             // local JCode-managed no-project task factory
-	NewRemoteEngine     func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine (SSH or Docker)
-	NewAutomationEngine func(taskID, pwd, mode string) (*EngineConfig, error)                                             // headless sibling of NewEngine for automation runs (drops interactive tools)
-	InitialMode         string                                                                                            // unified startup mode string ("approval"/"plan"/"full_access")
-	TodoStore           *tools.TodoStore
-	Recorder            *session.Recorder
-	Tracer              *telemetry.LangfuseTracer
-	Env                 *tools.Env
-	ProviderName        string
-	ModelName           string
-	Config              *config.Config
-	Registry            *model.ModelRegistry
-	ApprovalState       *runner.ApprovalState
-	SkillLoader         *skills.Loader
-	FlowLoader          *flow.Loader
-	ReloadMCP           func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) // optional: hot-reload MCP tools
-	InitialMCPStatuses  []tools.MCPStatus                                                     // statuses from the startup MCP load
-	WechatClient        channel.Channel                                                       // optional WeChat channel
-	WebHandler          *handler.WebHandler                                                   // optional: pre-created handler for sharing with tools
-	EventHandler        handler.AgentEventHandler                                             // optional: handler for runner (e.g. NotifyingHandler)
-	NeedsSetup          bool                                                                  // true when no providers are configured (setup mode)
-	TokenUsage          *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
-	ContextBreakdownFn  func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
-	ToolSearchStats     func() ToolSearchCounts                                               // optional: effective ToolSearch catalog counts for the bootstrap task
-	Automations         *automation.Store                                                     // optional: automation store (nil in setup mode)
-	AuthToken           string                                                                // bearer token required on non-exempt requests when RequireAuth is set
-	RequireAuth         bool                                                                  // enforce token auth (set when bound to a non-loopback host)
-	BrowserManager      *browser.Manager                                                      // optional: process-wide browser-use manager shared with per-task Envs
-	ComputerManager     *computer.Manager                                                     // optional: process-wide computer-use manager shared with per-task Envs
-	MemoryStart         func(context.Context, string) (<-chan error, error)                   // optional: acquire and start one manual local-project memory distillation
-	BLEController       BLEController                                                         // optional: live BLE status-channel toggle (desktop builds)
-	CloudSupervisor     CloudSupervisor                                                       // optional: cloud relay status + live auto_connect toggle
-	ArtifactService     *artifact.Service                                                     // optional: session Artifact registry
-	ArtifactShares      ArtifactSharePublisher                                                // optional: encrypted Cloud artifact publisher
-	CloudCredentials    func() (*cloud.Credentials, error)                                    // optional: injectable credential loader
-	OpenArtifact        ArtifactOpener                                                        // optional: Desktop open/reveal adapter
-	ProviderAuth        ProviderAuthService                                                   // optional: managed provider login service
+	Port                 int
+	Host                 string
+	OpenBrowser          bool
+	Pwd                  string
+	WorkspaceKind        session.WorkspaceKind
+	Version              string
+	Agent                *adk.ChatModelAgent
+	CreateAgent          func(providerName, modelName string) (*adk.ChatModelAgent, error)
+	RebuildForMode       func(planMode bool) (*adk.ChatModelAgent, error)
+	RebuildForAutomation func() (*adk.ChatModelAgent, error)
+	RebuildForRole       func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
+	NewEngine            func(taskID, pwd, mode string) (*EngineConfig, error)                                             // factory for new concurrent task engines (local)
+	NewScratchEngine     func(taskID, pwd, mode string) (*EngineConfig, error)                                             // local JCode-managed no-project task factory
+	NewRemoteEngine      func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine (SSH or Docker)
+	NewAutomationEngine  func(taskID, pwd, mode string) (*EngineConfig, error)                                             // headless sibling of NewEngine for automation runs (drops interactive tools)
+	InitialMode          string                                                                                            // unified startup mode string ("approval"/"plan"/"full_access")
+	TodoStore            *tools.TodoStore
+	Recorder             *session.Recorder
+	Tracer               *telemetry.LangfuseTracer
+	Env                  *tools.Env
+	ProviderName         string
+	ModelName            string
+	Config               *config.Config
+	Registry             *model.ModelRegistry
+	ApprovalState        *runner.ApprovalState
+	SkillLoader          *skills.Loader
+	FlowLoader           *flow.Loader
+	ReloadMCP            func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) // optional: hot-reload MCP tools
+	InitialMCPStatuses   []tools.MCPStatus                                                     // statuses from the startup MCP load
+	WechatClient         channel.Channel                                                       // optional WeChat channel
+	WebHandler           *handler.WebHandler                                                   // optional: pre-created handler for sharing with tools
+	EventHandler         handler.AgentEventHandler                                             // optional: handler for runner (e.g. NotifyingHandler)
+	NeedsSetup           bool                                                                  // true when no providers are configured (setup mode)
+	TokenUsage           *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
+	ContextBreakdownFn   func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
+	ToolSearchStats      func() ToolSearchCounts                                               // optional: effective ToolSearch catalog counts for the bootstrap task
+	Automations          *automation.Store                                                     // optional: automation store (nil in setup mode)
+	AuthToken            string                                                                // bearer token required on non-exempt requests when RequireAuth is set
+	RequireAuth          bool                                                                  // enforce token auth (set when bound to a non-loopback host)
+	BrowserManager       *browser.Manager                                                      // optional: process-wide browser-use manager shared with per-task Envs
+	ComputerManager      *computer.Manager                                                     // optional: process-wide computer-use manager shared with per-task Envs
+	MemoryStart          func(context.Context, string) (<-chan error, error)                   // optional: acquire and start one manual local-project memory distillation
+	BLEController        BLEController                                                         // optional: live BLE status-channel toggle (desktop builds)
+	CloudSupervisor      CloudSupervisor                                                       // optional: cloud relay status + live auto_connect toggle
+	ArtifactService      *artifact.Service                                                     // optional: session Artifact registry
+	ArtifactShares       ArtifactSharePublisher                                                // optional: encrypted Cloud artifact publisher
+	CloudCredentials     func() (*cloud.Credentials, error)                                    // optional: injectable credential loader
+	OpenArtifact         ArtifactOpener                                                        // optional: Desktop open/reveal adapter
+	ProviderAuth         ProviderAuthService                                                   // optional: managed provider login service
 }
 
 // NewServer creates a new web server.
@@ -331,24 +332,25 @@ func NewServer(cfg *ServerConfig) *Server {
 	}
 	// The bootstrap Engine carries the per-task run state of the initial session.
 	boot := &Engine{
-		pwd:             cfg.Pwd,
-		workspaceKind:   session.NormalizeWorkspaceKind(cfg.WorkspaceKind),
-		handler:         h,
-		agent:           cfg.Agent,
-		todoStore:       cfg.TodoStore,
-		recorder:        cfg.Recorder,
-		env:             cfg.Env,
-		providerName:    cfg.ProviderName,
-		modelName:       cfg.ModelName,
-		mode:            mode.Parse(cfg.InitialMode).String(),
-		approvalState:   cfg.ApprovalState,
-		eventHandler:    eh,
-		tokenUsage:      cfg.TokenUsage,
-		breakdownFn:     cfg.ContextBreakdownFn,
-		toolSearchStats: cfg.ToolSearchStats,
-		createAgent:     cfg.CreateAgent,
-		rebuildForMode:  cfg.RebuildForMode,
-		rebuildForRole:  cfg.RebuildForRole,
+		pwd:                  cfg.Pwd,
+		workspaceKind:        session.NormalizeWorkspaceKind(cfg.WorkspaceKind),
+		handler:              h,
+		agent:                cfg.Agent,
+		todoStore:            cfg.TodoStore,
+		recorder:             cfg.Recorder,
+		env:                  cfg.Env,
+		providerName:         cfg.ProviderName,
+		modelName:            cfg.ModelName,
+		mode:                 mode.Parse(cfg.InitialMode).String(),
+		approvalState:        cfg.ApprovalState,
+		eventHandler:         eh,
+		tokenUsage:           cfg.TokenUsage,
+		breakdownFn:          cfg.ContextBreakdownFn,
+		toolSearchStats:      cfg.ToolSearchStats,
+		createAgent:          cfg.CreateAgent,
+		rebuildForMode:       cfg.RebuildForMode,
+		rebuildForAutomation: cfg.RebuildForAutomation,
+		rebuildForRole:       cfg.RebuildForRole,
 	}
 	if boot.tokenUsage == nil {
 		boot.tokenUsage = &model.TokenUsage{}
@@ -452,6 +454,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/stop", s.handleStop)
 	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
+	mux.HandleFunc("GET /api/sessions/{id}/delete-impact", s.handleSessionDeleteImpact)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /api/sessions", s.handleNewSession)
 	mux.HandleFunc("POST /api/sessions/activate", s.handleActivateSession)

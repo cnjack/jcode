@@ -3,12 +3,15 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/session"
+	managedworkspace "github.com/cnjack/jcode/internal/workspace"
 )
 
 // defaultRunsLimit bounds how many automation runs handleListAutomationRuns
@@ -19,9 +22,10 @@ const defaultRunsLimit = 100
 // volatile run-state, as returned to the web UI.
 type automationItem struct {
 	automation.Automation
-	HumanSchedule string              `json:"human_schedule"`
-	Badge         string              `json:"badge"`
-	State         automation.RunState `json:"state"`
+	HumanSchedule string                `json:"human_schedule"`
+	Badge         string                `json:"badge"`
+	State         automation.RunState   `json:"state"`
+	WorkspaceKind session.WorkspaceKind `json:"workspace_kind"`
 }
 
 func (s *Server) autoStore(w http.ResponseWriter) (*automation.Store, bool) {
@@ -38,7 +42,15 @@ func toItem(st *automation.Store, a *automation.Automation) automationItem {
 		HumanSchedule: automation.HumanSchedule(a.Trigger),
 		Badge:         automation.Badge(a.Trigger),
 		State:         st.State(a.ID),
+		WorkspaceKind: automationWorkspaceKind(a.ProjectPath),
 	}
+}
+
+func automationWorkspaceKind(projectPath string) session.WorkspaceKind {
+	if managedworkspace.ValidateScratchPath(projectPath) == nil {
+		return session.WorkspaceScratch
+	}
+	return session.WorkspaceProject
 }
 
 func (s *Server) handleListAutomations(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +95,17 @@ func (s *Server) handleCreateAutomation(w http.ResponseWriter, r *http.Request) 
 	if req.Source == "" {
 		req.Source = automation.SourceManual
 	}
+	if req.ContextPolicy == automation.ContextConversation {
+		// Serialize owner validation + creation with session deletion. Otherwise a
+		// create could validate the owner, pause while deletion commits, then write
+		// a fresh dangling owner_session_id.
+		s.taskCreateMu.Lock()
+		defer s.taskCreateMu.Unlock()
+	}
+	if err := s.validateAutomationConversationOwner(&req.Automation); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	created, err := st.Create(req.Automation)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -96,6 +119,38 @@ func (s *Server) handleCreateAutomation(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, toItem(st, created))
 }
 
+func (s *Server) validateAutomationConversationOwner(a *automation.Automation) error {
+	if a.ContextPolicy != automation.ContextConversation {
+		return nil
+	}
+	meta, err := findAutomationConversationOwner(a.OwnerSessionID)
+	if err != nil {
+		return err
+	}
+	if meta.Project != a.ProjectPath {
+		return fmt.Errorf("owner conversation belongs to project %q, not %q", meta.Project, a.ProjectPath)
+	}
+	return nil
+}
+
+func findAutomationConversationOwner(sessionID string) (*session.SessionMeta, error) {
+	ownerID := strings.TrimSpace(sessionID)
+	if ownerID == "" {
+		return nil, fmt.Errorf("owner conversation is required")
+	}
+	meta, err := session.FindSessionMeta(ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("load owner conversation: %w", err)
+	}
+	if meta == nil {
+		return nil, fmt.Errorf("owner conversation %q does not exist", ownerID)
+	}
+	if meta.AutomationID != "" {
+		return nil, fmt.Errorf("automation run %q cannot own another automation", ownerID)
+	}
+	return meta, nil
+}
+
 func (s *Server) handleUpdateAutomation(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.autoStore(w)
 	if !ok {
@@ -106,17 +161,65 @@ func (s *Server) handleUpdateAutomation(w http.ResponseWriter, r *http.Request) 
 	// "omitted" from "zero value", so editing an automation that carries a
 	// provider/model override — or is paused — never silently clears it.
 	var req struct {
-		Name        *string             `json:"name"`
-		Prompt      *string             `json:"prompt"`
-		Trigger     *automation.Trigger `json:"trigger"`
-		ProjectPath *string             `json:"project_path"`
-		Mode        *string             `json:"mode"`
-		Provider    *string             `json:"provider"`
-		Model       *string             `json:"model"`
-		Enabled     *bool               `json:"enabled"`
+		Name           *string             `json:"name"`
+		Prompt         *string             `json:"prompt"`
+		Trigger        *automation.Trigger `json:"trigger"`
+		ProjectPath    *string             `json:"project_path"`
+		Mode           *string             `json:"mode"`
+		Provider       *string             `json:"provider"`
+		Model          *string             `json:"model"`
+		Enabled        *bool               `json:"enabled"`
+		OwnerSessionID *string             `json:"owner_session_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.OwnerSessionID != nil {
+		// Session deletion takes the same lock. Keep owner lookup and definition
+		// publication in one critical section so a successful switch cannot leave
+		// a dangling owner_session_id.
+		s.taskCreateMu.Lock()
+		defer s.taskCreateMu.Unlock()
+	}
+	existing := st.Get(r.PathValue("id"))
+	if existing == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "automation not found"})
+		return
+	}
+	ownerSessionID := existing.OwnerSessionID
+	ownerProjectPath := existing.ProjectPath
+	if req.OwnerSessionID != nil {
+		if existing.ContextPolicy != automation.ContextConversation {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "only conversation-bound automations can switch conversations",
+			})
+			return
+		}
+		ownerSessionID = strings.TrimSpace(*req.OwnerSessionID)
+		if ownerSessionID != existing.OwnerSessionID && st.State(existing.ID).LastStatus == automation.StatusRunning {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "automation is currently running",
+			})
+			return
+		}
+		owner, err := findAutomationConversationOwner(ownerSessionID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		ownerProjectPath = owner.Project
+	}
+	if req.ProjectPath != nil && *req.ProjectPath != existing.ProjectPath &&
+		(existing.ContextPolicy == automation.ContextConversation ||
+			automationWorkspaceKind(existing.ProjectPath) == session.WorkspaceScratch) {
+		reason := "conversation-bound automation cannot move to another project"
+		if existing.ContextPolicy != automation.ContextConversation {
+			reason = "no-project automation cannot move to another project"
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": reason,
+		})
 		return
 	}
 	updated, err := st.Update(r.PathValue("id"), func(a *automation.Automation) {
@@ -143,6 +246,10 @@ func (s *Server) handleUpdateAutomation(w http.ResponseWriter, r *http.Request) 
 		}
 		if req.Enabled != nil {
 			a.Enabled = *req.Enabled
+		}
+		if req.OwnerSessionID != nil {
+			a.OwnerSessionID = ownerSessionID
+			a.ProjectPath = ownerProjectPath
 		}
 	})
 	if err != nil {

@@ -49,7 +49,8 @@ func (e *Env) NewExecuteTool(bm *BackgroundManager) tool.InvokableTool {
 		Desc: "Executes a bash command. By default runs synchronously and returns output. " +
 			"Set background=true to run in the background (returns immediately with a task ID). " +
 			"Use background mode for long-running commands (npm install, go test, docker build, etc.) " +
-			"so you can keep working. Check results later with check_background.",
+			"so you can keep working. Check results later with check_background. " +
+			"Never use sleep, polling loops, or background shell commands to implement a user's delayed, future-time, or recurring request; use automation_create instead.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"command": {
 				Type:     schema.String,

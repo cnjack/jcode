@@ -1529,6 +1529,9 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	if resumeUUID != "" && rec != nil {
 		rec.SetUUID(resumeUUID)
 	}
+	if rec != nil {
+		env.SessionIDFn = rec.UUID
+	}
 	imageLedger, imageLedgerErr := newImageUsageLedger(rec)
 	if imageLedgerErr != nil {
 		config.Logger().Printf("[image] initialize TUI usage ledger: %v", imageLedgerErr)

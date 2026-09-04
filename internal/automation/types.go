@@ -46,6 +46,17 @@ type Trigger struct {
 	At      string      `json:"at,omitempty"`      // RFC3339 pinned time (once)
 }
 
+// ContextPolicy controls which conversation context an automation uses.
+type ContextPolicy string
+
+const (
+	// ContextIsolated starts each run in a fresh automation session.
+	ContextIsolated ContextPolicy = "isolated"
+	// ContextConversation injects each run into OwnerSessionID so the task sees
+	// that conversation's current (possibly compacted) history.
+	ContextConversation ContextPolicy = "conversation"
+)
+
 // Run terminal-status values (mirrored onto session.SessionMeta.TerminalStatus).
 const (
 	StatusRunning     = "running"
@@ -73,19 +84,21 @@ const (
 // bookkeeping lives separately in RunState (automation-state.json) so the
 // scheduler's frequent writes never collide with human edits.
 type Automation struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Prompt      string  `json:"prompt"`
-	Trigger     Trigger `json:"trigger"`
-	ProjectPath string  `json:"project_path"` // required, must be a local path
-	Mode        string  `json:"mode"`         // approval|plan|full_access
-	Provider    string  `json:"provider,omitempty"`
-	Model       string  `json:"model,omitempty"`
-	RunInCloud  bool    `json:"run_in_cloud"` // reserved; always false in v1
-	Enabled     bool    `json:"enabled"`
-	Source      string  `json:"source"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID             string        `json:"id"`
+	Name           string        `json:"name"`
+	Prompt         string        `json:"prompt"`
+	Trigger        Trigger       `json:"trigger"`
+	ProjectPath    string        `json:"project_path"` // required, must be a local path
+	ContextPolicy  ContextPolicy `json:"context_policy,omitempty"`
+	OwnerSessionID string        `json:"owner_session_id,omitempty"`
+	Mode           string        `json:"mode"` // approval|plan|full_access
+	Provider       string        `json:"provider,omitempty"`
+	Model          string        `json:"model,omitempty"`
+	RunInCloud     bool          `json:"run_in_cloud"` // reserved; always false in v1
+	Enabled        bool          `json:"enabled"`
+	Source         string        `json:"source"`
+	CreatedAt      string        `json:"created_at"`
+	UpdatedAt      string        `json:"updated_at"`
 }
 
 // RunState is the volatile per-automation scheduler bookkeeping. It persists in

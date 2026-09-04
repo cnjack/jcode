@@ -38,6 +38,13 @@ type Runner interface {
 	StartRun(ctx context.Context, a *Automation, kind string) (sessionID string, err error)
 }
 
+// RunnerReadiness is an optional pre-claim gate. Conversation-backed runners
+// use it to keep a due trigger pending while its owner conversation is busy,
+// matching cron reinjection semantics without consuming a once trigger.
+type RunnerReadiness interface {
+	CanStart(a *Automation) bool
+}
+
 // SkipNotifier is called when the scheduler skips a fire without running (e.g.
 // the bound project is gone). Optional.
 type SkipNotifier func(a *Automation, reason string)
@@ -193,6 +200,9 @@ func (s *Scheduler) tick(ctx context.Context) {
 		// manual "Run Now" that races it. A crashed-run zombie left at "running" is
 		// cleared by reconcileStale on the next owner election.
 		if busy || st.LastStatus == StatusRunning {
+			continue
+		}
+		if readiness, ok := s.runner.(RunnerReadiness); ok && !readiness.CanStart(a) {
 			continue
 		}
 

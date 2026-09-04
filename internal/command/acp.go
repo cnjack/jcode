@@ -536,6 +536,9 @@ func (a *acpAgent) buildAgentSession(
 	}
 
 	env := tools.NewEnv(pwd, platform)
+	if rec != nil {
+		env.SessionIDFn = rec.UUID
+	}
 	config.Logger().Printf("[acp] using LocalExecutor for session %s", sessionID)
 	bgManager := tools.NewBackgroundManager(env)
 

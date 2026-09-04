@@ -22,6 +22,10 @@ const storeVersion = 1
 // that does not exist, so HTTP handlers can map it to 404 rather than 400.
 var ErrNotFound = errors.New("automation not found")
 
+// ErrOwnerAutomationRunning prevents a conversation deletion from detaching or
+// deleting a related automation after it has already claimed a run.
+var ErrOwnerAutomationRunning = errors.New("related automation is running")
+
 // errScheduledOnceNotClaimable is internal control flow for a conditional
 // scheduled-once claim. Returning it from withLock skips both persistence writes
 // when the definition was disabled, retargeted, consumed, or already running.
@@ -220,6 +224,9 @@ func (s *Store) Create(a Automation) (*Automation, error) {
 	if a.Mode == "" {
 		a.Mode = "full_access"
 	}
+	if a.ContextPolicy == "" {
+		a.ContextPolicy = ContextIsolated
+	}
 	if err := ValidateAutomation(&a); err != nil {
 		return nil, err
 	}
@@ -275,6 +282,9 @@ func (s *Store) Update(id string, mutate func(*Automation)) (*Automation, error)
 		cp := *a
 		mutate(&cp)
 		cp.ID = id // immutable
+		if cp.ContextPolicy == "" {
+			cp.ContextPolicy = ContextIsolated
+		}
 		cp.UpdatedAt = nowFunc().Format(time.RFC3339)
 		if err := ValidateAutomation(&cp); err != nil {
 			return err
@@ -327,6 +337,111 @@ func (s *Store) Delete(id string) error {
 		}
 		delete(s.defs, id)
 		delete(s.state, id)
+		return nil
+	})
+}
+
+// SessionAutomationPolicy selects how conversation-bound automations are
+// handled when their owner conversation is deleted.
+type SessionAutomationPolicy string
+
+const (
+	SessionAutomationDelete SessionAutomationPolicy = "delete"
+	SessionAutomationDetach SessionAutomationPolicy = "detach"
+)
+
+// SessionAutomationSnapshot is the rollback payload returned when resolving a
+// conversation deletion. Definitions and run state are copied by value.
+type SessionAutomationSnapshot struct {
+	Definitions []Automation
+	State       map[string]RunState
+}
+
+// ListByOwnerSession returns a fresh cross-process view of every automation
+// bound to sessionID. Disabled and already-fired definitions are included: the
+// relationship, not the current armed state, determines deletion impact.
+func (s *Store) ListByOwnerSession(sessionID string) ([]*Automation, error) {
+	var result []*Automation
+	err := s.withLock(false, false, func() error {
+		for _, a := range s.listLocked() {
+			if a.ContextPolicy != ContextConversation || a.OwnerSessionID != sessionID {
+				continue
+			}
+			cp := *a
+			result = append(result, &cp)
+		}
+		return nil
+	})
+	return result, err
+}
+
+// ResolveOwnerSession applies the user's explicit conversation-deletion policy
+// atomically within the automation store. delete removes matching definitions
+// and state; detach preserves their enabled state as isolated tasks and clears
+// the owner.
+func (s *Store) ResolveOwnerSession(sessionID string, policy SessionAutomationPolicy) (SessionAutomationSnapshot, error) {
+	if policy != SessionAutomationDelete && policy != SessionAutomationDetach {
+		return SessionAutomationSnapshot{}, fmt.Errorf("invalid automation policy %q", policy)
+	}
+	snapshot := SessionAutomationSnapshot{State: make(map[string]RunState)}
+	err := s.withLock(true, true, func() error {
+		for id, a := range s.defs {
+			if a.ContextPolicy != ContextConversation || a.OwnerSessionID != sessionID {
+				continue
+			}
+			if st := s.state[id]; st != nil && st.LastStatus == StatusRunning {
+				return fmt.Errorf("automation %q: %w", id, ErrOwnerAutomationRunning)
+			}
+		}
+		for id, a := range s.defs {
+			if a.ContextPolicy != ContextConversation || a.OwnerSessionID != sessionID {
+				continue
+			}
+			snapshot.Definitions = append(snapshot.Definitions, *a)
+			if st := s.state[id]; st != nil {
+				snapshot.State[id] = *st
+			}
+			switch policy {
+			case SessionAutomationDelete:
+				delete(s.defs, id)
+				delete(s.state, id)
+			case SessionAutomationDetach:
+				cp := *a
+				cp.ContextPolicy = ContextIsolated
+				cp.OwnerSessionID = ""
+				cp.UpdatedAt = nowFunc().Format(time.RFC3339)
+				s.defs[id] = &cp
+				if st := s.state[id]; st != nil && st.LastSessionID != "" {
+					stateCopy := *st
+					stateCopy.LastSessionID = ""
+					s.state[id] = &stateCopy
+				}
+			}
+		}
+		return nil
+	})
+	return snapshot, err
+}
+
+// RestoreSessionAutomations rolls back ResolveOwnerSession when the subsequent
+// session-file deletion fails. It is idempotent and restores the exact captured
+// definitions and run state.
+func (s *Store) RestoreSessionAutomations(snapshot SessionAutomationSnapshot) error {
+	if len(snapshot.Definitions) == 0 {
+		return nil
+	}
+	return s.withLock(true, true, func() error {
+		for i := range snapshot.Definitions {
+			definition := snapshot.Definitions[i]
+			cp := definition
+			s.defs[definition.ID] = &cp
+			if st, ok := snapshot.State[definition.ID]; ok {
+				stateCopy := st
+				s.state[definition.ID] = &stateCopy
+			} else {
+				delete(s.state, definition.ID)
+			}
+		}
 		return nil
 	})
 }
