@@ -22,6 +22,11 @@ const storeVersion = 1
 // that does not exist, so HTTP handlers can map it to 404 rather than 400.
 var ErrNotFound = errors.New("automation not found")
 
+// errScheduledOnceNotClaimable is internal control flow for a conditional
+// scheduled-once claim. Returning it from withLock skips both persistence writes
+// when the definition was disabled, retargeted, consumed, or already running.
+var errScheduledOnceNotClaimable = errors.New("scheduled once is not claimable")
+
 // defsFile is the user-edited definitions; stateFile is the volatile scheduler
 // bookkeeping; lockFile is the cross-process advisory write lock guarding both.
 const (
@@ -274,9 +279,15 @@ func (s *Store) Update(id string, mutate func(*Automation)) (*Automation, error)
 		if err := ValidateAutomation(&cp); err != nil {
 			return err
 		}
+		// A once pin is inseparable from its pending NextRunAt. Reset the stale
+		// schedule in the same cross-process lock as the definition update so the
+		// scheduler can never honor the old pin after a retarget. Transitions into
+		// or out of once also need a fresh seed for the new trigger shape.
+		resetOnceSchedule := a.Trigger != cp.Trigger &&
+			(a.Trigger.Type == TriggerOnce || cp.Trigger.Type == TriggerOnce)
 		s.defs[id] = &cp
 		out = &cp
-		if !wasEnabled && cp.Enabled {
+		if (!wasEnabled && cp.Enabled) || resetOnceSchedule {
 			st := s.state[id]
 			if st == nil {
 				st = &RunState{}
@@ -284,7 +295,12 @@ func (s *Store) Update(id string, mutate func(*Automation)) (*Automation, error)
 				c := *st
 				st = &c
 			}
-			st.ConsecutiveFails = 0
+			if !wasEnabled && cp.Enabled {
+				st.ConsecutiveFails = 0
+			}
+			if resetOnceSchedule {
+				st.NextRunAt = ""
+			}
 			s.state[id] = st
 		}
 		return nil
@@ -360,6 +376,64 @@ func (s *Store) TryMarkRunning(id string) (bool, error) {
 		return nil
 	})
 	return claimed, err
+}
+
+// TryClaimScheduledOnce conditionally claims and consumes a scheduled once run
+// under one cross-process lock. expectedAt is the pin observed by the scheduler;
+// if a concurrent edit changed that pin, the stale run is refused. On success it
+// returns the current definition snapshot that was atomically claimed, marks the
+// run as running, stamps the consumed slot, clears NextRunAt, and disarms the
+// persisted definition before any agent work starts.
+func (s *Store) TryClaimScheduledOnce(id, expectedAt string) (*Automation, bool, error) {
+	var claimed *Automation
+	err := s.withLock(true, true, func() error {
+		a, ok := s.defs[id]
+		if !ok {
+			return fmt.Errorf("automation %q: %w", id, ErrNotFound)
+		}
+		if !a.Enabled || a.Trigger.Type != TriggerOnce || a.Trigger.At != expectedAt {
+			return errScheduledOnceNotClaimable
+		}
+
+		at, err := time.Parse(time.RFC3339, a.Trigger.At)
+		if err != nil {
+			return fmt.Errorf("automation %q has invalid once pin: %w", id, err)
+		}
+		st := s.state[id]
+		if (st != nil && st.LastStatus == StatusRunning) ||
+			(st != nil && st.LastFiredSlot == SlotKey(at)) {
+			return errScheduledOnceNotClaimable
+		}
+
+		now := nowFunc().Format(time.RFC3339)
+		if st == nil {
+			st = &RunState{}
+		} else {
+			cp := *st
+			st = &cp
+		}
+		st.LastStatus = StatusRunning
+		st.LastError = ""
+		st.LastRunAt = now
+		st.LastFiredSlot = SlotKey(at)
+		st.NextRunAt = ""
+		s.state[id] = st
+
+		runDef := *a
+		persisted := *a
+		persisted.Enabled = false
+		persisted.UpdatedAt = now
+		s.defs[id] = &persisted
+		claimed = &runDef
+		return nil
+	})
+	if errors.Is(err, errScheduledOnceNotClaimable) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return claimed, true, nil
 }
 
 // UpdateStateAndMaybeDisable mutates the run-state (e.g. recording a failure and

@@ -142,7 +142,7 @@ func TestNextCronFire_NeverFires(t *testing.T) {
 }
 
 func TestNextCronFire_Timezone(t *testing.T) {
-	loc := mustLoad(t, "America/New_York")
+	loc := mustLoadNewYork(t)
 	// 09:00 New York on 2026-07-01 = 13:00 UTC. nextCron from 08:00 local
 	// must land on 09:00 LOCAL, not a UTC wall-clock reading.
 	after := time.Date(2026, 7, 1, 8, 0, 0, 0, loc)
@@ -156,7 +156,7 @@ func TestNextCronFire_Timezone(t *testing.T) {
 }
 
 func TestNextCronFire_DST_Transitions(t *testing.T) {
-	loc := mustLoad(t, "America/New_York")
+	loc := mustLoadNewYork(t)
 
 	// Spring forward 2026-03-08: 02:30 does not exist. Go's time.Date
 	// interprets the missing wall clock in the POST-transition offset

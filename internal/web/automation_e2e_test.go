@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cnjack/jcode/internal/automation"
+	"github.com/cnjack/jcode/internal/session"
 )
 
 // ---- once + cron trigger HTTP coverage ----
@@ -107,10 +109,31 @@ type recordingRunner struct {
 }
 
 func (r *recordingRunner) StartRun(_ context.Context, a *automation.Automation, kind string) (string, error) {
+	recorder, err := session.NewRecorder(a.ProjectPath, "test", "test")
+	if err != nil {
+		return "", err
+	}
+	recorder.RecordUser(a.Prompt)
+	defer recorder.Close()
+	sessionID := recorder.UUID()
+	meta, err := session.UpdateSessionMeta(sessionID, func(m *session.SessionMeta) {
+		m.AutomationID = a.ID
+		m.TriggerKind = kind
+		m.TerminalStatus = automation.StatusSuccess
+		m.EndTime = time.Now().Format(time.RFC3339)
+		m.UpdatedAt = m.EndTime
+	})
+	if err != nil {
+		return "", err
+	}
+	if meta == nil {
+		return "", fmt.Errorf("record automation session %q: session index entry missing", sessionID)
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.starts = append(r.starts, a.ID+":"+kind)
-	return "sess-" + a.ID, nil
+	return sessionID, nil
 }
 
 func (r *recordingRunner) count() int {
@@ -132,6 +155,7 @@ func waitForE2E(t *testing.T, cond func() bool) {
 }
 
 func TestAutomationE2E_HTTPCreateToScheduledFire(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	s := newAutomationTestServer(t)
 	proj := t.TempDir()
 	runner := &recordingRunner{}
@@ -212,9 +236,9 @@ func TestAutomationE2E_HTTPCreateToScheduledFire(t *testing.T) {
 	if got.Enabled {
 		t.Fatal("once automation must be disarmed after firing")
 	}
-	if st := s.automations.State(created.ID); st.LastStatus != automation.StatusSuccess {
-		t.Fatalf("once run status = %q, want success", st.LastStatus)
-	}
+	waitForE2E(t, func() bool {
+		return s.automations.State(created.ID).LastStatus == automation.StatusSuccess
+	})
 
 	// 6. A cron automation stays armed and its NextRunAt advanced to a valid
 	// future */15 slot. (The exact slot depends on the scheduler's tick instant

@@ -46,8 +46,8 @@ func (d *doneCapture) OnAgentDone(err error) {
 // throwaway headless Engine, injecting the prompt, and blocking until the agent
 // is done. The run is recorded as a normal session tagged with the automation id
 // and trigger kind. Because there is no idle-evict, the engine is torn down on
-// completion. Scheduled runs are forced to full_access (headless approvals would
-// hang); ctx carries the liveness ceiling for scheduled fires.
+// completion. Auto-fired schedule and once definitions are forced to full_access
+// (headless approvals would hang); ctx carries the liveness ceiling.
 func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, kind string) (string, error) {
 	if s.newEngine == nil {
 		return "", fmt.Errorf("automation runs are unavailable (setup mode)")
@@ -56,10 +56,7 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 		return "", fmt.Errorf("project path is missing or not a directory: %s", a.ProjectPath)
 	}
 
-	mode := a.Mode
-	if a.Trigger.Type == automation.TriggerSchedule || mode == "" {
-		mode = "full_access" // headless: Ask/Plan would block forever on approvals
-	}
+	mode := automationRunMode(a)
 
 	// Automation runs are unattended, so they must use a headless engine that
 	// drops interactive tools (ask_user). An agent calling ask_user in a run with
@@ -162,6 +159,14 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 		}()
 	}
 	return sid, runErr
+}
+
+func automationRunMode(a *automation.Automation) string {
+	mode := a.Mode
+	if a.Trigger.Type == automation.TriggerSchedule || a.Trigger.Type == automation.TriggerOnce || mode == "" {
+		return "full_access" // headless: Ask/Plan would block forever on approvals
+	}
+	return mode
 }
 
 // stampAutomationMeta tags a run's session with its automation id, trigger kind

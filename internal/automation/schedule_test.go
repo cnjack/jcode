@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-func mustLoad(t *testing.T, name string) *time.Location {
+func mustLoadNewYork(t *testing.T) *time.Location {
 	t.Helper()
-	loc, err := time.LoadLocation(name)
+	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		t.Skipf("tz %s unavailable: %v", name, err)
+		t.Skipf("America/New_York timezone unavailable: %v", err)
 	}
 	return loc
 }
@@ -61,7 +61,7 @@ func TestComputeNextRun_Manual(t *testing.T) {
 }
 
 func TestComputeNextRun_DST_SpringForward(t *testing.T) {
-	loc := mustLoad(t, "America/New_York")
+	loc := mustLoadNewYork(t)
 	// 2026-03-08: clocks jump 02:00 -> 03:00. A daily 02:30 does not exist that
 	// day; ComputeNextRun must still return a real future instant (normalized).
 	after := time.Date(2026, 3, 8, 0, 0, 0, 0, loc)
@@ -79,7 +79,7 @@ func TestComputeNextRun_DST_SpringForward(t *testing.T) {
 }
 
 func TestComputeNextRun_DST_FallBack_SlotDedup(t *testing.T) {
-	loc := mustLoad(t, "America/New_York")
+	loc := mustLoadNewYork(t)
 	// During fall-back the 01:30 wall-clock occurs twice. SlotKey must be equal
 	// for both so the scheduler's LastFiredSlot guard suppresses the second.
 	first := time.Date(2026, 11, 1, 1, 30, 0, 0, loc)

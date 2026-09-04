@@ -25,9 +25,9 @@ func (f *fakeRunner) StartRun(_ context.Context, _ *Automation, _ string) (strin
 
 func (f *fakeRunner) count() int { f.mu.Lock(); defer f.mu.Unlock(); return f.calls }
 
-func waitFor(t *testing.T, cond func() bool, d time.Duration) {
+func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(d)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -134,8 +134,8 @@ func TestSchedulerTick_SeedsThenFires(t *testing.T) {
 		t.Fatal(err)
 	}
 	sch.tick(context.Background())
-	waitFor(t, func() bool { return r.count() == 1 }, 2*time.Second)
-	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess }, 2*time.Second)
+	waitFor(t, func() bool { return r.count() == 1 })
+	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess })
 }
 
 func TestSchedulerTick_SlotDedup(t *testing.T) {
@@ -223,8 +223,8 @@ func TestSchedulerTick_OnceFiresThenDisarms(t *testing.T) {
 		rs.LastFiredSlot = ""
 	})
 	sch.tick(context.Background())
-	waitFor(t, func() bool { return r.count() == 1 }, 2*time.Second)
-	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess }, 2*time.Second)
+	waitFor(t, func() bool { return r.count() == 1 })
+	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess })
 
 	got := s.Get(a.ID)
 	if got.Enabled {
@@ -276,8 +276,8 @@ func TestSchedulerTick_OnceLateDelivery(t *testing.T) {
 		t.Fatalf("late-delivery seed = %q, want pinned At", got)
 	}
 	sch.tick(context.Background())
-	waitFor(t, func() bool { return r.count() == 1 }, 2*time.Second)
-	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess }, 2*time.Second)
+	waitFor(t, func() bool { return r.count() == 1 })
+	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess })
 	if s.Get(a.ID).Enabled {
 		t.Fatal("late-delivered once must be disarmed after firing")
 	}
@@ -313,8 +313,8 @@ func TestSchedulerTick_OnceLateDelivery(t *testing.T) {
 	due := time.Now().Add(-time.Minute)
 	_ = s.UpdateState(a.ID, func(rs *RunState) { rs.NextRunAt = due.Format(time.RFC3339) })
 	sch.tick(context.Background())
-	waitFor(t, func() bool { return r.count() == 2 }, 2*time.Second)
-	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess }, 2*time.Second)
+	waitFor(t, func() bool { return r.count() == 2 })
+	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess })
 	if s.Get(a.ID).Enabled {
 		t.Fatal("retargeted fire must re-disarm after running")
 	}
@@ -359,7 +359,7 @@ func TestSchedulerTick_CronFiresAndAdvances(t *testing.T) {
 		rs.LastFiredSlot = ""
 	})
 	sch.tick(context.Background())
-	waitFor(t, func() bool { return r.count() == 1 }, 2*time.Second)
+	waitFor(t, func() bool { return r.count() == 1 })
 
 	next, ok := ComputeNextRun(due, a.Trigger)
 	if !ok {
@@ -381,6 +381,7 @@ func TestExecuteRun_OnceRefusedClaimStaysFireable(t *testing.T) {
 	if _, err := s.Update(a.ID, func(x *Automation) { x.Trigger.At = past.Format(time.RFC3339) }); err != nil {
 		t.Fatal(err)
 	}
+	a = s.Get(a.ID)
 
 	// A manual run holds the claim; the scheduled fire is refused.
 	if ok, _ := s.TryMarkRunning(a.ID); !ok {
@@ -405,6 +406,79 @@ func TestExecuteRun_OnceRefusedClaimStaysFireable(t *testing.T) {
 	}
 	if s.Get(a.ID).Enabled {
 		t.Fatal("successful scheduled fire must disarm")
+	}
+}
+
+func TestSchedulerTick_OnceRetargetsArmedPin(t *testing.T) {
+	originalNow := nowFunc
+	now := time.Date(2026, time.September, 4, 10, 0, 0, 0, time.Local)
+	nowFunc = func() time.Time { return now }
+	t.Cleanup(func() { nowFunc = originalNow })
+
+	s, _ := NewStoreDir(t.TempDir())
+	oldPin := now.Add(time.Hour)
+	newPin := now.Add(2 * time.Hour)
+	a, _ := s.Create(Automation{Name: "retarget", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: oldPin.Format(time.RFC3339)}, Enabled: true})
+	r := &fakeRunner{sid: "retargeted"}
+	sch := NewScheduler(s, r)
+
+	sch.tick(context.Background())
+	if got := s.State(a.ID).NextRunAt; got != oldPin.Format(time.RFC3339) {
+		t.Fatalf("initial pin = %q, want %q", got, oldPin.Format(time.RFC3339))
+	}
+	if _, err := s.Update(a.ID, func(x *Automation) { x.Trigger.At = newPin.Format(time.RFC3339) }); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.State(a.ID).NextRunAt; got != "" {
+		t.Fatalf("retarget left stale NextRunAt %q", got)
+	}
+
+	now = oldPin.Add(time.Minute)
+	sch.tick(context.Background()) // seed the new pin; the old pin must not fire
+	if r.count() != 0 {
+		t.Fatal("retargeted once fired at the superseded pin")
+	}
+	if got := s.State(a.ID).NextRunAt; got != newPin.Format(time.RFC3339) {
+		t.Fatalf("retargeted pin = %q, want %q", got, newPin.Format(time.RFC3339))
+	}
+
+	now = newPin.Add(time.Minute)
+	sch.tick(context.Background())
+	waitFor(t, func() bool { return r.count() == 1 })
+	waitFor(t, func() bool { return s.State(a.ID).LastStatus == StatusSuccess })
+	if s.Get(a.ID).Enabled {
+		t.Fatal("retargeted once was not disarmed after its new pin fired")
+	}
+}
+
+func TestExecuteRun_ScheduledOnceRejectsStaleRetargetedDefinition(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	oldPin := time.Now().Add(time.Hour)
+	newPin := oldPin.Add(time.Hour)
+	stale, _ := s.Create(Automation{Name: "race", Prompt: "old", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerOnce, At: oldPin.Format(time.RFC3339)}, Enabled: true})
+	if _, err := s.Update(stale.ID, func(x *Automation) {
+		x.Trigger.At = newPin.Format(time.RFC3339)
+		x.Prompt = "new"
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &fakeRunner{sid: "must-not-run"}
+	if _, err := ExecuteRun(context.Background(), s, r, stale, KindScheduled); err == nil {
+		t.Fatal("stale scheduled-once claim unexpectedly succeeded")
+	}
+	if r.count() != 0 {
+		t.Fatal("runner started from a stale once definition")
+	}
+	current := s.Get(stale.ID)
+	if !current.Enabled || current.Trigger.At != newPin.Format(time.RFC3339) || current.Prompt != "new" {
+		t.Fatalf("stale claim changed retargeted definition: %+v", current)
+	}
+	st := s.State(stale.ID)
+	if st.LastStatus == StatusRunning || st.LastFiredSlot != "" {
+		t.Fatalf("stale claim consumed run state: %+v", st)
 	}
 }
 

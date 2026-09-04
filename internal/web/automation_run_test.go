@@ -1,6 +1,10 @@
 package web
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cnjack/jcode/internal/automation"
+)
 
 // runAutomation keys the engine on eng.taskID (the single registration done by
 // buildLocalEngine) and reclaims it with deleteEngine(eng.taskID). This guards
@@ -36,5 +40,27 @@ func TestAutomationEngineRegisteredOnceAndReclaimed(t *testing.T) {
 		if n != 0 {
 			t.Fatalf("run %d: engine not reclaimed, %d still live", i, n)
 		}
+	}
+}
+
+func TestAutomationRunModeForcesUnattendedTriggersToFullAccess(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger automation.TriggerType
+		mode    string
+		want    string
+	}{
+		{name: "schedule", trigger: automation.TriggerSchedule, mode: "approval", want: "full_access"},
+		{name: "once", trigger: automation.TriggerOnce, mode: "plan", want: "full_access"},
+		{name: "manual", trigger: automation.TriggerManual, mode: "approval", want: "approval"},
+		{name: "empty fallback", trigger: automation.TriggerManual, mode: "", want: "full_access"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &automation.Automation{Mode: tt.mode, Trigger: automation.Trigger{Type: tt.trigger}}
+			if got := automationRunMode(a); got != tt.want {
+				t.Fatalf("automationRunMode() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

@@ -257,36 +257,30 @@ func (s *Scheduler) skipAndMaybeDisable(a *Automation, reason string) {
 // manual ▶ path so state bookkeeping is identical. For scheduled runs, repeated
 // errors increment ConsecutiveFails and auto-disable past the threshold.
 func ExecuteRun(ctx context.Context, store *Store, runner Runner, a *Automation, kind string) (string, error) {
-	// Atomically claim the run. If a run for this automation is already in
-	// progress (a scheduled fire racing a manual "Run Now", or another process),
-	// refuse rather than start a second agent session against the same project.
-	// Returning before writing any terminal state preserves the live run's
-	// status.
-	claimed, _ := store.TryMarkRunning(a.ID)
-	if !claimed {
-		return "", fmt.Errorf("a run is already in progress for automation %q", a.ID)
-	}
-
-	// A once trigger is consumed by its scheduled fire: disarm the definition
-	// and stamp its consumed slot only AFTER the run is claimed, so a refused
-	// claim (a racing manual run) leaves the one-shot armed and re-fireable.
-	// The run itself still executes and records normally. Manual runs are a
-	// preview — they never consume it.
+	// A scheduled once is claimed and consumed against the CURRENT persisted pin
+	// in one cross-process transaction. This rejects a copied definition when a
+	// user retargets it between tick and this goroutine, and returns the latest
+	// definition snapshot for the actual run. Manual once runs remain previews.
 	if kind == KindScheduled && a.Trigger.Type == TriggerOnce {
-		consumedSlot := SlotKey(nowFunc())
-		if at, perr := time.Parse(time.RFC3339, a.Trigger.At); perr == nil {
-			consumedSlot = SlotKey(at)
+		current, claimed, err := store.TryClaimScheduledOnce(a.ID, a.Trigger.At)
+		if err != nil {
+			return "", fmt.Errorf("claim scheduled once %q: %w", a.ID, err)
 		}
-		if _, derr := store.SetEnabled(a.ID, false); derr != nil {
-			config.Logger().Printf("[automation] once disarm failed for %s: %v", a.ID, derr)
-			_ = store.UpdateState(a.ID, func(rs *RunState) {
-				rs.LastError = truncate("auto-disarm failed: "+derr.Error(), 300)
-			})
+		if !claimed {
+			return "", fmt.Errorf("scheduled once automation %q is no longer claimable", a.ID)
 		}
-		_ = store.UpdateState(a.ID, func(rs *RunState) {
-			rs.LastFiredSlot = consumedSlot
-			rs.NextRunAt = ""
-		})
+		a = current
+	} else {
+		// Atomically claim every other run. If a run for this automation is
+		// already in progress (a scheduled fire racing a manual "Run Now", or
+		// another process), refuse rather than overlap it.
+		claimed, err := store.TryMarkRunning(a.ID)
+		if err != nil {
+			return "", fmt.Errorf("claim automation run %q: %w", a.ID, err)
+		}
+		if !claimed {
+			return "", fmt.Errorf("a run is already in progress for automation %q", a.ID)
+		}
 	}
 
 	sessionID, err := safeStartRun(ctx, runner, a, kind)
