@@ -186,19 +186,29 @@ const STANDARD_EFFORT_OPTIONS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'm
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
-interface PendingBrowserFile {
+interface PendingDroppedFile {
   id: string
-  file: File
+  name: string
+  size?: number
+  mediaType?: string
+  /** Browser files need uploading; native Desktop drops already have a readable path. */
+  file?: File
+  path?: string
   uploadedPath?: string
   uploading?: boolean
   error?: string
 }
 
-let browserFileID = 0
+let droppedFileID = 0
 
-function nextBrowserFileID(): string {
-  browserFileID += 1
-  return `browser_file_${Date.now().toString(36)}_${browserFileID.toString(36)}`
+function nextDroppedFileID(): string {
+  droppedFileID += 1
+  return `dropped_file_${Date.now().toString(36)}_${droppedFileID.toString(36)}`
+}
+
+function droppedFileName(path: string): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts.at(-1) || path || 'attachment'
 }
 
 /**
@@ -306,7 +316,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const [input, setInput] = useState(() => readDraft(currentSessionId))
   /** Pending vision images — same shape as the ChatRuntime `ChatImage` / AttachmentList. */
   const [pendingImages, setPendingImages] = useState<RuntimeChatImage[]>([])
-  const [pendingBrowserFiles, setPendingBrowserFiles] = useState<PendingBrowserFile[]>([])
+  const [pendingFiles, setPendingFiles] = useState<PendingDroppedFile[]>([])
   const [isUploadingFiles, setIsUploadingFiles] = useState(false)
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
@@ -508,7 +518,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     draftSessionRef.current = currentSessionId
     setInput(readDraft(currentSessionId))
     setPendingImages([])
-    setPendingBrowserFiles([])
+    setPendingFiles([])
     setIsUploadingFiles(false)
   }, [currentSessionId])
 
@@ -524,32 +534,38 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const send = useCallback(async () => {
     const composerGeneration = composerGenerationRef.current
     const text = input.trim()
-    if (!text && pendingImages.length === 0 && pendingBrowserFiles.length === 0) return
-    if (isUploadingFiles || (isRunning && pendingBrowserFiles.length > 0)) return
+    if (!text && pendingImages.length === 0 && pendingFiles.length === 0) return
+    const hasFilesToUpload = pendingFiles.some((item) => !item.path && !item.uploadedPath)
+    if (isUploadingFiles || (isRunning && hasFilesToUpload)) return
 
-    let uploadedFiles = pendingBrowserFiles
-    if (uploadedFiles.length > 0) {
+    let completedFiles = pendingFiles
+    const filesToUpload = completedFiles.filter((item) => !item.path && !item.uploadedPath)
+    if (filesToUpload.length > 0) {
       if (!currentSessionId || !host.uploadDroppedFile) {
-        setPendingBrowserFiles((current) => current.map((item) => ({
-          ...item,
-          uploading: false,
-          error: strings.fileUploadUnavailable,
-        })))
+        setPendingFiles((current) => current.map((item) =>
+          item.path || item.uploadedPath ? item : {
+            ...item,
+            uploading: false,
+            error: strings.fileUploadUnavailable,
+          },
+        ))
         return
       }
       const targetSessionID = currentSessionId
       setIsUploadingFiles(true)
-      uploadedFiles = uploadedFiles.map((item) => ({
+      completedFiles = completedFiles.map((item) => ({
         ...item,
-        uploading: !item.uploadedPath,
+        uploading: !item.path && !item.uploadedPath,
         error: undefined,
       }))
-      setPendingBrowserFiles(uploadedFiles)
+      setPendingFiles(completedFiles)
       let failed = false
-      for (const pending of uploadedFiles) {
-        if (pending.uploadedPath) continue
+      for (const pending of filesToUpload) {
         let next = pending
-        if (pending.file.size > MAX_UPLOAD_BYTES) {
+        if (!pending.file) {
+          next = { ...pending, uploading: false, error: strings.fileUploadUnavailable }
+          failed = true
+        } else if (pending.file.size > MAX_UPLOAD_BYTES) {
           next = { ...pending, uploading: false, error: strings.fileTooLarge }
           failed = true
         } else {
@@ -563,8 +579,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
             failed = true
           }
         }
-        uploadedFiles = uploadedFiles.map((item) => item.id === pending.id ? next : item)
-        setPendingBrowserFiles(uploadedFiles)
+        completedFiles = completedFiles.map((item) => item.id === pending.id ? next : item)
+        setPendingFiles(completedFiles)
       }
       setIsUploadingFiles(false)
       if (failed || currentSessionRef.current !== targetSessionID || composerGenerationRef.current !== composerGeneration) return
@@ -574,8 +590,10 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
       pendingImages.length > 0
         ? pendingImages.map((i) => ({ data: i.data, media_type: i.media_type, name: i.name }))
         : undefined
-    const fileContext = uploadedFiles
-      .map((item) => item.uploadedPath ? droppedFilePrompt(item.uploadedPath) : '')
+    const fileContext = completedFiles
+      .map((item) => item.path || item.uploadedPath)
+      .filter((path): path is string => !!path)
+      .map(droppedFilePrompt)
       .filter(Boolean)
       .join('\n\n')
     const body = [text, fileContext].filter(Boolean).join('\n\n') || strings.attachedImages
@@ -588,10 +606,10 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     setInput('')
     writeDraft(currentSessionId, '')
     setPendingImages([])
-    setPendingBrowserFiles([])
+    setPendingFiles([])
     setShowSlashMenu(false)
     onSent?.()
-  }, [actions, currentSessionId, host.uploadDroppedFile, input, isRunning, isUploadingFiles, onSent, pendingBrowserFiles, pendingImages, strings])
+  }, [actions, currentSessionId, host.uploadDroppedFile, input, isRunning, isUploadingFiles, onSent, pendingFiles, pendingImages, strings])
 
   // ─── Model / mode selection ───────────────────────────────────────────────
 
@@ -693,19 +711,9 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     reader.readAsDataURL(file)
   }, [])
 
-  const appendDroppedFilePrompts = useCallback((prompts: string[]) => {
-    if (prompts.length === 0) return
-    setInput((current) => {
-      const separator = current.length === 0 || current.endsWith('\n') ? '' : '\n'
-      return `${current}${separator}${prompts.join('\n')}`
-    })
-    requestAnimationFrame(() => textareaRef.current?.focus())
-  }, [])
-
   const ingestBrowserFiles = useCallback((files: Iterable<File>) => {
     if (isUploadingFiles) return
-    const prompts: string[] = []
-    const uploads: PendingBrowserFile[] = []
+    const pending: PendingDroppedFile[] = []
     for (const file of files) {
       if (imageSupport && file.type.startsWith('image/') && file.size <= MAX_IMAGE_BYTES) {
         addImageFile(file)
@@ -713,18 +721,26 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
       }
       const exposedPath = (file as File & { path?: string }).path
       if (exposedPath) {
-        prompts.push(droppedFilePrompt(exposedPath))
+        pending.push({
+          id: nextDroppedFileID(),
+          name: file.name || droppedFileName(exposedPath),
+          size: file.size,
+          mediaType: file.type || undefined,
+          path: exposedPath,
+        })
         continue
       }
-      uploads.push({
-        id: nextBrowserFileID(),
+      pending.push({
+        id: nextDroppedFileID(),
+        name: file.name || 'attachment',
+        size: file.size,
+        mediaType: file.type || undefined,
         file,
         error: file.size > MAX_UPLOAD_BYTES ? strings.fileTooLarge : undefined,
       })
     }
-    appendDroppedFilePrompts(prompts)
-    if (uploads.length > 0) setPendingBrowserFiles((current) => [...current, ...uploads])
-  }, [addImageFile, appendDroppedFilePrompts, imageSupport, isUploadingFiles, strings.fileTooLarge])
+    if (pending.length > 0) setPendingFiles((current) => [...current, ...pending])
+  }, [addImageFile, imageSupport, isUploadingFiles, strings.fileTooLarge])
 
   const ingestNativePaths = useCallback(async (paths: string[]) => {
     if (isUploadingFiles) return
@@ -745,10 +761,14 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
       name: image.name,
     }] : [])
     if (images.length > 0) setPendingImages((current) => [...current, ...images])
-    appendDroppedFilePrompts(
-      results.filter(({ image }) => !image).map(({ path }) => droppedFilePrompt(path)),
-    )
-  }, [appendDroppedFilePrompts, host.readDroppedImage, imageSupport, isUploadingFiles])
+    const files = results.flatMap(({ path, image }) => image ? [] : [{
+      id: nextDroppedFileID(),
+      name: droppedFileName(path),
+      path,
+    }])
+    if (files.length > 0) setPendingFiles((current) => [...current, ...files])
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [host.readDroppedImage, imageSupport, isUploadingFiles])
 
   useEffect(() => {
     if (!host.listenForFileDrops) return
@@ -831,14 +851,14 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     setPendingImages((prev) => prev.filter((_, i) => i !== index))
   }
 
-  function removeBrowserFile(id: string) {
+  function removePendingFile(id: string) {
     if (isUploadingFiles) return
-    setPendingBrowserFiles((current) => current.filter((item) => item.id !== id))
+    setPendingFiles((current) => current.filter((item) => item.id !== id))
   }
 
-  function retryBrowserFile(id: string) {
+  function retryPendingFile(id: string) {
     if (isUploadingFiles) return
-    setPendingBrowserFiles((current) => current.map((item) => item.id === id ? {
+    setPendingFiles((current) => current.map((item) => item.id === id ? {
       ...item,
       uploadedPath: undefined,
       error: undefined,
@@ -1038,23 +1058,24 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     setShowEffortPicker(false)
   }
 
-  const pendingFileItems = useMemo<PendingAttachmentItem[]>(() => pendingBrowserFiles.map((item) => ({
+  const pendingFileItems = useMemo<PendingAttachmentItem[]>(() => pendingFiles.map((item) => ({
     attachment: {
       id: item.id,
       kind: 'file',
-      name: item.file.name || 'attachment',
-      size: item.file.size,
-      media_type: item.file.type || undefined,
-      progress: item.uploading ? 0.5 : item.uploadedPath ? 1 : 0,
+      name: item.name,
+      size: item.size,
+      media_type: item.mediaType,
+      progress: item.uploading ? 0.5 : item.path || item.uploadedPath ? 1 : 0,
       error: item.error,
     },
     status: item.error ? 'error' : item.uploading ? 'uploading' : 'done',
-    remove: () => removeBrowserFile(item.id),
-    retry: () => retryBrowserFile(item.id),
-  })), [isUploadingFiles, pendingBrowserFiles])
-  const hasPayload = input.trim().length > 0 || pendingImages.length > 0 || pendingBrowserFiles.length > 0
-  const canSend = hasPayload && !isUploadingFiles && (!isRunning || pendingBrowserFiles.length === 0)
-  const showSend = !isRunning || ((input.trim().length > 0 || pendingImages.length > 0) && pendingBrowserFiles.length === 0)
+    remove: () => removePendingFile(item.id),
+    retry: () => retryPendingFile(item.id),
+  })), [isUploadingFiles, pendingFiles])
+  const hasFilesToUpload = pendingFiles.some((item) => !item.path && !item.uploadedPath)
+  const hasPayload = input.trim().length > 0 || pendingImages.length > 0 || pendingFiles.length > 0
+  const canSend = hasPayload && !isUploadingFiles && (!isRunning || !hasFilesToUpload)
+  const showSend = !isRunning || (hasPayload && !hasFilesToUpload)
   const currentModeDef = MODE_DEFS.find((m) => m.value === mode) ?? MODE_DEFS[0]
   // Host-restricted mode list (M20 cloud ceiling): absent ⇒ all four modes.
   const modeDefs = allowedModes ? MODE_DEFS.filter((d) => allowedModes.includes(d.value)) : MODE_DEFS
@@ -1257,8 +1278,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                     >
                       <PaperClipIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)]" />
                       <span>{strings.attachFiles}</span>
-                      {pendingImages.length + pendingBrowserFiles.length > 0 && (
-                        <span className="ml-auto font-mono text-[10px] text-[var(--color-primary)]">{pendingImages.length + pendingBrowserFiles.length}</span>
+                      {pendingImages.length + pendingFiles.length > 0 && (
+                        <span className="ml-auto font-mono text-[10px] text-[var(--color-primary)]">{pendingImages.length + pendingFiles.length}</span>
                       )}
                     </button>
                     <div className="mx-2 my-1 h-px bg-[var(--color-border)]" aria-hidden="true" />
