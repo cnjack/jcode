@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
+	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
@@ -183,6 +184,23 @@ func (s *Server) SubmitMessage(message, source string) (accepted bool, err error
 // still unavailable, agent construction is retried before any history or
 // recorder mutation and the caller's running claim is released.
 func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID string, images []chatImage) (string, error) {
+	return s.submitMessageWithOptions(eng, message, mode, source, sessionID, images, submitMessageOptions{})
+}
+
+type submitMessageOptions struct {
+	Agent        *adk.ChatModelAgent
+	EventHandler handler.AgentEventHandler
+}
+
+// submitMessageWithOptions is the task-runner seam used by conversation-bound
+// automations. Overrides affect only this turn: the interactive Engine's agent,
+// mode selection, and handler remain unchanged.
+func (s *Server) submitMessageWithOptions(
+	eng *Engine,
+	message, mode, source, sessionID string,
+	images []chatImage,
+	opts submitMessageOptions,
+) (string, error) {
 	if err := eng.ensureAgentAvailable(); err != nil {
 		eng.running.Store(false)
 		return "", err
@@ -372,6 +390,13 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	history := make([]adk.Message, len(eng.history))
 	copy(history, eng.history)
 	agent := eng.agent
+	eventHandler := eng.eventHandler
+	if opts.Agent != nil {
+		agent = opts.Agent
+	}
+	if opts.EventHandler != nil {
+		eventHandler = opts.EventHandler
+	}
 	eng.emu.Unlock()
 
 	// Reset the per-turn approval-reviewer denial breaker.
@@ -420,7 +445,7 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 		// Inject the hook dispatcher so PreToolUse/PostToolUse/Stop hooks run on the
 		// Web surface too (parity with the TUI); reloaded per turn for hot-apply.
 		hookCtx := hooks.WithDispatcher(runCtx, hooks.NewSessionDispatcher(config.ConfigDir(), eng.env.Pwd(), recorder.UUID(), config.Logger().Printf))
-		result := runner.Run(hookCtx, agent, history, eng.eventHandler, recorder, eng.todoStore, eng.env.GoalStore, s.tracer, eng.tokenUsage)
+		result := runner.Run(hookCtx, agent, history, eventHandler, recorder, eng.todoStore, eng.env.GoalStore, s.tracer, eng.tokenUsage)
 		if len(result.Messages) > 0 {
 			eng.emu.Lock()
 			eng.history = append(eng.history, result.Messages...)

@@ -30,7 +30,7 @@ import {
 import { WSClient } from './lib/ws'
 import { api, isAPIError } from './lib/api'
 import { apiBase } from './lib/apiBase'
-import { normalizeMode } from './lib/types'
+import { normalizeMode, type TaskItem } from './lib/types'
 import { useAppDispatch, useAppSelector } from './app/hooks'
 import {
   modelActions,
@@ -353,6 +353,15 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
     void dispatch(replaySession(run.session_id))
   }, [dispatch])
 
+  const openAutomationConversation = useCallback((conversation: TaskItem) => {
+    void dispatch(openConversation({
+      uuid: conversation.uuid,
+      project: conversation.project,
+      title: conversation.title,
+      workspaceKind: conversation.workspace_kind,
+    }))
+  }, [dispatch])
+
   const closeRun = useCallback(() => {
     setActiveRun(null)
     dispatch(uiActions.setView('automations'))
@@ -492,7 +501,9 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
               sidebar is outside the card. */}
           <main className="workspace-main relative flex min-h-0 min-w-0 flex-1 flex-col">
             {activeView === 'chat' && <ChatView />}
-            {activeView === 'automations' && <AutomationsView onOpenRun={openRun} />}
+            {activeView === 'automations' && (
+              <AutomationsView onOpenRun={openRun} onOpenConversation={openAutomationConversation} />
+            )}
             {activeView === 'cloud-mobile' && <CloudMobileView />}
             {activeView === 'automation-run' && (
               <AutomationRunReplay run={activeRun} onBack={closeRun} onOpenArtifacts={() => togglePanel('artifacts')} />

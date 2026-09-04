@@ -107,6 +107,30 @@ func TestListAllTasksEmpty(t *testing.T) {
 	}
 }
 
+func TestListSessionsExcludesAutomationRuns(t *testing.T) {
+	seedIndex(t, map[string][]session.SessionMeta{
+		"/work/p": {
+			{UUID: "normal", Project: "/work/p", Title: "normal"},
+			{UUID: "automation-run", Project: "/work/p", Title: "run", AutomationID: "automation-1"},
+		},
+	})
+	s := &Server{Engine: &Engine{pwd: "/work/p"}}
+	rec := httptest.NewRecorder()
+	s.handleListSessions(rec, httptest.NewRequest(http.MethodGet, "/api/sessions", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var items []struct {
+		UUID string `json:"uuid"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].UUID != "normal" {
+		t.Fatalf("sessions=%+v", items)
+	}
+}
+
 // P0-2: GET /api/tasks returns sessions across ALL projects, each tagged with
 // its project path.
 func TestListAllTasksMultiProject(t *testing.T) {

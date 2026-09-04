@@ -2,11 +2,13 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/session"
@@ -37,11 +39,68 @@ type taskItem struct {
 	ArtifactUnseen bool                  `json:"artifact_unseen,omitempty"`
 }
 
+type sessionDeleteAutomation struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	HumanSchedule string `json:"human_schedule"`
+	Enabled       bool   `json:"enabled"`
+}
+
+type sessionDeleteImpact struct {
+	Automations []sessionDeleteAutomation `json:"automations"`
+}
+
+func deleteImpactFor(automations []*automation.Automation) sessionDeleteImpact {
+	items := make([]sessionDeleteAutomation, 0, len(automations))
+	for _, item := range automations {
+		items = append(items, sessionDeleteAutomation{
+			ID: item.ID, Name: item.Name, HumanSchedule: automation.HumanSchedule(item.Trigger), Enabled: item.Enabled,
+		})
+	}
+	return sessionDeleteImpact{Automations: items}
+}
+
+func hasRunningAutomation(st *automation.Store, automations []*automation.Automation) bool {
+	for _, item := range automations {
+		if st.State(item.ID).LastStatus == automation.StatusRunning {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) handleSessionDeleteImpact(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id is required"})
+		return
+	}
+	meta, err := session.FindSessionMeta(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if meta == nil && s.resolveEngine(id) == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+	if s.automations == nil {
+		writeJSON(w, http.StatusOK, sessionDeleteImpact{Automations: []sessionDeleteAutomation{}})
+		return
+	}
+	related, err := s.automations.ListByOwnerSession(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, deleteImpactFor(related))
+}
+
 func newTaskItem(m *session.SessionMeta, project string, running bool) taskItem {
 	return taskItem{
 		UUID:           m.UUID,
 		Project:        project,
-		WorkspaceKind:  session.NormalizeWorkspaceKind(m.WorkspaceKind),
+		WorkspaceKind:  effectiveSessionWorkspaceKind(m),
 		CreatedAt:      m.StartTime,
 		UpdatedAt:      m.UpdatedAt,
 		Provider:       m.Provider,
@@ -198,6 +257,12 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]sessionItem, 0, len(metas))
 	for _, m := range metas {
+		// Match /api/tasks: automation run sessions live only in Automations >
+		// Recent runs. The active-project fallback must not reinsert them into the
+		// conversation sidebar under their backing scratch directory.
+		if m.AutomationID != "" {
+			continue
+		}
 		items = append(items, sessionItem{
 			UUID:      m.UUID,
 			CreatedAt: m.StartTime,
@@ -227,6 +292,31 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id is required"})
 		return
 	}
+	policy := automation.SessionAutomationPolicy(r.URL.Query().Get("automation_policy"))
+	if policy != "" && policy != automation.SessionAutomationDelete && policy != automation.SessionAutomationDetach {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "automation_policy must be 'delete' or 'detach'"})
+		return
+	}
+	if s.automations != nil {
+		related, err := s.automations.ListByOwnerSession(id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if hasRunningAutomation(s.automations, related) {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "a related automation is currently running", "code": "conversation_automation_running",
+			})
+			return
+		}
+		if len(related) > 0 && policy == "" {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "conversation has related automations", "code": "conversation_has_automations",
+				"automations": deleteImpactFor(related).Automations,
+			})
+			return
+		}
+	}
 	// Serialize with activation, then atomically reject running tasks and detach
 	// non-active engines under the lifecycle order taskCreateMu -> tasksMu -> mu.
 	// Active engines stay live but have their recorder reset while run claims are
@@ -244,6 +334,63 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		s.taskCreateMu.Unlock()
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
 		return
+	}
+	var automationSnapshot automation.SessionAutomationSnapshot
+	if s.automations != nil {
+		if policy == "" {
+			// Re-check while activation/run claims are blocked. A conversation-bound
+			// automation may have been created after the preflight response.
+			related, err := s.automations.ListByOwnerSession(id)
+			if err != nil {
+				s.mu.Unlock()
+				s.tasksMu.Unlock()
+				s.taskCreateMu.Unlock()
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			if len(related) > 0 {
+				s.mu.Unlock()
+				s.tasksMu.Unlock()
+				s.taskCreateMu.Unlock()
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error": "conversation has related automations", "code": "conversation_has_automations",
+					"automations": deleteImpactFor(related).Automations,
+				})
+				return
+			}
+		} else {
+			related, err := s.automations.ListByOwnerSession(id)
+			if err != nil {
+				s.mu.Unlock()
+				s.tasksMu.Unlock()
+				s.taskCreateMu.Unlock()
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			if hasRunningAutomation(s.automations, related) {
+				s.mu.Unlock()
+				s.tasksMu.Unlock()
+				s.taskCreateMu.Unlock()
+				writeJSON(w, http.StatusConflict, map[string]string{
+					"error": "a related automation is currently running", "code": "conversation_automation_running",
+				})
+				return
+			}
+			automationSnapshot, err = s.automations.ResolveOwnerSession(id, policy)
+			if err != nil {
+				s.mu.Unlock()
+				s.tasksMu.Unlock()
+				s.taskCreateMu.Unlock()
+				if errors.Is(err, automation.ErrOwnerAutomationRunning) {
+					writeJSON(w, http.StatusConflict, map[string]string{
+						"error": "a related automation is currently running", "code": "conversation_automation_running",
+					})
+					return
+				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		}
 	}
 	uploadLocked := eng != nil
 	if uploadLocked {
@@ -284,6 +431,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		eng.uploadMu.Unlock()
 	}
 	if deleteErr != nil {
+		if s.automations != nil {
+			if rollbackErr := s.automations.RestoreSessionAutomations(automationSnapshot); rollbackErr != nil {
+				config.Logger().Printf("[automation] failed to roll back session deletion policy for %s: %v", id, rollbackErr)
+			}
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": deleteErr.Error()})
 		return
 	}

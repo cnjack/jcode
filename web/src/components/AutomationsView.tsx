@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useTranslation, Trans } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import {
   BoltIcon,
@@ -31,9 +31,11 @@ import {
   CalendarDaysIcon,
   HandRaisedIcon,
   DocumentDuplicateIcon,
+  LockClosedIcon,
+  ArrowTopRightOnSquareIcon,
 } from '@heroicons/react/24/outline'
 import { api } from '../lib/api'
-import { triggerKindLabel } from '../lib/automation'
+import { toDatetimeLocal, toLocalRFC3339, triggerKindLabel } from '../lib/automation'
 import type {
   Automation,
   AutomationCadence,
@@ -43,13 +45,15 @@ import type {
   AutomationTemplate,
   AutomationTrigger,
 } from '../lib/automation'
+import type { ProjectInfo, TaskItem } from '../lib/types'
+import { SelectMenu } from './SelectMenu'
 
 // ─── Local helpers ───────────────────────────────────────────────────────────
 
 type View = 'list' | 'templates'
 type StatusFilter = 'all' | 'success' | 'failed'
 type CardState = 'running' | 'error' | 'success' | 'paused'
-type FormTrigger = 'manual' | 'hourly' | 'daily' | 'weekly'
+type FormTrigger = 'manual' | 'hourly' | 'daily' | 'weekly' | 'once' | 'cron'
 
 const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
@@ -89,21 +93,61 @@ function relTimeFromNow(iso: string, t: TFunction): string {
   return relLabel(new Date(iso).getTime() - Date.now(), t)
 }
 
+function projectName(path: string): string {
+  const normalized = path.replace(/[\\/]+$/, '')
+  return normalized.split(/[\\/]/).pop() || path
+}
+
 function nextRunLabel(a: AutomationItem, t: TFunction): string {
   if (a.trigger.type === 'manual') {
-    const last = a.state.last_run_at
-    if (!last) return t('automations.notRunYet')
-    const rel = relTime(last, t)
-    if (a.state.last_status === 'success') return t('automations.lastRunOk', { time: rel })
-    if (a.state.last_status === 'error') return t('automations.lastRunFailed', { time: rel })
-    return rel
+    return lastRunLabel(a, t)
+  }
+  if (a.trigger.type === 'once') {
+    // Prefer the scheduler's seeded slot; fall back to the pinned time while
+    // it is still future (unseeded first 30s, or due-but-not-yet-fired), and
+    // only show the last-run outcome once the pin itself is past.
+    const next = a.state.next_run_at
+    if (next && new Date(next).getTime() > Date.now()) {
+      return t('automations.nextRunIn', { time: relTimeFromNow(next, t) })
+    }
+    const at = a.trigger.at
+    if (a.enabled && at && new Date(at).getTime() > Date.now()) {
+      return t('automations.nextRunIn', { time: relTimeFromNow(at, t) })
+    }
+    return lastRunLabel(a, t)
   }
   const next = a.state.next_run_at
-  return next ? t('automations.nextRunIn', { time: relTimeFromNow(next, t) }) : a.human_schedule
+  if (!next || new Date(next).getTime() <= Date.now()) {
+    // Overdue slot awaiting the next tick — a relative "in {time}" would be
+    // wrong, so fall back to the timeless schedule string.
+    return a.human_schedule
+  }
+  return t('automations.nextRunIn', { time: relTimeFromNow(next, t) })
+}
+
+function lastRunLabel(a: AutomationItem, t: TFunction): string {
+  const last = a.state.last_run_at
+  if (!last) return t('automations.notRunYet')
+  const rel = relTime(last, t)
+  if (a.state.last_status === 'success') return t('automations.lastRunOk', { time: rel })
+  if (a.state.last_status === 'error') return t('automations.lastRunFailed', { time: rel })
+  return rel
 }
 
 function runLabel(r: AutomationRun): string {
   return r.start_time ? new Date(r.start_time).toLocaleString() : ''
+}
+
+/** Whether the meta row shows "next run" (future fire) or falls back to "last run". */
+function usesNextRun(a: AutomationItem): boolean {
+  if (a.trigger.type === 'manual') return false
+  if (a.trigger.type === 'once') {
+    const next = a.state.next_run_at
+    if (next && new Date(next).getTime() > Date.now()) return true
+    const at = a.trigger.at
+    return a.enabled && !!at && new Date(at).getTime() > Date.now()
+  }
+  return true
 }
 
 function modeLabel(mode: string | undefined, t: TFunction): string {
@@ -124,6 +168,9 @@ function CadenceChip({ a }: { a: AutomationItem | AutomationTemplate }) {
   if (trig.type === 'manual') {
     label = t('automations.cadence.manual')
     Icon = HandRaisedIcon
+  } else if (trig.type === 'once') {
+    label = t('automations.cadence.once')
+    Icon = ClockIcon
   } else if (trig.cadence === 'hourly') {
     label = t('automations.cadence.hourly')
     Icon = ClockIcon
@@ -132,6 +179,9 @@ function CadenceChip({ a }: { a: AutomationItem | AutomationTemplate }) {
     Icon = CalendarDaysIcon
   } else if (trig.cadence === 'weekly') {
     label = t('automations.cadence.weekly')
+    Icon = CalendarDaysIcon
+  } else if (trig.cadence === 'cron') {
+    label = t('automations.cadence.cron')
     Icon = CalendarDaysIcon
   }
   return (
@@ -215,71 +265,98 @@ interface FormValues {
   hour: number
   minute: number
   weekday: number
+  /** 5-field cron expression (trigger === 'cron'). */
+  cronExpr: string
+  /** datetime-local input value (trigger === 'once'). */
+  onceAt: string
   projectPath: string
+  ownerSessionID: string
   mode: string
   prompt: string
   enabled: boolean
 }
 
-function buildForm(editing: AutomationItem | null, prefill: Partial<AutomationCreate> | null): FormValues {
-  if (editing) {
-    return {
-      name: editing.name,
-      trigger:
-        editing.trigger.type === 'manual'
-          ? 'manual'
-          : ((editing.trigger.cadence as FormTrigger) || 'daily'),
-      hour: editing.trigger.hour ?? 9,
-      minute: editing.trigger.minute ?? 0,
-      weekday: editing.trigger.weekday ?? 1,
-      projectPath: editing.project_path,
-      mode: editing.mode || 'full_access',
-      prompt: editing.prompt,
-      enabled: editing.enabled,
-    }
+/** Fill trigger-related form fields from a trigger value (mutates + returns base). */
+function applyTrigger(trig: AutomationTrigger, base: FormValues): FormValues {
+  if (trig.type === 'manual') {
+    base.trigger = 'manual'
+  } else if (trig.type === 'once') {
+    base.trigger = 'once'
+    base.onceAt = toDatetimeLocal(trig.at)
+  } else if (trig.cadence === 'cron') {
+    base.trigger = 'cron'
+    base.cronExpr = trig.expr || ''
+  } else {
+    base.trigger = (trig.cadence as FormTrigger) || 'daily'
+    base.hour = trig.hour ?? 9
+    base.minute = trig.minute ?? 0
+    base.weekday = trig.weekday ?? 1
   }
-  const base: FormValues = {
+  return base
+}
+
+function buildForm(editing: AutomationItem | null, prefill: Partial<AutomationCreate> | null): FormValues {
+  const blank: FormValues = {
     name: '',
     trigger: 'daily',
     hour: 9,
     minute: 0,
     weekday: 1,
+    cronExpr: '',
+    onceAt: '',
     projectPath: '',
+    ownerSessionID: '',
     mode: 'full_access',
     prompt: '',
     enabled: true,
   }
-  if (prefill) {
-    if (prefill.name) base.name = prefill.name
-    if (prefill.prompt) base.prompt = prefill.prompt
-    if (prefill.mode) base.mode = prefill.mode
-    if (prefill.project_path) base.projectPath = prefill.project_path
-    if (prefill.trigger) {
-      base.trigger =
-        prefill.trigger.type === 'manual'
-          ? 'manual'
-          : ((prefill.trigger.cadence as FormTrigger) || 'daily')
-      if (prefill.trigger.hour != null) base.hour = prefill.trigger.hour
-      if (prefill.trigger.minute != null) base.minute = prefill.trigger.minute
-      if (prefill.trigger.weekday != null) base.weekday = prefill.trigger.weekday
-    }
+  if (editing) {
+    return applyTrigger(editing.trigger, {
+      ...blank,
+      name: editing.name,
+      projectPath: editing.project_path,
+      ownerSessionID: editing.owner_session_id || '',
+      mode: editing.mode || 'full_access',
+      prompt: editing.prompt,
+      enabled: editing.enabled,
+    })
   }
-  return base
+  if (prefill) {
+    if (prefill.name) blank.name = prefill.name
+    if (prefill.prompt) blank.prompt = prefill.prompt
+    if (prefill.mode) blank.mode = prefill.mode
+    if (prefill.project_path) blank.projectPath = prefill.project_path
+    if (prefill.trigger) applyTrigger(prefill.trigger, blank)
+  }
+  return blank
 }
 
 function buildPayload(form: FormValues, runNow: boolean): AutomationCreate {
-  const trigger: AutomationTrigger =
-    form.trigger === 'manual'
-      ? { type: 'manual' }
-      : {
-          type: 'schedule',
-          cadence: form.trigger as AutomationCadence,
-          hour: form.hour,
-          minute: form.minute,
-          weekday: form.weekday,
-        }
+  let trigger: AutomationTrigger
+  let mode = form.mode
+  switch (form.trigger) {
+    case 'manual':
+      trigger = { type: 'manual' }
+      break
+    case 'once': {
+      const at = form.onceAt ? new Date(form.onceAt) : null
+      trigger = { type: 'once', at: at && !Number.isNaN(at.getTime()) ? toLocalRFC3339(at) : undefined }
+      break
+    }
+    case 'cron':
+      trigger = { type: 'schedule', cadence: 'cron', expr: form.cronExpr.trim() }
+      break
+    default:
+      trigger = {
+        type: 'schedule',
+        cadence: form.trigger as AutomationCadence,
+        hour: form.hour,
+        minute: form.minute,
+        weekday: form.weekday,
+      }
+  }
   // A scheduled automation runs unattended, so it must auto-approve.
-  const mode = form.trigger === 'manual' ? form.mode : 'full_access'
+  if (form.trigger !== 'manual') mode = 'full_access'
   return {
     name: form.name.trim(),
     prompt: form.prompt.trim(),
@@ -293,10 +370,16 @@ function buildPayload(form: FormValues, runNow: boolean): AutomationCreate {
 
 function AutomationEditor({
   state,
+  projects,
+  conversations,
+  onOpenConversation,
   onClose,
   onSaved,
 }: {
   state: EditorState
+  projects: ProjectInfo[]
+  conversations: TaskItem[]
+  onOpenConversation?: (conversation: TaskItem) => void
   onClose: () => void
   onSaved: () => void
 }) {
@@ -316,9 +399,53 @@ function AutomationEditor({
   const isSchedule = form.trigger !== 'manual'
   const showHour = form.trigger === 'daily' || form.trigger === 'weekly'
   const showWeekday = form.trigger === 'weekly'
+  const showMinute = isSchedule && form.trigger !== 'once' && form.trigger !== 'cron'
+  const showOnceAt = form.trigger === 'once'
+  const showCronExpr = form.trigger === 'cron'
+  const conversationBound = editing?.context_policy === 'conversation'
+  const selectableConversations = useMemo(() => {
+    const available = conversations.filter(
+      (conversation) => !conversation.archived || conversation.uuid === form.ownerSessionID,
+    )
+    return [...available].sort((a, b) => {
+      const aTime = Date.parse(a.updated_at || a.created_at || '') || 0
+      const bTime = Date.parse(b.updated_at || b.created_at || '') || 0
+      return bTime - aTime
+    })
+  }, [conversations, form.ownerSessionID])
+  const selectedConversation = selectableConversations.find(
+    (conversation) => conversation.uuid === form.ownerSessionID,
+  )
+  const projectLocked = Boolean(
+    editing && (editing.context_policy === 'conversation' || editing.workspace_kind === 'scratch'),
+  )
+  const noProject = conversationBound
+    ? (selectedConversation?.workspace_kind || editing?.workspace_kind) === 'scratch'
+    : editing?.workspace_kind === 'scratch'
+  const selectableProjects = useMemo(() => {
+    const byPath = new Map(
+      projects
+        .filter((project) => project.workspace_kind !== 'scratch')
+        .map((project) => [project.path, project]),
+    )
+    if (!projectLocked && form.projectPath && !byPath.has(form.projectPath)) {
+      byPath.set(form.projectPath, { path: form.projectPath, workspace_kind: 'project' })
+    }
+    return [...byPath.values()].sort((a, b) => projectName(a.path).localeCompare(projectName(b.path)))
+  }, [form.projectPath, projectLocked, projects])
 
   function update<K extends keyof FormValues>(key: K, value: FormValues[K]) {
     setForm((f) => ({ ...f, [key]: value }))
+  }
+
+  function updateConversation(sessionID: string) {
+    const conversation = selectableConversations.find((item) => item.uuid === sessionID)
+    if (!conversation) return
+    setForm((current) => ({
+      ...current,
+      ownerSessionID: conversation.uuid,
+      projectPath: conversation.project,
+    }))
   }
 
   async function save(runNow: boolean) {
@@ -335,11 +462,34 @@ function AutomationEditor({
       setError(t('automations.editor.errProject'))
       return
     }
+    if (form.trigger === 'once' && !form.onceAt) {
+      setError(t('automations.editor.errOnceAt'))
+      return
+    }
+    // New one-shots must not point before the current minute (the API's gate);
+    // editing an expired one stays allowed so its record is fixable.
+    if (!editing && form.trigger === 'once' && form.onceAt) {
+      const minuteFloor = new Date()
+      minuteFloor.setSeconds(0, 0)
+      if (new Date(form.onceAt).getTime() < minuteFloor.getTime()) {
+        setError(t('automations.editor.errOnceAtPast'))
+        return
+      }
+    }
+    if (form.trigger === 'cron' && !form.cronExpr.trim()) {
+      setError(t('automations.editor.errCronExpr'))
+      return
+    }
     setSaving(true)
     try {
       const payload = buildPayload(form, runNow)
       if (editing) {
-        await api.automationUpdate(editing.id, payload as Partial<Automation>)
+        const patch = { ...payload } as Partial<Automation> & { project_path?: string }
+        if (conversationBound) {
+          patch.owner_session_id = form.ownerSessionID
+          delete patch.project_path
+        }
+        await api.automationUpdate(editing.id, patch)
       } else {
         await api.automationCreate(payload)
       }
@@ -364,14 +514,16 @@ function AutomationEditor({
       onClick={onClose}
     >
       <form
+        noValidate
         onClick={(e) => e.stopPropagation()}
         onSubmit={onSubmit}
         role="dialog"
         aria-modal="true"
+        aria-labelledby="automation-editor-title"
         className="flex max-h-[88vh] w-full max-w-[560px] flex-col rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]"
       >
         <header className="flex items-center justify-between px-5 pb-3 pt-[18px]">
-          <h2 className="text-base font-semibold text-[var(--color-foreground)]">
+          <h2 id="automation-editor-title" className="text-base font-semibold text-[var(--color-foreground)]">
             {editing ? t('automations.editor.editTitle') : t('automations.new')}
           </h2>
           <button
@@ -396,106 +548,191 @@ function AutomationEditor({
           </label>
 
           <div className="flex flex-wrap gap-2.5">
-            <label className="flex flex-1 min-w-0 flex-col gap-1.5">
+            <div className="flex flex-1 min-w-0 flex-col gap-1.5">
               <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.trigger')}</span>
-              <select
+              <SelectMenu
+                ariaLabel={t('automations.editor.trigger')}
                 value={form.trigger}
-                onChange={(e) => update('trigger', e.target.value as FormTrigger)}
-                className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
-              >
-                <option value="daily">{t('automations.cadence.daily')}</option>
-                <option value="weekly">{t('automations.cadence.weekly')}</option>
-                <option value="hourly">{t('automations.cadence.hourly')}</option>
-                <option value="manual">{t('automations.cadence.manual')}</option>
-              </select>
-            </label>
+                onChange={(value) => update('trigger', value as FormTrigger)}
+                options={[
+                  { value: 'daily', label: t('automations.cadence.daily') },
+                  { value: 'weekly', label: t('automations.cadence.weekly') },
+                  { value: 'hourly', label: t('automations.cadence.hourly') },
+                  { value: 'cron', label: t('automations.cadence.cron') },
+                  { value: 'once', label: t('automations.cadence.once') },
+                  { value: 'manual', label: t('automations.cadence.manual') },
+                ]}
+              />
+            </div>
+
+            {showOnceAt && (
+              <label className="flex flex-1 min-w-0 flex-col gap-1.5">
+                <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.onceAt')}</span>
+                <input
+                  type="datetime-local"
+                  min={toDatetimeLocal(new Date().toISOString())}
+                  value={form.onceAt}
+                  onChange={(e) => update('onceAt', e.target.value)}
+                  className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
+                />
+              </label>
+            )}
+
+            {showCronExpr && (
+              <label className="flex flex-1 min-w-0 flex-col gap-1.5">
+                <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.cadence.cron')}</span>
+                <input
+                  value={form.cronExpr}
+                  onChange={(e) => update('cronExpr', e.target.value)}
+                  placeholder="*/15 * * * *"
+                  className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 font-mono text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
+                />
+                <span className="text-[11px] text-[var(--color-muted-foreground)]">
+                  {t('automations.editor.cronHint')}
+                </span>
+              </label>
+            )}
 
             {showWeekday && (
-              <label className="flex flex-1 min-w-0 flex-col gap-1.5">
+              <div className="flex flex-1 min-w-0 flex-col gap-1.5">
                 <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.day')}</span>
-                <select
-                  value={form.weekday}
-                  onChange={(e) => update('weekday', Number(e.target.value))}
-                  className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
-                >
-                  {WEEKDAY_KEYS.map((key, i) => (
-                    <option key={key} value={i}>
-                      {t(`automations.weekday.${key}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <SelectMenu
+                  ariaLabel={t('automations.editor.day')}
+                  value={String(form.weekday)}
+                  onChange={(value) => update('weekday', Number(value))}
+                  options={WEEKDAY_KEYS.map((key, index) => ({
+                    value: String(index),
+                    label: t(`automations.weekday.${key}`),
+                  }))}
+                />
+              </div>
             )}
 
             {showHour && (
-              <label className="flex flex-1 min-w-0 flex-col gap-1.5">
+              <div className="flex flex-1 min-w-0 flex-col gap-1.5">
                 <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.hour')}</span>
-                <select
-                  value={form.hour}
-                  onChange={(e) => update('hour', Number(e.target.value))}
-                  className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
-                >
-                  {Array.from({ length: 24 }, (_, h) => (
-                    <option key={h} value={h}>
-                      {String(h).padStart(2, '0')}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <SelectMenu
+                  ariaLabel={t('automations.editor.hour')}
+                  value={String(form.hour)}
+                  onChange={(value) => update('hour', Number(value))}
+                  options={Array.from({ length: 24 }, (_, hour) => ({
+                    value: String(hour),
+                    label: String(hour).padStart(2, '0'),
+                  }))}
+                />
+              </div>
             )}
 
-            {isSchedule && (
-              <label className="flex flex-1 min-w-0 flex-col gap-1.5">
+            {showMinute && (
+              <div className="flex flex-1 min-w-0 flex-col gap-1.5">
                 <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.minute')}</span>
-                <select
-                  value={form.minute}
-                  onChange={(e) => update('minute', Number(e.target.value))}
-                  className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
-                >
-                  {Array.from({ length: 60 }, (_, m) => (
-                    <option key={m} value={m}>
-                      :{String(m).padStart(2, '0')}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <SelectMenu
+                  ariaLabel={t('automations.editor.minute')}
+                  value={String(form.minute)}
+                  onChange={(value) => update('minute', Number(value))}
+                  options={Array.from({ length: 60 }, (_, minute) => ({
+                    value: String(minute),
+                    label: `:${String(minute).padStart(2, '0')}`,
+                  }))}
+                />
+              </div>
             )}
           </div>
 
-          <label className="flex flex-1 flex-col gap-1.5">
+          {conversationBound && (
+            <div className="flex flex-1 flex-col gap-1.5">
+              <span className="text-xs font-semibold text-[var(--color-foreground)]">
+                {t('automations.editor.runsIn')}
+              </span>
+              <div className="flex min-w-0 items-center gap-2">
+                <SelectMenu
+                  ariaLabel={t('automations.editor.runsIn')}
+                  className="min-w-0 flex-1"
+                  value={form.ownerSessionID}
+                  onChange={updateConversation}
+                  options={[
+                    ...(!selectedConversation && form.ownerSessionID
+                      ? [{
+                          value: form.ownerSessionID,
+                          label: `${t('sidebar.untitled')} · ${form.ownerSessionID.slice(0, 8)}`,
+                          description: noProject ? t('workspace.noProject') : projectName(form.projectPath),
+                        }]
+                      : []),
+                    ...selectableConversations.map((conversation) => ({
+                      value: conversation.uuid,
+                      label: conversation.title?.trim() || t('sidebar.untitled'),
+                      description: conversation.workspace_kind === 'scratch'
+                        ? t('workspace.noProject')
+                        : projectName(conversation.project),
+                    })),
+                  ]}
+                />
+                {selectedConversation && onOpenConversation && (
+                  <button
+                    type="button"
+                    aria-label={t('automations.editor.openConversation')}
+                    title={t('automations.editor.openConversation')}
+                    onClick={() => onOpenConversation(selectedConversation)}
+                    className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-muted-foreground)] transition-colors hover:border-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+                  >
+                    <ArrowTopRightOnSquareIcon className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-1 flex-col gap-1.5">
             <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.project')}</span>
-            <input
-              value={form.projectPath}
-              onChange={(e) => update('projectPath', e.target.value)}
-              placeholder={t('automations.editor.projectPlaceholder')}
-              className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
-            />
-            <span className="text-[11px] text-[var(--color-muted-foreground)]">
-              {t('automations.editor.projectHint')}
-            </span>
-          </label>
+            {projectLocked ? (
+              <div
+                role="textbox"
+                aria-readonly="true"
+                aria-label={t('automations.editor.project')}
+                className="flex min-w-0 items-center gap-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-muted)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)]"
+              >
+                <LockClosedIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)]" />
+                <span className="truncate" title={noProject ? undefined : form.projectPath}>
+                  {noProject ? t('workspace.noProject') : projectName(form.projectPath)}
+                </span>
+              </div>
+            ) : (
+              <SelectMenu
+                ariaLabel={t('automations.editor.project')}
+                value={form.projectPath}
+                placeholder={t('automations.editor.projectPlaceholder')}
+                onChange={(value) => update('projectPath', value)}
+                options={selectableProjects.map((project) => ({
+                  value: project.path,
+                  label: projectName(project.path),
+                }))}
+              />
+            )}
+            {!projectLocked && form.projectPath && (
+              <span
+                className="min-w-0 truncate text-[11px] text-[var(--color-muted-foreground)]"
+                title={form.projectPath}
+              >
+                {form.projectPath}
+              </span>
+            )}
+          </div>
 
           {!isSchedule ? (
-            <label className="flex flex-1 flex-col gap-1.5">
+            <div className="flex flex-1 flex-col gap-1.5">
               <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.mode')}</span>
-              <select
+              <SelectMenu
+                ariaLabel={t('automations.editor.mode')}
                 value={form.mode}
-                onChange={(e) => update('mode', e.target.value)}
-                className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
-              >
-                <option value="full_access">{t('automations.mode.autopilot')}</option>
-                <option value="approval">{t('automations.mode.ask')}</option>
-                <option value="plan">{t('automations.mode.plan')}</option>
-              </select>
-            </label>
-          ) : (
-            <p className="text-xs text-[var(--color-muted-foreground)]">
-              <Trans
-                i18nKey="automations.editor.scheduleModeNote"
-                components={{ b: <strong className="font-semibold" /> }}
+                onChange={(value) => update('mode', value)}
+                options={[
+                  { value: 'full_access', label: t('automations.mode.autopilot') },
+                  { value: 'approval', label: t('automations.mode.ask') },
+                  { value: 'plan', label: t('automations.mode.plan') },
+                ]}
               />
-            </p>
-          )}
+            </div>
+          ) : null}
 
           <label className="flex flex-1 flex-col gap-1.5">
             <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.prompt')}</span>
@@ -549,11 +786,19 @@ function AutomationEditor({
 
 // ─── Main view ───────────────────────────────────────────────────────────────
 
-export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun) => void }) {
+export function AutomationsView({
+  onOpenRun,
+  onOpenConversation,
+}: {
+  onOpenRun?: (run: AutomationRun) => void
+  onOpenConversation?: (conversation: TaskItem) => void
+}) {
   const { t } = useTranslation()
   const [items, setItems] = useState<AutomationItem[]>([])
   const [runs, setRuns] = useState<AutomationRun[]>([])
   const [templates, setTemplates] = useState<AutomationTemplate[]>([])
+  const [projects, setProjects] = useState<ProjectInfo[]>([])
+  const [conversations, setConversations] = useState<TaskItem[]>([])
   const [loading, setLoading] = useState(true)
 
   const [view, setView] = useState<View>('list')
@@ -563,19 +808,32 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
   const [editor, setEditor] = useState<EditorState | null>(null)
 
   async function fetchAll() {
-    const [autoList, runList] = await Promise.all([api.automations(), api.automationRuns()])
+    const [autoList, runList, conversationList] = await Promise.all([
+      api.automations(),
+      api.automationRuns(),
+      api.tasks().catch(() => [] as TaskItem[]),
+    ])
     setItems(autoList)
     setRuns(runList)
+    setConversations(conversationList)
   }
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([api.automations(), api.automationRuns(), api.automationTemplates()])
-      .then(([autoList, runList, tplList]) => {
+    Promise.all([
+      api.automations(),
+      api.automationRuns(),
+      api.automationTemplates(),
+      api.projects().catch(() => [] as ProjectInfo[]),
+      api.tasks().catch(() => [] as TaskItem[]),
+    ])
+      .then(([autoList, runList, tplList, projectList, conversationList]) => {
         if (cancelled) return
         setItems(autoList)
         setRuns(runList)
         setTemplates(tplList)
+        setProjects(projectList)
+        setConversations(conversationList)
       })
       .catch(() => {})
       .finally(() => {
@@ -595,6 +853,11 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
       return true
     })
   }, [runs, statusFilter, search])
+
+  const conversationsByID = useMemo(
+    () => new Map(conversations.map((conversation) => [conversation.uuid, conversation])),
+    [conversations],
+  )
 
   // ── Mutations (refetch after each so cards/runs reflect server state) ──
   function newAutomation() {
@@ -706,6 +969,11 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3.5 pb-1.5">
                   {items.map((a) => {
                     const cs = cardState(a)
+                    const ownerConversation = a.owner_session_id
+                      ? conversationsByID.get(a.owner_session_id)
+                      : undefined
+                    const ownerTitle = ownerConversation?.title?.trim()
+                      || (a.owner_session_id ? `${t('sidebar.untitled')} · ${a.owner_session_id.slice(0, 8)}` : '')
                     const stripColor =
                       cs === 'success'
                         ? 'var(--color-success)'
@@ -744,13 +1012,33 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                             {t('automations.meta.schedule')}
                           </span>
                           <span className="truncate text-xs text-[var(--color-foreground)]">{a.human_schedule}</span>
+                          {a.context_policy === 'conversation' && (
+                            <>
+                              <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]">
+                                {t('automations.meta.runsIn')}
+                              </span>
+                              {ownerConversation && onOpenConversation ? (
+                                <button
+                                  type="button"
+                                  title={t('automations.editor.openConversation')}
+                                  onClick={() => onOpenConversation(ownerConversation)}
+                                  className="flex min-w-0 items-center gap-1 text-left text-xs text-[var(--color-foreground)] hover:text-[var(--color-primary)] focus-visible:outline-none focus-visible:underline"
+                                >
+                                  <span className="truncate">{ownerTitle}</span>
+                                  <ArrowTopRightOnSquareIcon className="h-3 w-3 shrink-0" />
+                                </button>
+                              ) : (
+                                <span className="truncate text-xs text-[var(--color-foreground)]">{ownerTitle}</span>
+                              )}
+                            </>
+                          )}
                           <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]">
-                            {a.trigger.type === 'manual' ? t('automations.meta.lastRun') : t('automations.meta.nextRun')}
+                            {usesNextRun(a) ? t('automations.meta.nextRun') : t('automations.meta.lastRun')}
                           </span>
                           <span
                             className={
                               'truncate text-xs ' +
-                              (a.trigger.type !== 'manual' && a.enabled
+                              (usesNextRun(a) && a.enabled
                                 ? 'font-semibold tabular-nums text-[var(--color-primary)]'
                                 : 'text-[var(--color-foreground)]')
                             }
@@ -807,16 +1095,18 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                   <h2 className="text-[15px] font-semibold">{t('automations.recentRuns')}</h2>
                   {runs.length > 0 && (
                     <div className="flex items-center gap-2">
-                      <select
+                      <SelectMenu
+                        ariaLabel={t('automations.filterRuns')}
                         value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                        title={t('automations.filterRuns')}
-                        className="h-8 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-[12.5px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
-                      >
-                        <option value="all">{t('automations.filterAll')}</option>
-                        <option value="success">{t('automations.filterSuccess')}</option>
-                        <option value="failed">{t('automations.filterFailed')}</option>
-                      </select>
+                        onChange={(value) => setStatusFilter(value as StatusFilter)}
+                        size="sm"
+                        className="w-[110px]"
+                        options={[
+                          { value: 'all', label: t('automations.filterAll') },
+                          { value: 'success', label: t('automations.filterSuccess') },
+                          { value: 'failed', label: t('automations.filterFailed') },
+                        ]}
+                      />
                       <input
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
@@ -938,6 +1228,9 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
       {editor && (
         <AutomationEditor
           state={editor}
+          projects={projects}
+          conversations={conversations}
+          onOpenConversation={onOpenConversation}
           onClose={() => setEditor(null)}
           onSaved={() => {
             void fetchAll()

@@ -185,6 +185,11 @@ func TestPlanExecuteSchemaOmitsBackground(t *testing.T) {
 	if normalSchema.Properties.Value("background") == nil {
 		t.Fatal("normal execute schema unexpectedly lost background")
 	}
+	for _, want := range []string{"Never use sleep", "recurring request", "automation_create"} {
+		if !strings.Contains(normalInfo.Desc, want) {
+			t.Errorf("normal execute description missing %q: %q", want, normalInfo.Desc)
+		}
+	}
 }
 
 func TestExecute_TruncatesLargeStdout(t *testing.T) {

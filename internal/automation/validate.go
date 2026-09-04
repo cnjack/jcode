@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -44,6 +45,18 @@ func ValidateAutomation(a *Automation) error {
 	if err := validateProjectPath(a.ProjectPath); err != nil {
 		return err
 	}
+	switch a.ContextPolicy {
+	case "", ContextIsolated:
+		if strings.TrimSpace(a.OwnerSessionID) != "" {
+			return fmt.Errorf("isolated automation cannot have an owner session")
+		}
+	case ContextConversation:
+		if strings.TrimSpace(a.OwnerSessionID) == "" {
+			return fmt.Errorf("conversation automation requires owner_session_id")
+		}
+	default:
+		return fmt.Errorf("invalid context_policy %q (want isolated|conversation)", a.ContextPolicy)
+	}
 	return validateTrigger(a.Trigger)
 }
 
@@ -67,10 +80,17 @@ func validateTrigger(t Trigger) error {
 	switch t.Type {
 	case TriggerManual:
 		return nil
+	case TriggerOnce:
+		// Well-formedness only — past-ness is a create-time check (see
+		// Store.Create) so an expired once-automation stays editable.
+		if _, err := time.Parse(time.RFC3339, t.At); err != nil {
+			return fmt.Errorf("once trigger needs a valid RFC3339 at time (got %q)", t.At)
+		}
+		return nil
 	case TriggerSchedule:
 		// fallthrough to cadence checks
 	default:
-		return fmt.Errorf("invalid trigger type %q (want schedule|manual)", t.Type)
+		return fmt.Errorf("invalid trigger type %q (want schedule|manual|once)", t.Type)
 	}
 	if t.Minute < 0 || t.Minute > 59 {
 		return fmt.Errorf("minute out of range 0-59")
@@ -89,8 +109,19 @@ func validateTrigger(t Trigger) error {
 		if t.Weekday < 0 || t.Weekday > 6 {
 			return fmt.Errorf("weekday out of range 0-6")
 		}
+	case CadenceCron:
+		expr, err := ParseCronExpr(t.Expr)
+		if err != nil {
+			return err
+		}
+		// Reject legal-but-never-fires expressions (`0 0 31 2 *`) so a broken
+		// schedule can't sit enabled forever without running. The 5-year scan
+		// window makes this near-permanent for any expression.
+		if _, ok := NextCronFire(nowFunc(), expr); !ok {
+			return fmt.Errorf("cron expression %q has no fire within %d years", t.Expr, cronMaxSearchYears)
+		}
 	default:
-		return fmt.Errorf("invalid cadence %q (want hourly|daily|weekly)", t.Cadence)
+		return fmt.Errorf("invalid cadence %q (want hourly|daily|weekly|cron)", t.Cadence)
 	}
 	return nil
 }

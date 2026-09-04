@@ -621,6 +621,7 @@ func TestRequestApprovalProgressiveDisclosureReadOnlyTools(t *testing.T) {
 		agent.ToolSearchReservedName,
 		"load_skill",
 		"goal_get",
+		"automation_list",
 	} {
 		t.Run(toolName, func(t *testing.T) {
 			approved, err := s.RequestApproval(context.Background(), toolName, `{}`)
@@ -637,6 +638,7 @@ func TestRequestApprovalDeferredMutationStillPrompts(t *testing.T) {
 		"goal_set",
 		"goal_update",
 		"automation_create",
+		"automation_delete",
 		"memory_note",
 		"workflow_run",
 	} {

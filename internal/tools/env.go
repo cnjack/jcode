@@ -43,6 +43,9 @@ type Env struct {
 	// to the server's in-memory cache, its REST API, and the scheduler. nil falls
 	// back to opening a fresh store (CLI/ACP contexts with no live server).
 	AutomationStore *automation.Store
+	// SessionIDFn returns the owning top-level conversation id for tools that
+	// create session-bound resources. nil/empty falls back to isolated behavior.
+	SessionIDFn func() string
 
 	// Browser is the process-wide browser-use manager shared with the web server
 	// (its extension bridge and /api/browser routes) so the agent's browser_*

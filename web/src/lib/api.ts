@@ -161,8 +161,14 @@ export const api = {
       body: JSON.stringify(data),
       signal,
     }),
-  deleteSession: (id: string) =>
-    request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  sessionDeleteImpact: (id: string) =>
+    request<{ automations: Array<{ id: string; name: string; human_schedule: string; enabled: boolean }> }>(
+      `/api/sessions/${encodeURIComponent(id)}/delete-impact`,
+    ),
+  deleteSession: (id: string, automationPolicy?: 'delete' | 'detach') => {
+    const query = automationPolicy ? `?automation_policy=${automationPolicy}` : ''
+    return request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}${query}`, { method: 'DELETE' })
+  },
   newSession: (
     sessionId?: string,
     signal?: AbortSignal,

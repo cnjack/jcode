@@ -38,6 +38,13 @@ type Runner interface {
 	StartRun(ctx context.Context, a *Automation, kind string) (sessionID string, err error)
 }
 
+// RunnerReadiness is an optional pre-claim gate. Conversation-backed runners
+// use it to keep a due trigger pending while its owner conversation is busy,
+// matching cron reinjection semantics without consuming a once trigger.
+type RunnerReadiness interface {
+	CanStart(a *Automation) bool
+}
+
 // SkipNotifier is called when the scheduler skips a fire without running (e.g.
 // the bound project is gone). Optional.
 type SkipNotifier func(a *Automation, reason string)
@@ -114,12 +121,14 @@ func (s *Scheduler) reconcileStale() {
 		if st.LastStatus != StatusRunning {
 			continue
 		}
-		if a.Trigger.Type != TriggerSchedule {
-			// Manual (or non-scheduled) run: a live one in another process has a
-			// recent, valid LastRunAt (ExecuteRun stamps it atomically when it
-			// claims the run). Leave those alone; reset only runs older than the
-			// window — and also an empty/garbled LastRunAt, which can't be a live
-			// run and would otherwise stay stuck at "running" forever.
+		// Scheduled runs — schedule AND once, both auto-fired — are reset
+		// unconditionally: winning the election lock proves the prior
+		// SCHEDULER owner is gone. Manual runs need a time heuristic instead —
+		// one may be executing right now in a DIFFERENT process (manual runs
+		// bypass the election), so resetting a fresh one would briefly show a
+		// bogus "interrupted" for a live cross-process run; only runs older
+		// than manualRunStaleWindow are treated as zombies.
+		if a.Trigger.Type != TriggerSchedule && a.Trigger.Type != TriggerOnce {
 			if t, err := time.Parse(time.RFC3339, st.LastRunAt); err == nil && now.Sub(t) < manualRunStaleWindow {
 				continue
 			}
@@ -134,16 +143,39 @@ func (s *Scheduler) reconcileStale() {
 func (s *Scheduler) tick(ctx context.Context) {
 	now := nowFunc()
 	for _, a := range s.store.List() {
-		if !a.Enabled || a.Trigger.Type != TriggerSchedule {
+		// Manual triggers never auto-fire; schedule and once do.
+		auto := a.Trigger.Type == TriggerSchedule || a.Trigger.Type == TriggerOnce
+		if !a.Enabled || !auto {
 			continue
 		}
 		st := s.store.State(a.ID)
 
 		next, err := time.Parse(time.RFC3339, st.NextRunAt)
 		if st.NextRunAt == "" || err != nil {
-			// First time we see it (or unparseable): seed NextRunAt, don't fire.
+			// First sight (or state reset). A once trigger seeds LATE-DELIVERY:
+			// it fires exactly once even if its pinned time already passed
+			// (same-minute picks, scheduler downtime). The consumed-slot latch
+			// blocks re-seeding only while it matches the CURRENT pin —
+			// retargeting At to a new time re-arms the one-shot. Recurring
+			// triggers with no future fire (corrupt expression) are skipped
+			// WITHOUT writing — writing "" here would re-persist the same
+			// state every tick.
+			if a.Trigger.Type == TriggerOnce {
+				if at, perr := time.Parse(time.RFC3339, a.Trigger.At); perr == nil {
+					if st.LastFiredSlot != SlotKey(at) {
+						_ = s.store.UpdateState(a.ID, func(rs *RunState) {
+							rs.NextRunAt = at.Format(time.RFC3339)
+						})
+					}
+				}
+				continue
+			}
+			seed, ok := ComputeNextRun(now, a.Trigger)
+			if !ok {
+				continue
+			}
 			_ = s.store.UpdateState(a.ID, func(rs *RunState) {
-				rs.NextRunAt = nextRunString(now, a.Trigger)
+				rs.NextRunAt = seed.Format(time.RFC3339)
 			})
 			continue
 		}
@@ -170,6 +202,9 @@ func (s *Scheduler) tick(ctx context.Context) {
 		if busy || st.LastStatus == StatusRunning {
 			continue
 		}
+		if readiness, ok := s.runner.(RunnerReadiness); ok && !readiness.CanStart(a) {
+			continue
+		}
 
 		// Fire-time precheck: the bound project must still exist locally.
 		if !projectUsable(a.ProjectPath) {
@@ -189,10 +224,17 @@ func (s *Scheduler) fire(ctx context.Context, a *Automation, slot string, now ti
 	s.inflight[a.ID] = true
 	s.mu.Unlock()
 
-	_ = s.store.UpdateState(a.ID, func(rs *RunState) {
-		rs.LastFiredSlot = slot
-		rs.NextRunAt = nextRunString(now, a.Trigger)
-	})
+	// A once trigger's slot is only consumed AFTER the run is claimed (inside
+	// ExecuteRun). Writing it here would let a racing manual "Run Now" claim
+	// swallow the one-shot's only fire: the scheduled claim is refused but the
+	// slot and NextRunAt are already gone. Recurring triggers advance eagerly —
+	// their next occurrence exists regardless of who runs this one.
+	if a.Trigger.Type != TriggerOnce {
+		_ = s.store.UpdateState(a.ID, func(rs *RunState) {
+			rs.LastFiredSlot = slot
+			rs.NextRunAt = nextRunString(now, a.Trigger)
+		})
+	}
 
 	go func() {
 		defer func() {
@@ -225,14 +267,30 @@ func (s *Scheduler) skipAndMaybeDisable(a *Automation, reason string) {
 // manual ▶ path so state bookkeeping is identical. For scheduled runs, repeated
 // errors increment ConsecutiveFails and auto-disable past the threshold.
 func ExecuteRun(ctx context.Context, store *Store, runner Runner, a *Automation, kind string) (string, error) {
-	// Atomically claim the run. If a run for this automation is already in
-	// progress (a scheduled fire racing a manual "Run Now", or another process),
-	// refuse rather than start a second agent session against the same project.
-	// Returning before writing any terminal state preserves the live run's
-	// status.
-	claimed, _ := store.TryMarkRunning(a.ID)
-	if !claimed {
-		return "", fmt.Errorf("a run is already in progress for automation %q", a.ID)
+	// A scheduled once is claimed and consumed against the CURRENT persisted pin
+	// in one cross-process transaction. This rejects a copied definition when a
+	// user retargets it between tick and this goroutine, and returns the latest
+	// definition snapshot for the actual run. Manual once runs remain previews.
+	if kind == KindScheduled && a.Trigger.Type == TriggerOnce {
+		current, claimed, err := store.TryClaimScheduledOnce(a.ID, a.Trigger.At)
+		if err != nil {
+			return "", fmt.Errorf("claim scheduled once %q: %w", a.ID, err)
+		}
+		if !claimed {
+			return "", fmt.Errorf("scheduled once automation %q is no longer claimable", a.ID)
+		}
+		a = current
+	} else {
+		// Atomically claim every other run. If a run for this automation is
+		// already in progress (a scheduled fire racing a manual "Run Now", or
+		// another process), refuse rather than overlap it.
+		claimed, err := store.TryMarkRunning(a.ID)
+		if err != nil {
+			return "", fmt.Errorf("claim automation run %q: %w", a.ID, err)
+		}
+		if !claimed {
+			return "", fmt.Errorf("a run is already in progress for automation %q", a.ID)
+		}
 	}
 
 	sessionID, err := safeStartRun(ctx, runner, a, kind)

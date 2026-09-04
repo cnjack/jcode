@@ -17,7 +17,26 @@ import (
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/tools"
+	managedworkspace "github.com/cnjack/jcode/internal/workspace"
 )
+
+func TestEffectiveSessionWorkspaceKindRepairsLegacyAutomationScratchRun(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	scratch, err := managedworkspace.CreateScratch(time.Date(2026, 9, 4, 0, 0, 0, 0, time.Local))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyRun := &session.SessionMeta{
+		Project: scratch, WorkspaceKind: session.WorkspaceProject, AutomationID: "automation-1",
+	}
+	if got := effectiveSessionWorkspaceKind(legacyRun); got != session.WorkspaceScratch {
+		t.Fatalf("legacy automation run kind=%q, want scratch", got)
+	}
+	normal := &session.SessionMeta{Project: scratch, WorkspaceKind: session.WorkspaceProject}
+	if got := effectiveSessionWorkspaceKind(normal); got != session.WorkspaceProject {
+		t.Fatalf("ordinary project session kind=%q, want project", got)
+	}
+}
 
 type activationRemoteExecutor struct {
 	project  string

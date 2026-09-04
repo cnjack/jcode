@@ -22,6 +22,15 @@ const storeVersion = 1
 // that does not exist, so HTTP handlers can map it to 404 rather than 400.
 var ErrNotFound = errors.New("automation not found")
 
+// ErrOwnerAutomationRunning prevents a conversation deletion from detaching or
+// deleting a related automation after it has already claimed a run.
+var ErrOwnerAutomationRunning = errors.New("related automation is running")
+
+// errScheduledOnceNotClaimable is internal control flow for a conditional
+// scheduled-once claim. Returning it from withLock skips both persistence writes
+// when the definition was disabled, retargeted, consumed, or already running.
+var errScheduledOnceNotClaimable = errors.New("scheduled once is not claimable")
+
 // defsFile is the user-edited definitions; stateFile is the volatile scheduler
 // bookkeeping; lockFile is the cross-process advisory write lock guarding both.
 const (
@@ -215,8 +224,23 @@ func (s *Store) Create(a Automation) (*Automation, error) {
 	if a.Mode == "" {
 		a.Mode = "full_access"
 	}
+	if a.ContextPolicy == "" {
+		a.ContextPolicy = ContextIsolated
+	}
 	if err := ValidateAutomation(&a); err != nil {
 		return nil, err
+	}
+	// Once triggers must still be reachable: reject a pinned time that is
+	// already before the current wall-clock minute at CREATE time only. The
+	// minute floor gives form submissions slack — anything the floor accepts
+	// fires on the next tick via the scheduler's late-delivery seeding, so a
+	// "now"-ish pick a few seconds in the past still runs. Update deliberately
+	// skips this check so an expired once-automation stays editable.
+	if a.Trigger.Type == TriggerOnce {
+		at, err := time.Parse(time.RFC3339, a.Trigger.At)
+		if err != nil || at.Before(nowFunc().Truncate(time.Minute)) {
+			return nil, fmt.Errorf("once trigger at time %q is invalid or already past", a.Trigger.At)
+		}
 	}
 	now := nowFunc().Format(time.RFC3339)
 	a.ID = newID()
@@ -258,13 +282,22 @@ func (s *Store) Update(id string, mutate func(*Automation)) (*Automation, error)
 		cp := *a
 		mutate(&cp)
 		cp.ID = id // immutable
+		if cp.ContextPolicy == "" {
+			cp.ContextPolicy = ContextIsolated
+		}
 		cp.UpdatedAt = nowFunc().Format(time.RFC3339)
 		if err := ValidateAutomation(&cp); err != nil {
 			return err
 		}
+		// A once pin is inseparable from its pending NextRunAt. Reset the stale
+		// schedule in the same cross-process lock as the definition update so the
+		// scheduler can never honor the old pin after a retarget. Transitions into
+		// or out of once also need a fresh seed for the new trigger shape.
+		resetOnceSchedule := a.Trigger != cp.Trigger &&
+			(a.Trigger.Type == TriggerOnce || cp.Trigger.Type == TriggerOnce)
 		s.defs[id] = &cp
 		out = &cp
-		if !wasEnabled && cp.Enabled {
+		if (!wasEnabled && cp.Enabled) || resetOnceSchedule {
 			st := s.state[id]
 			if st == nil {
 				st = &RunState{}
@@ -272,7 +305,12 @@ func (s *Store) Update(id string, mutate func(*Automation)) (*Automation, error)
 				c := *st
 				st = &c
 			}
-			st.ConsecutiveFails = 0
+			if !wasEnabled && cp.Enabled {
+				st.ConsecutiveFails = 0
+			}
+			if resetOnceSchedule {
+				st.NextRunAt = ""
+			}
 			s.state[id] = st
 		}
 		return nil
@@ -299,6 +337,111 @@ func (s *Store) Delete(id string) error {
 		}
 		delete(s.defs, id)
 		delete(s.state, id)
+		return nil
+	})
+}
+
+// SessionAutomationPolicy selects how conversation-bound automations are
+// handled when their owner conversation is deleted.
+type SessionAutomationPolicy string
+
+const (
+	SessionAutomationDelete SessionAutomationPolicy = "delete"
+	SessionAutomationDetach SessionAutomationPolicy = "detach"
+)
+
+// SessionAutomationSnapshot is the rollback payload returned when resolving a
+// conversation deletion. Definitions and run state are copied by value.
+type SessionAutomationSnapshot struct {
+	Definitions []Automation
+	State       map[string]RunState
+}
+
+// ListByOwnerSession returns a fresh cross-process view of every automation
+// bound to sessionID. Disabled and already-fired definitions are included: the
+// relationship, not the current armed state, determines deletion impact.
+func (s *Store) ListByOwnerSession(sessionID string) ([]*Automation, error) {
+	var result []*Automation
+	err := s.withLock(false, false, func() error {
+		for _, a := range s.listLocked() {
+			if a.ContextPolicy != ContextConversation || a.OwnerSessionID != sessionID {
+				continue
+			}
+			cp := *a
+			result = append(result, &cp)
+		}
+		return nil
+	})
+	return result, err
+}
+
+// ResolveOwnerSession applies the user's explicit conversation-deletion policy
+// atomically within the automation store. delete removes matching definitions
+// and state; detach preserves their enabled state as isolated tasks and clears
+// the owner.
+func (s *Store) ResolveOwnerSession(sessionID string, policy SessionAutomationPolicy) (SessionAutomationSnapshot, error) {
+	if policy != SessionAutomationDelete && policy != SessionAutomationDetach {
+		return SessionAutomationSnapshot{}, fmt.Errorf("invalid automation policy %q", policy)
+	}
+	snapshot := SessionAutomationSnapshot{State: make(map[string]RunState)}
+	err := s.withLock(true, true, func() error {
+		for id, a := range s.defs {
+			if a.ContextPolicy != ContextConversation || a.OwnerSessionID != sessionID {
+				continue
+			}
+			if st := s.state[id]; st != nil && st.LastStatus == StatusRunning {
+				return fmt.Errorf("automation %q: %w", id, ErrOwnerAutomationRunning)
+			}
+		}
+		for id, a := range s.defs {
+			if a.ContextPolicy != ContextConversation || a.OwnerSessionID != sessionID {
+				continue
+			}
+			snapshot.Definitions = append(snapshot.Definitions, *a)
+			if st := s.state[id]; st != nil {
+				snapshot.State[id] = *st
+			}
+			switch policy {
+			case SessionAutomationDelete:
+				delete(s.defs, id)
+				delete(s.state, id)
+			case SessionAutomationDetach:
+				cp := *a
+				cp.ContextPolicy = ContextIsolated
+				cp.OwnerSessionID = ""
+				cp.UpdatedAt = nowFunc().Format(time.RFC3339)
+				s.defs[id] = &cp
+				if st := s.state[id]; st != nil && st.LastSessionID != "" {
+					stateCopy := *st
+					stateCopy.LastSessionID = ""
+					s.state[id] = &stateCopy
+				}
+			}
+		}
+		return nil
+	})
+	return snapshot, err
+}
+
+// RestoreSessionAutomations rolls back ResolveOwnerSession when the subsequent
+// session-file deletion fails. It is idempotent and restores the exact captured
+// definitions and run state.
+func (s *Store) RestoreSessionAutomations(snapshot SessionAutomationSnapshot) error {
+	if len(snapshot.Definitions) == 0 {
+		return nil
+	}
+	return s.withLock(true, true, func() error {
+		for i := range snapshot.Definitions {
+			definition := snapshot.Definitions[i]
+			cp := definition
+			s.defs[definition.ID] = &cp
+			if st, ok := snapshot.State[definition.ID]; ok {
+				stateCopy := st
+				s.state[definition.ID] = &stateCopy
+			} else {
+				delete(s.state, definition.ID)
+			}
+		}
 		return nil
 	})
 }
@@ -348,6 +491,64 @@ func (s *Store) TryMarkRunning(id string) (bool, error) {
 		return nil
 	})
 	return claimed, err
+}
+
+// TryClaimScheduledOnce conditionally claims and consumes a scheduled once run
+// under one cross-process lock. expectedAt is the pin observed by the scheduler;
+// if a concurrent edit changed that pin, the stale run is refused. On success it
+// returns the current definition snapshot that was atomically claimed, marks the
+// run as running, stamps the consumed slot, clears NextRunAt, and disarms the
+// persisted definition before any agent work starts.
+func (s *Store) TryClaimScheduledOnce(id, expectedAt string) (*Automation, bool, error) {
+	var claimed *Automation
+	err := s.withLock(true, true, func() error {
+		a, ok := s.defs[id]
+		if !ok {
+			return fmt.Errorf("automation %q: %w", id, ErrNotFound)
+		}
+		if !a.Enabled || a.Trigger.Type != TriggerOnce || a.Trigger.At != expectedAt {
+			return errScheduledOnceNotClaimable
+		}
+
+		at, err := time.Parse(time.RFC3339, a.Trigger.At)
+		if err != nil {
+			return fmt.Errorf("automation %q has invalid once pin: %w", id, err)
+		}
+		st := s.state[id]
+		if (st != nil && st.LastStatus == StatusRunning) ||
+			(st != nil && st.LastFiredSlot == SlotKey(at)) {
+			return errScheduledOnceNotClaimable
+		}
+
+		now := nowFunc().Format(time.RFC3339)
+		if st == nil {
+			st = &RunState{}
+		} else {
+			cp := *st
+			st = &cp
+		}
+		st.LastStatus = StatusRunning
+		st.LastError = ""
+		st.LastRunAt = now
+		st.LastFiredSlot = SlotKey(at)
+		st.NextRunAt = ""
+		s.state[id] = st
+
+		runDef := *a
+		persisted := *a
+		persisted.Enabled = false
+		persisted.UpdatedAt = now
+		s.defs[id] = &persisted
+		claimed = &runDef
+		return nil
+	})
+	if errors.Is(err, errScheduledOnceNotClaimable) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return claimed, true, nil
 }
 
 // UpdateStateAndMaybeDisable mutates the run-state (e.g. recording a failure and

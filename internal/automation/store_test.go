@@ -23,6 +23,9 @@ func TestStoreCRUDRoundTrip(t *testing.T) {
 	if a.ID == "" || a.Mode != "full_access" || a.Source != SourceManual {
 		t.Fatalf("defaults not applied: %+v", a)
 	}
+	if a.ContextPolicy != ContextIsolated || a.OwnerSessionID != "" {
+		t.Fatalf("legacy context defaults not applied: %+v", a)
+	}
 	if got := s.List(); len(got) != 1 {
 		t.Fatalf("want 1, got %d", len(got))
 	}
@@ -49,6 +52,102 @@ func TestStoreCRUDRoundTrip(t *testing.T) {
 	}
 	if len(s.List()) != 0 {
 		t.Fatal("delete did not remove")
+	}
+}
+
+func TestResolveOwnerSessionDetachDeleteAndRollback(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewStoreDir(dir)
+	project := t.TempDir()
+	create := func(name, owner string) *Automation {
+		a, err := s.Create(Automation{
+			Name: name, Prompt: "p", ProjectPath: project, Enabled: true,
+			ContextPolicy: ContextConversation, OwnerSessionID: owner,
+			Trigger: Trigger{Type: TriggerManual},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	first := create("first", "session-1")
+	second := create("second", "session-1")
+	other := create("other", "session-2")
+	if err := s.UpdateState(first.ID, func(st *RunState) {
+		st.LastStatus = StatusSuccess
+		st.LastSessionID = "session-1"
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	related, err := s.ListByOwnerSession("session-1")
+	if err != nil || len(related) != 2 {
+		t.Fatalf("related=%+v err=%v", related, err)
+	}
+	detached, err := s.ResolveOwnerSession("session-1", SessionAutomationDetach)
+	if err != nil || len(detached.Definitions) != 2 {
+		t.Fatalf("detach snapshot=%+v err=%v", detached, err)
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		got := s.Get(id)
+		if got == nil || got.ContextPolicy != ContextIsolated || got.OwnerSessionID != "" || !got.Enabled {
+			t.Fatalf("detached automation %s = %+v", id, got)
+		}
+	}
+	if got := s.State(first.ID).LastSessionID; got != "" {
+		t.Fatalf("detach kept deleted owner as last session: %q", got)
+	}
+	if got := s.Get(other.ID); got == nil || got.OwnerSessionID != "session-2" {
+		t.Fatalf("unrelated automation changed: %+v", got)
+	}
+
+	if err := s.RestoreSessionAutomations(detached); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Get(first.ID); got == nil || got.ContextPolicy != ContextConversation || got.OwnerSessionID != "session-1" {
+		t.Fatalf("rollback did not restore definition: %+v", got)
+	}
+	if got := s.State(first.ID).LastStatus; got != StatusSuccess {
+		t.Fatalf("rollback did not restore state: %q", got)
+	}
+	if got := s.State(first.ID).LastSessionID; got != "session-1" {
+		t.Fatalf("rollback did not restore last session: %q", got)
+	}
+
+	deleted, err := s.ResolveOwnerSession("session-1", SessionAutomationDelete)
+	if err != nil || len(deleted.Definitions) != 2 {
+		t.Fatalf("delete snapshot=%+v err=%v", deleted, err)
+	}
+	if s.Get(first.ID) != nil || s.Get(second.ID) != nil || s.Get(other.ID) == nil {
+		t.Fatal("delete policy removed the wrong definitions")
+	}
+	if err := s.RestoreSessionAutomations(deleted); err != nil {
+		t.Fatal(err)
+	}
+	if s.Get(first.ID) == nil || s.Get(second.ID) == nil {
+		t.Fatal("delete rollback did not restore definitions")
+	}
+}
+
+func TestResolveOwnerSessionRejectsClaimedRunAtomically(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	a, err := s.Create(Automation{
+		Name: "running", Prompt: "p", ProjectPath: t.TempDir(), Enabled: true,
+		ContextPolicy: ContextConversation, OwnerSessionID: "owner",
+		Trigger: Trigger{Type: TriggerManual},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.TryMarkRunning(a.ID); err != nil || !ok {
+		t.Fatalf("claim=%v err=%v", ok, err)
+	}
+	if _, err := s.ResolveOwnerSession("owner", SessionAutomationDetach); !errors.Is(err, ErrOwnerAutomationRunning) {
+		t.Fatalf("resolve running owner err=%v", err)
+	}
+	got := s.Get(a.ID)
+	if got == nil || got.ContextPolicy != ContextConversation || got.OwnerSessionID != "owner" {
+		t.Fatalf("failed resolve mutated definition: %+v", got)
 	}
 }
 

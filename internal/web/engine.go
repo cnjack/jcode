@@ -115,7 +115,11 @@ type Engine struct {
 	// a model or mode switch rebuilds only this task's agent.
 	createAgent    func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	rebuildForMode func(planMode bool) (*adk.ChatModelAgent, error)
-	rebuildForRole func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
+	// rebuildForAutomation builds a full-access agent over this conversation's
+	// current model/context with unattended-only tools. It does not publish the
+	// candidate as the conversation's interactive agent.
+	rebuildForAutomation func() (*adk.ChatModelAgent, error)
+	rebuildForRole       func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
 
 	// pumpCancel stops this engine's event-forwarding goroutine on teardown.
 	pumpCancel context.CancelFunc
@@ -132,27 +136,28 @@ type Engine struct {
 // command package hands them over through this exported struct and the server
 // assembles the Engine via newEngine.
 type EngineConfig struct {
-	TaskID          string
-	Pwd             string
-	WorkspaceKind   session.WorkspaceKind
-	Mode            string
-	ProviderName    string
-	ModelName       string
-	AgentRole       string
-	Agent           *adk.ChatModelAgent
-	Env             *tools.Env
-	TodoStore       *tools.TodoStore
-	Recorder        *session.Recorder
-	TokenUsage      *model.TokenUsage
-	ApprovalState   *runner.ApprovalState
-	Handler         *handler.WebHandler
-	EventHandler    handler.AgentEventHandler
-	BreakdownFn     func() usage.ContextBreakdown
-	ToolSearchStats func() ToolSearchCounts
-	CreateAgent     func(providerName, modelName string) (*adk.ChatModelAgent, error)
-	RebuildForMode  func(planMode bool) (*adk.ChatModelAgent, error)
-	RebuildForRole  func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
-	FlowLoader      *flow.Loader
+	TaskID               string
+	Pwd                  string
+	WorkspaceKind        session.WorkspaceKind
+	Mode                 string
+	ProviderName         string
+	ModelName            string
+	AgentRole            string
+	Agent                *adk.ChatModelAgent
+	Env                  *tools.Env
+	TodoStore            *tools.TodoStore
+	Recorder             *session.Recorder
+	TokenUsage           *model.TokenUsage
+	ApprovalState        *runner.ApprovalState
+	Handler              *handler.WebHandler
+	EventHandler         handler.AgentEventHandler
+	BreakdownFn          func() usage.ContextBreakdown
+	ToolSearchStats      func() ToolSearchCounts
+	CreateAgent          func(providerName, modelName string) (*adk.ChatModelAgent, error)
+	RebuildForMode       func(planMode bool) (*adk.ChatModelAgent, error)
+	RebuildForAutomation func() (*adk.ChatModelAgent, error)
+	RebuildForRole       func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
+	FlowLoader           *flow.Loader
 	// RecorderInit decorates recorders this engine creates AFTER build (lazy
 	// creation / session switch in chat.go) so they get the same hooks (e.g.
 	// the LLM title refiner) as the recorder built with the task.
@@ -180,28 +185,29 @@ func newEngine(c *EngineConfig) *Engine {
 		taskID = c.Recorder.UUID()
 	}
 	e := &Engine{
-		taskID:          taskID,
-		pwd:             c.Pwd,
-		workspaceKind:   session.NormalizeWorkspaceKind(c.WorkspaceKind),
-		mode:            c.Mode,
-		providerName:    c.ProviderName,
-		modelName:       c.ModelName,
-		agentRole:       c.AgentRole,
-		agent:           c.Agent,
-		env:             c.Env,
-		todoStore:       c.TodoStore,
-		recorder:        c.Recorder,
-		tokenUsage:      tu,
-		approvalState:   c.ApprovalState,
-		handler:         c.Handler,
-		eventHandler:    c.EventHandler,
-		breakdownFn:     c.BreakdownFn,
-		toolSearchStats: c.ToolSearchStats,
-		createAgent:     c.CreateAgent,
-		rebuildForMode:  c.RebuildForMode,
-		rebuildForRole:  c.RebuildForRole,
-		flowLoader:      c.FlowLoader,
-		recorderInit:    c.RecorderInit,
+		taskID:               taskID,
+		pwd:                  c.Pwd,
+		workspaceKind:        session.NormalizeWorkspaceKind(c.WorkspaceKind),
+		mode:                 c.Mode,
+		providerName:         c.ProviderName,
+		modelName:            c.ModelName,
+		agentRole:            c.AgentRole,
+		agent:                c.Agent,
+		env:                  c.Env,
+		todoStore:            c.TodoStore,
+		recorder:             c.Recorder,
+		tokenUsage:           tu,
+		approvalState:        c.ApprovalState,
+		handler:              c.Handler,
+		eventHandler:         c.EventHandler,
+		breakdownFn:          c.BreakdownFn,
+		toolSearchStats:      c.ToolSearchStats,
+		createAgent:          c.CreateAgent,
+		rebuildForMode:       c.RebuildForMode,
+		rebuildForAutomation: c.RebuildForAutomation,
+		rebuildForRole:       c.RebuildForRole,
+		flowLoader:           c.FlowLoader,
+		recorderInit:         c.RecorderInit,
 	}
 	// Give the approval reviewer (when one is installed on this ApprovalState)
 	// recent conversation context. Harmless when no reviewer is set.

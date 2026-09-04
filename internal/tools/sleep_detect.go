@@ -38,7 +38,8 @@ func detectSleep(command string) (bool, string) {
 			if seconds > maxSleepSeconds {
 				return true, fmt.Sprintf(
 					"Blocked: sleep %ds exceeds the %ds limit. "+
-						"Remove or reduce the sleep duration.",
+						"Do not split the wait into shorter sleeps or a polling loop. "+
+						"For delayed, future-time, or recurring user work, use automation_create instead.",
 					seconds, maxSleepSeconds,
 				)
 			}

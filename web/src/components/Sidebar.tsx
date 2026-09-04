@@ -30,6 +30,7 @@ import {
   EnvelopeOpenIcon,
   TrashIcon,
   EllipsisHorizontalIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
@@ -63,6 +64,18 @@ interface SessionRow {
   archived: boolean
   unread: boolean
   running: boolean
+}
+
+interface DeleteImpactAutomation {
+  id: string
+  name: string
+  human_schedule: string
+  enabled: boolean
+}
+
+interface DeleteDialogState {
+  row: SessionRow
+  automations: DeleteImpactAutomation[]
 }
 
 /** Matches Vue .task-menu-items min-width. */
@@ -115,6 +128,8 @@ export function Sidebar() {
   // ⋯: menu's LEFT edge starts just to the RIGHT of the button.
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const ctxRef = useRef<HTMLDivElement | null>(null)
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   // Track rows that just appeared so we can play a one-shot enter animation
   // (avoids a hard pop-in when a new session is revealed optimistically).
@@ -353,6 +368,15 @@ export function Sidebar() {
     }
   }, [ctx])
 
+  useEffect(() => {
+    if (!deleteDialog) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !deleteBusy) setDeleteDialog(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [deleteDialog, deleteBusy])
+
   // ── Actions ──
 
   // Shared with the ⌘N / ⇧⌘O shortcuts in App.tsx (see startNewChat in the store).
@@ -391,9 +415,24 @@ export function Sidebar() {
     }
   }
 
-  async function deleteItem(row: SessionRow) {
+  async function requestDelete(row: SessionRow) {
+    if (row.running) return
+    try {
+      const impact = await api.sessionDeleteImpact(row.uuid)
+      if (impact.automations.length > 0) {
+        setDeleteDialog({ row, automations: impact.automations })
+        return
+      }
+      await deleteItem(row)
+    } catch {
+      // Keep the conversation intact; the next task refresh can reconcile.
+    }
+  }
+
+  async function deleteItem(row: SessionRow, automationPolicy?: 'delete' | 'detach') {
     // Running tasks must not be deleted — backend also returns 409. Stop first.
     if (row.running) return
+    setDeleteBusy(true)
     const wasActive = row.uuid === currentSessionId
     if (wasActive) {
       // Drop queued type-ahead for this session BEFORE the delete round-trip:
@@ -403,10 +442,13 @@ export function Sidebar() {
       dispatch(chatActions.dropSessionQueue(row.uuid))
     }
     try {
-      await api.deleteSession(row.uuid)
+      await api.deleteSession(row.uuid, automationPolicy)
     } catch {
+      setDeleteBusy(false)
       return
     }
+    setDeleteBusy(false)
+    setDeleteDialog(null)
     // Filter inside the reducer: the render-scope sessions/tasks copies are
     // stale after the await (a WS update or refresh may have landed since),
     // and a whole-list setTasks would clobber it.
@@ -497,7 +539,7 @@ export function Sidebar() {
           danger
           disabled={row.running}
           title={row.running ? t('sidebar.actions.deleteWhileRunning') : undefined}
-          onClick={() => { void deleteItem(row); closeCtx() }}
+          onClick={() => { void requestDelete(row); closeCtx() }}
         />
       </>
     )
@@ -743,6 +785,77 @@ export function Sidebar() {
               }}
             >
               {renderCtxItems(ctxRow)}
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {deleteDialog && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[var(--z-modal)] grid place-items-center bg-[var(--backdrop)] p-4 backdrop-blur-[6px]"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-conversation-title"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget && !deleteBusy) setDeleteDialog(null)
+              }}
+            >
+              <section className="w-full max-w-[520px] overflow-hidden rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-background)] shadow-[var(--shadow-xl)]">
+                <div className="flex items-start gap-3.5 px-5 pb-4 pt-5">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius-lg)] bg-[var(--color-error-bg)] text-[var(--color-destructive)]">
+                    <ExclamationTriangleIcon className="h-[18px] w-[18px]" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h2 id="delete-conversation-title" className="text-[15px] font-semibold text-[var(--color-foreground)]">
+                      {t('sidebar.deleteDialog.title', { title: rowTitle(deleteDialog.row, untitledLabel) })}
+                    </h2>
+                    <p className="mt-1 text-[12.5px] leading-5 text-[var(--color-muted-foreground)]">
+                      {t('sidebar.deleteDialog.body', { count: deleteDialog.automations.length })}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mx-5 max-h-40 overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-1.5">
+                  {deleteDialog.automations.map((item) => (
+                    <div key={item.id} className="flex items-center gap-3 border-b border-[var(--color-border)] py-2.5 last:border-b-0">
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${item.enabled ? 'bg-[var(--color-success)]' : 'bg-[var(--color-muted-foreground)]'}`} />
+                      <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-[var(--color-foreground)]">{item.name}</span>
+                      <span className="shrink-0 text-[11px] text-[var(--color-muted-foreground)]">{item.human_schedule}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 grid gap-2 border-t border-[var(--color-border)] bg-[var(--color-muted)] p-4 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    disabled={deleteBusy}
+                    onClick={() => { void deleteItem(deleteDialog.row, 'detach') }}
+                    className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2.5 text-left transition-colors hover:border-[var(--color-primary)] disabled:opacity-50"
+                  >
+                    <span className="block text-[12.5px] font-semibold text-[var(--color-foreground)]">{t('sidebar.deleteDialog.keep')}</span>
+                    <span className="mt-0.5 block text-[11px] leading-4 text-[var(--color-muted-foreground)]">{t('sidebar.deleteDialog.keepHint')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deleteBusy}
+                    onClick={() => { void deleteItem(deleteDialog.row, 'delete') }}
+                    className="rounded-[var(--radius-lg)] border border-[var(--color-destructive)] bg-[var(--color-error-bg)] px-3 py-2.5 text-left transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    <span className="block text-[12.5px] font-semibold text-[var(--color-destructive)]">{t('sidebar.deleteDialog.deleteAll', { count: deleteDialog.automations.length })}</span>
+                    <span className="mt-0.5 block text-[11px] leading-4 text-[var(--color-destructive)] opacity-80">{t('sidebar.deleteDialog.deleteHint')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    autoFocus
+                    disabled={deleteBusy}
+                    onClick={() => setDeleteDialog(null)}
+                    className="sm:col-span-2 justify-self-end rounded-[var(--radius-md)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-background)] hover:text-[var(--color-foreground)] disabled:opacity-50"
+                  >
+                    {deleteBusy ? t('sidebar.deleteDialog.deleting') : t('sidebar.deleteDialog.cancel')}
+                  </button>
+                </div>
+              </section>
             </div>,
             document.body,
           )

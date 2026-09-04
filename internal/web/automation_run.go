@@ -21,7 +21,22 @@ func (s *Server) AutomationRunner() automation.Runner {
 
 type automationRunner struct{ s *Server }
 
+func (r automationRunner) CanStart(a *automation.Automation) bool {
+	if a.ContextPolicy != automation.ContextConversation || a.OwnerSessionID == "" {
+		return true
+	}
+	eng := r.s.resolveEngine(a.OwnerSessionID)
+	return eng == nil || !eng.running.Load()
+}
+
 func (r automationRunner) StartRun(ctx context.Context, a *automation.Automation, kind string) (string, error) {
+	if r.s.automations != nil {
+		current := r.s.automations.Get(a.ID)
+		if current == nil {
+			return "", fmt.Errorf("automation %q no longer exists", a.ID)
+		}
+		a = current
+	}
 	return r.s.runAutomation(ctx, a, kind)
 }
 
@@ -46,9 +61,12 @@ func (d *doneCapture) OnAgentDone(err error) {
 // throwaway headless Engine, injecting the prompt, and blocking until the agent
 // is done. The run is recorded as a normal session tagged with the automation id
 // and trigger kind. Because there is no idle-evict, the engine is torn down on
-// completion. Scheduled runs are forced to full_access (headless approvals would
-// hang); ctx carries the liveness ceiling for scheduled fires.
+// completion. Auto-fired schedule and once definitions are forced to full_access
+// (headless approvals would hang); ctx carries the liveness ceiling.
 func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, kind string) (string, error) {
+	if a.ContextPolicy == automation.ContextConversation {
+		return s.runConversationAutomation(ctx, a, kind)
+	}
 	if s.newEngine == nil {
 		return "", fmt.Errorf("automation runs are unavailable (setup mode)")
 	}
@@ -56,10 +74,7 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 		return "", fmt.Errorf("project path is missing or not a directory: %s", a.ProjectPath)
 	}
 
-	mode := a.Mode
-	if a.Trigger.Type == automation.TriggerSchedule || mode == "" {
-		mode = "full_access" // headless: Ask/Plan would block forever on approvals
-	}
+	mode := automationRunMode(a)
 
 	// Automation runs are unattended, so they must use a headless engine that
 	// drops interactive tools (ask_user). An agent calling ask_user in a run with
@@ -162,6 +177,127 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 		}()
 	}
 	return sid, runErr
+}
+
+// runConversationAutomation resumes the owning conversation and injects the
+// automation prompt as a synthetic user turn. It uses a one-turn headless agent
+// over the conversation's current history, leaving the interactive agent and
+// saved mode untouched. If the conversation is busy, the claimed automation
+// waits for that turn to finish instead of opening a parallel history writer.
+func (s *Server) runConversationAutomation(
+	ctx context.Context,
+	a *automation.Automation,
+	kind string,
+) (string, error) {
+	if a.OwnerSessionID == "" {
+		return "", fmt.Errorf("conversation automation %q has no owner session", a.ID)
+	}
+
+	var eng *Engine
+	for {
+		// Activation and the running claim share taskCreateMu with session deletion.
+		// Without this lock span, deletion could clear the recorder after activation
+		// but before the claim, and this run would recreate the deleted session.
+		s.taskCreateMu.Lock()
+		result, err := s.ensureConversationLocked(ctx, a.OwnerSessionID, a.ProjectPath, "automation", "")
+		if err != nil {
+			s.taskCreateMu.Unlock()
+			return "", fmt.Errorf("resume automation conversation %q: %w", a.OwnerSessionID, err)
+		}
+		if result.Project != a.ProjectPath {
+			s.taskCreateMu.Unlock()
+			return "", fmt.Errorf(
+				"automation conversation %q belongs to project %q, not %q",
+				a.OwnerSessionID, result.Project, a.ProjectPath,
+			)
+		}
+		eng = s.resolveEngine(a.OwnerSessionID)
+		if eng == nil {
+			s.taskCreateMu.Unlock()
+			return "", fmt.Errorf("automation conversation %q has no runtime", a.OwnerSessionID)
+		}
+		claimed := s.tryStartEngine(eng)
+		s.taskCreateMu.Unlock()
+		if claimed {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+
+	submitted := false
+	defer func() {
+		if !submitted {
+			eng.running.Store(false)
+		}
+	}()
+	if eng.rebuildForAutomation == nil {
+		return "", fmt.Errorf("conversation automation agent is unavailable")
+	}
+	eng.rebuildMu.Lock()
+	automationAgent, err := eng.rebuildForAutomation()
+	eng.rebuildMu.Unlock()
+	if err != nil {
+		return "", fmt.Errorf("build conversation automation agent: %w", err)
+	}
+
+	done := make(chan error, 1)
+	eng.emu.Lock()
+	baseHandler := eng.eventHandler
+	eng.emu.Unlock()
+	if baseHandler == nil {
+		return "", fmt.Errorf("conversation automation handler is unavailable")
+	}
+	capture := &doneCapture{AgentEventHandler: baseHandler, done: done}
+	sid, err := s.submitMessageWithOptions(
+		eng,
+		conversationAutomationPrompt(a, kind),
+		"full_access",
+		"automation",
+		a.OwnerSessionID,
+		nil,
+		submitMessageOptions{Agent: automationAgent, EventHandler: capture},
+	)
+	if err != nil {
+		return sid, err
+	}
+	submitted = true
+
+	select {
+	case runErr := <-done:
+		return sid, runErr
+	case <-ctx.Done():
+		eng.emu.Lock()
+		cancel := eng.runCancel
+		eng.emu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		select {
+		case runErr := <-done:
+			return sid, runErr
+		case <-time.After(3 * time.Second):
+			return sid, ctx.Err()
+		}
+	}
+}
+
+func conversationAutomationPrompt(a *automation.Automation, kind string) string {
+	return fmt.Sprintf(
+		"<automation-fire id=%q kind=%q>\n%s\n</automation-fire>",
+		a.ID, kind, a.Prompt,
+	)
+}
+
+func automationRunMode(a *automation.Automation) string {
+	mode := a.Mode
+	if a.Trigger.Type == automation.TriggerSchedule || a.Trigger.Type == automation.TriggerOnce || mode == "" {
+		return "full_access" // headless: Ask/Plan would block forever on approvals
+	}
+	return mode
 }
 
 // stampAutomationMeta tags a run's session with its automation id, trigger kind

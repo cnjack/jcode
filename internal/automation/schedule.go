@@ -15,38 +15,56 @@ import (
 // the clock jumps 02:00→03:00 lands on a real instant). Fall-back (a slot that
 // occurs twice) is deduped by the caller via SlotKey/LastFiredSlot, not here.
 //
-// Returns ok=false for non-schedule triggers (manual never auto-fires).
+// Returns ok=false for non-schedule triggers (manual never auto-fires) and for
+// a once trigger whose pinned time is not strictly in the future.
 func ComputeNextRun(after time.Time, t Trigger) (time.Time, bool) {
-	if t.Type != TriggerSchedule {
-		return time.Time{}, false
-	}
-	loc := after.Location()
-	switch t.Cadence {
-	case CadenceHourly:
-		// Next occurrence of :MM strictly after `after`.
-		c := time.Date(after.Year(), after.Month(), after.Day(), after.Hour(), t.Minute, 0, 0, loc)
-		for !c.After(after) {
-			c = c.Add(time.Hour)
+	switch t.Type {
+	case TriggerOnce:
+		at, err := time.Parse(time.RFC3339, t.At)
+		if err != nil || !at.After(after) {
+			return time.Time{}, false
 		}
-		return c, true
+		return at, true
 
-	case CadenceDaily:
-		c := time.Date(after.Year(), after.Month(), after.Day(), t.Hour, t.Minute, 0, 0, loc)
-		for !c.After(after) {
-			c = time.Date(c.Year(), c.Month(), c.Day()+1, t.Hour, t.Minute, 0, 0, loc)
-		}
-		return c, true
-
-	case CadenceWeekly:
-		c := time.Date(after.Year(), after.Month(), after.Day(), t.Hour, t.Minute, 0, 0, loc)
-		// Advance day-by-day (calendar-safe) until weekday matches and it's in the future.
-		for i := 0; i < 8; i++ {
-			if int(c.Weekday()) == t.Weekday && c.After(after) {
-				return c, true
+	case TriggerSchedule:
+		loc := after.Location()
+		switch t.Cadence {
+		case CadenceHourly:
+			// Next occurrence of :MM strictly after `after`.
+			c := time.Date(after.Year(), after.Month(), after.Day(), after.Hour(), t.Minute, 0, 0, loc)
+			for !c.After(after) {
+				c = c.Add(time.Hour)
 			}
-			c = time.Date(c.Year(), c.Month(), c.Day()+1, t.Hour, t.Minute, 0, 0, loc)
+			return c, true
+
+		case CadenceDaily:
+			c := time.Date(after.Year(), after.Month(), after.Day(), t.Hour, t.Minute, 0, 0, loc)
+			for !c.After(after) {
+				c = time.Date(c.Year(), c.Month(), c.Day()+1, t.Hour, t.Minute, 0, 0, loc)
+			}
+			return c, true
+
+		case CadenceWeekly:
+			c := time.Date(after.Year(), after.Month(), after.Day(), t.Hour, t.Minute, 0, 0, loc)
+			// Advance day-by-day (calendar-safe) until weekday matches and it's in the future.
+			for i := 0; i < 8; i++ {
+				if int(c.Weekday()) == t.Weekday && c.After(after) {
+					return c, true
+				}
+				c = time.Date(c.Year(), c.Month(), c.Day()+1, t.Hour, t.Minute, 0, 0, loc)
+			}
+			return c, true // unreachable in practice; loop always finds a match within 7 days
+
+		case CadenceCron:
+			expr, err := ParseCronExpr(t.Expr)
+			if err != nil {
+				return time.Time{}, false
+			}
+			return NextCronFire(after, expr)
+
+		default:
+			return time.Time{}, false
 		}
-		return c, true // unreachable in practice; loop always finds a match within 7 days
 
 	default:
 		return time.Time{}, false
@@ -61,10 +79,19 @@ func SlotKey(t time.Time) string {
 }
 
 // HumanSchedule renders a trigger for display, e.g. "Daily at 09:00",
-// "Weekly on Mon at 14:30", "Hourly at :05", "Manual".
+// "Weekly on Mon at 14:30", "Hourly at :05", "Manual",
+// "Once at 2026-09-04 15:00", or `Cron "*/15 * * * *"`.
 func HumanSchedule(t Trigger) string {
-	if t.Type == TriggerManual {
+	switch t.Type {
+	case TriggerManual:
 		return "Manual"
+	case TriggerOnce:
+		if at, err := time.Parse(time.RFC3339, t.At); err == nil {
+			// Render in the host's local timezone — agents may pass UTC and
+			// everything else on this surface is documented as local time.
+			return fmt.Sprintf("Once at %s", at.In(time.Local).Format("2006-01-02 15:04"))
+		}
+		return "Once"
 	}
 	switch t.Cadence {
 	case CadenceHourly:
@@ -73,16 +100,21 @@ func HumanSchedule(t Trigger) string {
 		return fmt.Sprintf("Daily at %02d:%02d", t.Hour, t.Minute)
 	case CadenceWeekly:
 		return fmt.Sprintf("Weekly on %s at %02d:%02d", weekdayName(t.Weekday), t.Hour, t.Minute)
+	case CadenceCron:
+		return fmt.Sprintf("Cron %q", t.Expr)
 	default:
 		return string(t.Cadence)
 	}
 }
 
 // Badge renders a short cadence label for cards: "Daily" / "Weekly" / "Hourly"
-// / "Manual".
+// / "Manual" / "Once" / "Cron".
 func Badge(t Trigger) string {
-	if t.Type == TriggerManual {
+	switch t.Type {
+	case TriggerManual:
 		return "Manual"
+	case TriggerOnce:
+		return "Once"
 	}
 	switch t.Cadence {
 	case CadenceHourly:
@@ -91,6 +123,8 @@ func Badge(t Trigger) string {
 		return "Daily"
 	case CadenceWeekly:
 		return "Weekly"
+	case CadenceCron:
+		return "Cron"
 	default:
 		return string(t.Cadence)
 	}
