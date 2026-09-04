@@ -641,7 +641,8 @@ describe('file attachments', () => {
       }),
       readDroppedImage,
     })
-    const { container } = renderComposer(host)
+    const runtime = createMockRuntime()
+    const { container } = renderComposer(host, runtime)
     const composer = container.querySelector('.jcode-product-composer') as HTMLDivElement
     vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({
       left: 10,
@@ -657,16 +658,24 @@ describe('file attachments', () => {
     await waitFor(() => expect(onFileDrop).toBeTypeOf('function'))
 
     act(() => onFileDrop?.({ type: 'drop', paths: [
-      '/Users/jack/Documents/report.pdf',
+      '/Users/jack/Documents/live-pptx.pptx',
       '/Users/jack/Documents/screen.png',
     ], x: 100, y: 100 }))
 
     await waitFor(() => {
-      expect(textarea(container).value).toContain('/Users/jack/Documents/report.pdf')
+      expect(textarea(container).value).toBe('')
       expect(container.querySelector('.jcode-attachment-list')?.getAttribute('data-count')).toBe('1')
+      expect(container.querySelector('.jcode-pending-attachments')?.getAttribute('data-count')).toBe('1')
     })
     expect(readDroppedImage).toHaveBeenCalledTimes(2)
-    expect(textarea(container).value).toContain('dragged a file into the input')
+    expect(container.textContent).toContain('live-pptx.pptx')
+
+    fireEvent.click(screen.getByLabelText('Send'))
+    await waitFor(() => {
+      const send = (runtime as ReturnType<typeof createMockRuntime>).calls.find((call) => call.action === 'sendMessage')
+      expect(send?.args[0]).toContain('[File Drop]')
+      expect(send?.args[0]).toContain('/Users/jack/Documents/live-pptx.pptx')
+    })
   })
 
   it('drops a delayed native image read after an s1 to s2 to s1 transition', async () => {
