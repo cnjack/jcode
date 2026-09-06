@@ -68,10 +68,10 @@ describe('Sidebar no-project grouping', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Second scratch task')).toBeTruthy())
-    expect(screen.getAllByText('No project')).toHaveLength(1)
+    expect(screen.getAllByText('Chat')).toHaveLength(1)
     expect(screen.queryByText('2026-08-19-001')).toBeNull()
     expect(screen.queryByText('2026-08-19-002')).toBeNull()
     const groupNames = [...container.querySelectorAll('.sb-project-name')].map((node) => node.textContent)
-    expect(groupNames).toEqual(['No project', 'jcode'])
+    expect(groupNames).toEqual(['Chat', 'jcode'])
   })
 })

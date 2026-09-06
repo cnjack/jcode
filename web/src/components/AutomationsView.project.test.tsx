@@ -98,7 +98,7 @@ describe('Automation project field', () => {
     fireEvent.click(screen.getByTitle('Edit'))
     const dialog = screen.getByRole('dialog', { name: 'Edit automation' })
 
-    expect(within(dialog).getByRole('textbox', { name: 'Project' }).textContent).toBe('No project')
+    expect(within(dialog).getByRole('textbox', { name: 'Project' }).textContent).toBe('Chat')
     expect(within(dialog).queryByRole('combobox', { name: 'Project' })).toBeNull()
     expect(dialog.textContent).not.toContain(scratchPath)
     expect(dialog.textContent).not.toContain('cannot move')
@@ -149,10 +149,10 @@ describe('Automation project field', () => {
     fireEvent.click(ownerSelect)
     const ownerList = within(dialog).getByRole('listbox', { name: 'Runs in' })
     const scratchOwner = within(ownerList).getByRole('option', { name: /System resource checks/ })
-    expect(scratchOwner.textContent).toContain('No project')
+    expect(scratchOwner.textContent).toContain('Chat')
     fireEvent.click(scratchOwner)
     expect(ownerSelect.textContent).toContain('System resource checks')
-    expect(within(dialog).getByRole('textbox', { name: 'Project' }).textContent).toBe('No project')
+    expect(within(dialog).getByRole('textbox', { name: 'Project' }).textContent).toBe('Chat')
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(api.automationUpdate).toHaveBeenCalled())

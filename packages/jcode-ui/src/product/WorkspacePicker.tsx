@@ -18,6 +18,7 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
   ServerIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { useRuntimeState } from 'jcode-ui-core/runtime'
 import type { ProductComposerHost } from './host.js'
@@ -103,6 +104,7 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
     ? strings.workspaceScratchAction
     : activePath ? workspaceName(activePath) : strings.workspaceNone
   const activeRemote = !activeScratch && isRemotePath(activePath)
+  const canClearProject = !!activePath && !activeScratch && !!host.startScratchWorkspace
 
   const validateKnownPaths = useCallback(async () => {
     const localPaths = [...new Set(tasks
@@ -205,6 +207,7 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
   }
 
   async function startScratch() {
+    if (isRunning || switching) return
     if (activeScratch) {
       reset()
       return
@@ -217,6 +220,8 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
       reset()
     } catch (e) {
       setError(e instanceof Error ? e.message : strings.workspaceOpenError)
+      setBrowserOpen(false)
+      setOpen(true)
     } finally {
       setSwitching(false)
     }
@@ -240,27 +245,48 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
 
   return (
     <div ref={rootRef} className={`ws-bar${open ? ' is-open' : ''}`} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        disabled={isRunning || switching}
-        title={activePath}
-        onClick={(e) => {
-          e.stopPropagation()
-          setOpen((v) => {
-            if (!v) void validateKnownPaths()
-            return !v
-          })
-        }}
-        className="ws-pill ws-pill-action"
-      >
-        {activeScratch
-          ? <ChatBubbleLeftRightIcon className="h-3.5 w-3.5 ws-pill-icon" />
-          : activeRemote
-          ? <ServerIcon className="h-3.5 w-3.5 ws-pill-icon" />
-          : <FolderOpenIcon className="h-3.5 w-3.5 ws-pill-icon" />}
-        <span className="ws-name">{activeName}</span>
-        <ChevronDownIcon className={`h-3 w-3 ws-caret${open ? ' open' : ''}`} />
-      </button>
+      <div className={`ws-selection${canClearProject ? ' can-clear' : ''}${isRunning || switching ? ' is-disabled' : ''}`}>
+        {canClearProject && (
+          <button
+            type="button"
+            className="ws-clear"
+            disabled={isRunning || switching}
+            title={strings.workspaceClearProject}
+            aria-label={strings.workspaceClearProject}
+            onClick={(e) => {
+              e.stopPropagation()
+              void startScratch()
+            }}
+          >
+            {activeRemote
+              ? <ServerIcon className="h-3.5 w-3.5 ws-clear-icon" />
+              : <FolderOpenIcon className="h-3.5 w-3.5 ws-clear-icon" />}
+            <XMarkIcon className="h-3.5 w-3.5 ws-clear-hover-icon" />
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={isRunning || switching}
+          title={activeScratch ? activeName : activePath}
+          aria-expanded={open}
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpen((v) => {
+              if (!v) void validateKnownPaths()
+              return !v
+            })
+          }}
+          className="ws-pill ws-pill-action"
+        >
+          {!canClearProject && (activeScratch
+            ? <ChatBubbleLeftRightIcon className="h-3.5 w-3.5 ws-pill-icon" />
+            : activeRemote
+            ? <ServerIcon className="h-3.5 w-3.5 ws-pill-icon" />
+            : <FolderOpenIcon className="h-3.5 w-3.5 ws-pill-icon" />)}
+          <span className="ws-name">{activeName}</span>
+          <ChevronDownIcon className={`h-3 w-3 ws-caret${open ? ' open' : ''}`} />
+        </button>
+      </div>
 
       {open && (
         <div className={`ws-panel ${placement === 'bottom' ? 'place-bottom' : 'place-top'}`}>
@@ -313,6 +339,14 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
                 <MagnifyingGlassIcon className="h-3 w-3 ws-search-icon" />
                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={strings.workspaceSearch} className="ws-search-input" />
               </div>
+              {host.startScratchWorkspace && <div className="ws-chat-option">
+                <button type="button" disabled={isRunning || switching} className={`ws-action${activeScratch ? ' active' : ''}`} onClick={() => void startScratch()}>
+                  <ChatBubbleLeftRightIcon className="h-3.5 w-3.5" />
+                  <span>{strings.workspaceScratchAction}</span>
+                  {activeScratch && <CheckIcon className="ml-auto h-3.5 w-3.5 ws-check" />}
+                </button>
+                <div className="ws-action-separator" />
+              </div>}
               <div className="ws-list">
                 {workspaces.length === 0 ? (
                   <div className="ws-hint">{strings.workspaceNonePlural}</div>
@@ -347,14 +381,6 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
                   <ServerIcon className="h-3.5 w-3.5" />
                   <span>{strings.remoteConnect}</span>
                 </button>}
-                {host.startScratchWorkspace && <>
-                  <div className="ws-action-separator" />
-                  <button type="button" disabled={switching} className={`ws-action${activeScratch ? ' active' : ''}`} onClick={() => void startScratch()}>
-                    <ChatBubbleLeftRightIcon className="h-3.5 w-3.5" />
-                    <span>{strings.workspaceScratchAction}</span>
-                    {activeScratch && <CheckIcon className="ml-auto h-3.5 w-3.5 ws-check" />}
-                  </button>
-                </>}
               </div>
             </div>
           )}
@@ -395,12 +421,45 @@ const WS_CSS = `
   max-width: 230px;
   background: transparent;
   cursor: pointer;
-  transition: background 0.15s, transform 0.06s ease;
 }
 .ws-pill-action .ws-pill-icon { color: var(--color-accent-neutral); }
-.ws-pill-action:hover:not(:disabled) { background: var(--color-muted); }
-.ws-pill-action:active:not(:disabled) { transform: translateY(0.5px); }
 .ws-pill-action:disabled { opacity: 0.55; cursor: not-allowed; }
+.ws-selection {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 230px;
+  border-radius: var(--radius-lg);
+  transition: background 0.15s, transform 0.06s ease;
+}
+.ws-selection:is(:hover, :focus-within):not(.is-disabled),
+.ws-bar.is-open .ws-selection:not(.is-disabled) { background: var(--color-muted); }
+.ws-selection:active:not(.is-disabled) { transform: translateY(0.5px); }
+.ws-selection:has(:focus-visible) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.ws-selection button:focus-visible { outline: none; }
+.ws-selection.can-clear .ws-pill-action { padding-left: 2px; }
+.ws-clear {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--color-accent-neutral);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.ws-selection:is(:hover, :focus-within):not(.is-disabled) .ws-clear { color: var(--color-foreground); }
+.ws-clear:disabled { opacity: 0.55; cursor: not-allowed; }
+.ws-clear-icon, .ws-clear-hover-icon { grid-area: 1 / 1; }
+.ws-clear-hover-icon { visibility: hidden; }
+.ws-selection:is(:hover, :focus-within):not(.is-disabled) .ws-clear-icon { visibility: hidden; }
+.ws-selection:is(:hover, :focus-within):not(.is-disabled) .ws-clear-hover-icon { visibility: visible; }
+.ws-chat-option { flex-shrink: 0; }
 .ws-name {
   font-weight: 500;
   white-space: nowrap;

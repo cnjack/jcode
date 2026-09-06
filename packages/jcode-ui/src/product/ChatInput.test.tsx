@@ -262,7 +262,7 @@ describe('workspace picker', () => {
 
     fireEvent.click(screen.getByText('project'))
     expect(screen.queryByText('2026-08-19-001')).toBeNull()
-    fireEvent.click(screen.getByText('Work without a project'))
+    fireEvent.click(screen.getByText('Chat'))
     await waitFor(() => expect(startScratchWorkspace).toHaveBeenCalledTimes(1))
   })
 
@@ -295,8 +295,8 @@ describe('workspace picker', () => {
       startScratchWorkspace,
     }))
 
-    fireEvent.click(screen.getByText('Work without a project'))
-    const labels = screen.getAllByText('Work without a project')
+    fireEvent.click(screen.getByText('Chat'))
+    const labels = screen.getAllByText('Chat')
     fireEvent.click(labels[labels.length - 1])
     expect(startScratchWorkspace).not.toHaveBeenCalled()
   })
