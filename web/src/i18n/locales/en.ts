@@ -79,7 +79,7 @@ export default {
 
   welcome: {
     startIn: 'Start a new task in {project}',
-    startWithoutProject: 'Start a task without a project',
+    startWithoutProject: 'Start a Chat',
     subtitle: 'Send a message to start. {kbd} for commands.',
   },
 
@@ -1228,7 +1228,7 @@ export default {
     running: 'Running',
     untitled: 'New chat',
     newTaskHere: 'New task here',
-    newNoProjectTask: 'New task without a project',
+    newNoProjectTask: 'New Chat',
     filter: {
       title: 'Filters & sorting',
       status: 'Status',
@@ -1534,8 +1534,9 @@ export default {
 
   workspace: {
     none: 'No workspace',
-    noProject: 'No project',
-    workWithoutProject: 'Work without a project',
+    noProject: 'Chat',
+    workWithoutProject: 'Chat',
+    clearProject: 'Clear project and switch to Chat',
     loading: 'Loading…',
     noFolders: 'No folders',
     open: 'Open',

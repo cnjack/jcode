@@ -182,7 +182,7 @@ export default {
 
   welcome: {
     startIn: '{project}에서 새 작업 시작',
-    startWithoutProject: '프로젝트 없이 작업 시작',
+    startWithoutProject: '채팅 시작',
     subtitle: '메시지를 보내 시작하세요. {kbd}로 명령어를 확인하세요.',
   },
 
@@ -1114,7 +1114,7 @@ export default {
     running: '실행 중',
     untitled: '새 채팅',
     newTaskHere: '여기에 새 작업',
-    newNoProjectTask: '프로젝트 없이 새 작업',
+    newNoProjectTask: '새 채팅',
     filter: {
       title: '필터 및 정렬',
       status: '상태',
@@ -1401,8 +1401,9 @@ export default {
 
   workspace: {
     none: '워크스페이스 없음',
-    noProject: '프로젝트 없음',
-    workWithoutProject: '프로젝트 없이 작업',
+    noProject: '채팅',
+    workWithoutProject: '채팅',
+    clearProject: '프로젝트 선택 해제 후 채팅으로 전환',
     loading: '불러오는 중…',
     noFolders: '폴더 없음',
     open: '열기',

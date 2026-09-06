@@ -108,6 +108,7 @@ function buildStrings(t: (key: string, opts?: Record<string, unknown>) => string
     workspaceOpenError: t('workspace.openError'),
     workspacePathPlaceholder: t('projectSwitcher.pathPlaceholder'),
     workspaceScratchAction: t('workspace.workWithoutProject'),
+    workspaceClearProject: t('workspace.clearProject'),
     remoteConnect: t('nav.remoteConnect'),
 
     branchesTitle: t('branches.title'),

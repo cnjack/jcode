@@ -182,7 +182,7 @@ export default {
 
   welcome: {
     startIn: '{project} で新しいタスクを開始',
-    startWithoutProject: 'プロジェクトなしでタスクを開始',
+    startWithoutProject: 'チャットを開始',
     subtitle: 'メッセージを送信して開始します。{kbd} でコマンドを表示。',
   },
 
@@ -1115,7 +1115,7 @@ export default {
     running: '実行中',
     untitled: '新しいチャット',
     newTaskHere: 'ここで新規タスク',
-    newNoProjectTask: 'プロジェクトなしで新規タスク',
+    newNoProjectTask: '新しいチャット',
     filter: {
       title: 'フィルターと並べ替え',
       status: 'ステータス',
@@ -1402,8 +1402,9 @@ export default {
 
   workspace: {
     none: 'ワークスペースなし',
-    noProject: 'プロジェクトなし',
-    workWithoutProject: 'プロジェクトを使わずに作業',
+    noProject: 'チャット',
+    workWithoutProject: 'チャット',
+    clearProject: 'プロジェクトを解除してチャットに切り替え',
     loading: '読み込み中…',
     noFolders: 'フォルダーなし',
     open: '開く',
