@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cnjack/jcode/internal/procutil"
 	utils "github.com/cnjack/jcode/internal/util"
 )
 
@@ -56,6 +57,8 @@ type githubDraftProvider struct{}
 
 func draftCommand(ctx context.Context, pwd, program string, env []string, input string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, program, args...)
+	procutil.SetupProcessGroup(cmd)
+	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir = pwd
 	cmd.Env = env
 	cmd.Stdin = strings.NewReader(input)
@@ -71,7 +74,7 @@ func draftGit(ctx context.Context, pwd, index, input string, args ...string) (st
 	if index != "" {
 		env = append(env, "GIT_INDEX_FILE="+index)
 	}
-	return draftCommand(ctx, pwd, "git", env, input, append([]string{"-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false"}, args...)...)
+	return draftCommand(ctx, pwd, "git", env, input, append([]string{"-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + os.DevNull}, args...)...)
 }
 func ghDraftCommand(ctx context.Context, pwd string, args ...string) (string, error) {
 	env := append(os.Environ(), "GH_PROMPT_DISABLED=1", "GIT_TERMINAL_PROMPT=0")

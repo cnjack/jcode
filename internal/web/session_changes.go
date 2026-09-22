@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cnjack/jcode/internal/procutil"
 	utils "github.com/cnjack/jcode/internal/util"
 )
 
@@ -61,6 +62,8 @@ func (b *boundedChangeOutput) Write(p []byte) (int, error) {
 }
 func changesGit(ctx context.Context, pwd string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-optional-locks", "-c", "core.fsmonitor=false"}, args...)...)
+	procutil.SetupProcessGroup(cmd)
+	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir = pwd
 	cmd.Env = utils.ScrubbedGitEnv()
 	out := &boundedChangeOutput{limit: changesLimit}

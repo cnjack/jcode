@@ -51,3 +51,11 @@ or upstream refresh token is required. Cloud Runner configurations use the same
 explicit protocol with a scoped run token. The test exercises the actual wire
 path, scoped bearer, strict Codex request fields and streamed reply against a
 local upstream fixture. Live OAuth inference is a separate acceptance step.
+
+The live GitHub acceptance used an isolated clone and the existing `cnjack`
+GitHub CLI keyring identity. An encrypted browser request created a real draft
+containing only the reviewed fixture file; the original checkout/index stayed
+unchanged. Credential-helper timeout testing exposed orphaned children, so every
+inspection/delivery command now uses process-group cancellation and a bounded
+wait. Delivery Git commands disable hooks to avoid running repository hooks as a
+side effect of publishing the reviewed files.
