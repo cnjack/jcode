@@ -17,8 +17,8 @@ func TestListCloudModelsEnrichesKnownDesktopCatalogModel(t *testing.T) {
 			"models": []map[string]any{{
 				"model_id":          "cloud-model-id",
 				"provider_id":       "cloud-provider-id",
-				"kind":              "zhipuai-coding-plan",
-				"provider_name":     "Zhipu AI Coding Plan",
+				"kind":              "zhipuai",
+				"provider_name":     "Zhipu AI",
 				"model_name":        "GLM-5.2",
 				"upstream_model_id": "glm-5.2",
 				"scope":             "account",
