@@ -359,7 +359,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			vision := catalogModel.Capabilities.Image
 			effort := config.ResolveEffort(prov, mod, "")
 			proxyConfig := &config.ProviderConfig{
-				APIKey: deviceToken, Vision: &vision, ReasoningEffort: effort,
+				APIKey: deviceToken, Vision: &vision, ReasoningEffort: effort, Protocol: catalogModel.Protocol,
 			}
 			cm, err := internalmodel.NewChatModelFromProvider(
 				ctx, catalogModel.Kind, catalogModel.UpstreamModelID, proxyBase, proxyConfig,

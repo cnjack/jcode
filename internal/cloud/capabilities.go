@@ -23,11 +23,12 @@ import (
 // DeviceCapabilities is the capabilities payload stored by the orchestrator
 // and consumed by the console/mobile compose UI.
 type DeviceCapabilities struct {
-	Projects      []CapabilityProject      `json:"projects"`
-	Models        []CapabilityModel        `json:"models"`
-	CurrentModel  *CapabilityModel         `json:"current_model,omitempty"`
-	Efforts       []string                 `json:"efforts"`
-	SlashCommands []CapabilitySlashCommand `json:"slash_commands"`
+	WorkspaceActions []string                 `json:"workspace_actions"`
+	Projects         []CapabilityProject      `json:"projects"`
+	Models           []CapabilityModel        `json:"models"`
+	CurrentModel     *CapabilityModel         `json:"current_model,omitempty"`
+	Efforts          []string                 `json:"efforts"`
+	SlashCommands    []CapabilitySlashCommand `json:"slash_commands"`
 }
 
 // CapabilityProject is one known project directory.
@@ -69,10 +70,11 @@ var standardEfforts = []string{"minimal", "low", "medium", "high"}
 // capabilities must never break the session upsert they ride along with.
 func (c *Connector) collectCapabilities(ctx context.Context) *DeviceCapabilities {
 	caps := &DeviceCapabilities{
-		Projects:      []CapabilityProject{},
-		Models:        []CapabilityModel{},
-		Efforts:       []string{},
-		SlashCommands: []CapabilitySlashCommand{},
+		WorkspaceActions: []string{"changes", "draft_pr"},
+		Projects:         []CapabilityProject{},
+		Models:           []CapabilityModel{},
+		Efforts:          []string{},
+		SlashCommands:    []CapabilitySlashCommand{},
 	}
 
 	// Projects: the session index is keyed by project path — the same source

@@ -109,11 +109,12 @@ func TestMiniMaxM3ContextOverride(t *testing.T) {
 	}
 }
 
-// TestGLM52Injected guards that GLM-5.2 (released before its models.dev record)
-// is merged into the first-party Zhipu/Z.ai providers with a 1M window.
-func TestGLM52Injected(t *testing.T) {
+// TestGLM52CatalogMetadata checks GLM-5.2 on catalogs that still advertise it.
+// The Chinese Coding Plan catalog now lists GLM-5.3 instead; do not invent
+// availability there merely to satisfy a stale generated-registry expectation.
+func TestGLM52CatalogMetadata(t *testing.T) {
 	reg := NewModelRegistry()
-	for _, prov := range []string{"zhipuai", "zhipuai-coding-plan", "zai", "zai-coding-plan"} {
+	for _, prov := range []string{"zhipuai", "zai", "zai-coding-plan"} {
 		_, m, ok := reg.LookupModel(prov, "glm-5.2")
 		if !ok || m == nil {
 			t.Errorf("%s/glm-5.2 not found", prov)
