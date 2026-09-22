@@ -607,18 +607,19 @@ func (l *localControlPlane) doJSON(ctx context.Context, method, path string, bod
 // project_path, model, effort, goal, attachments — all optional. goal_armed
 // (M14) flips the meaning of text: it is a goal objective and the command
 // only arms the goal (POST /api/goal with start=true), skipping /api/chat and
-// every other compose step.
+// every other compose step. Workspace selection still applies before arming.
 type chatSendPayload struct {
-	Text        string           `json:"text"`
-	Images      []chatImage      `json:"images,omitempty"`
-	Mode        string           `json:"mode,omitempty"`
-	Channel     string           `json:"channel,omitempty"` // "console" | "mobile"
-	ProjectPath string           `json:"project_path,omitempty"`
-	Model       *chatModelRef    `json:"model,omitempty"`
-	Effort      string           `json:"effort,omitempty"`
-	Goal        string           `json:"goal,omitempty"`
-	GoalArmed   bool             `json:"goal_armed,omitempty"`
-	Attachments []chatAttachment `json:"attachments,omitempty"`
+	WorkspaceKind string           `json:"workspace_kind,omitempty"`
+	Text          string           `json:"text"`
+	Images        []chatImage      `json:"images,omitempty"`
+	Mode          string           `json:"mode,omitempty"`
+	Channel       string           `json:"channel,omitempty"` // "console" | "mobile"
+	ProjectPath   string           `json:"project_path,omitempty"`
+	Model         *chatModelRef    `json:"model,omitempty"`
+	Effort        string           `json:"effort,omitempty"`
+	Goal          string           `json:"goal,omitempty"`
+	GoalArmed     bool             `json:"goal_armed,omitempty"`
+	Attachments   []chatAttachment `json:"attachments,omitempty"`
 }
 
 // chatModelRef is the model facet of a compose chat.send.
@@ -631,7 +632,7 @@ type chatModelRef struct {
 // therefore goes through the ordered compose pipeline instead of the plain
 // one-shot /api/chat call.
 func (p *chatSendPayload) needsCompose() bool {
-	return p.ProjectPath != "" || p.Model != nil || p.Effort != "" || p.Goal != "" || len(p.Attachments) > 0
+	return p.WorkspaceKind != "" || p.ProjectPath != "" || p.Model != nil || p.Effort != "" || p.Goal != "" || len(p.Attachments) > 0
 }
 
 // cloudForbiddenMode reports whether a cloud chat.send asks for unrestricted
@@ -697,6 +698,13 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
 		return "error", map[string]string{"error": fmt.Sprintf("invalid chat.send payload: %v", err)}
 	}
+	if p.WorkspaceKind != "" && p.WorkspaceKind != "project" && p.WorkspaceKind != "scratch" {
+		return "error", map[string]string{"error": "invalid_workspace_kind"}
+	}
+	if p.WorkspaceKind == "scratch" && p.ProjectPath != "" && cmd.SessionID == "" {
+		return "error", map[string]string{"error": "scratch_workspace_path_managed"}
+	}
+
 	// M20 mode ceiling: a cloud-originated session may not run full_access
 	// (bypass). Rejected before any side effect — even a goal_armed payload
 	// that declares the intent is refused.
@@ -713,7 +721,7 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	}
 	// goal_armed wins over everything: text is the goal objective and the
 	// command only arms the goal — /api/chat and all compose facets
-	// (mode/images/session/attachments/…) are ignored.
+	// (mode/images/attachments/…) are ignored; workspace selection still applies.
 	if p.GoalArmed {
 		return c.execChatSendGoalArmed(ctx, cmd, &p)
 	}
@@ -735,7 +743,7 @@ func (c *Connector) execChatSendGoalArmed(ctx context.Context, cmd DeviceCommand
 	if objective == "" {
 		return "error", map[string]string{"error": "chat.send: goal_armed with empty objective"}
 	}
-	sessionID, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel)
+	sessionID, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel, p.WorkspaceKind)
 	if err != nil {
 		return "error", map[string]string{"error": err.Error()}
 	}
@@ -758,7 +766,7 @@ func (c *Connector) execChatSendLegacy(ctx context.Context, cmd DeviceCommand, p
 	// an empty id to /api/chat targets the local active engine, which could be a
 	// different conversation. The created id is therefore the sole target for
 	// both the message and the successful command acknowledgment.
-	sessionID, err := c.activateSession(ctx, cmd.SessionID, "", p.Channel)
+	sessionID, err := c.activateSession(ctx, cmd.SessionID, "", p.Channel, "")
 	if err != nil {
 		return "error", map[string]string{"error": err.Error()}
 	}
@@ -827,7 +835,7 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 
 	// 1. Activate the session without changing Desktop's foreground and return
 	// the id required by every task-scoped compose facet below.
-	sid, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel)
+	sid, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel, p.WorkspaceKind)
 	if err != nil {
 		return errResult(err)
 	}
@@ -916,8 +924,11 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 // activateSession centralizes the non-foreground local session contract for
 // Cloud commands. Source is always non-empty so the server applies the Cloud
 // remote allowlist and safe-mode policy before the first event is emitted.
-func (c *Connector) activateSession(ctx context.Context, sessionID, projectPath, source string) (string, error) {
+func (c *Connector) activateSession(ctx context.Context, sessionID, projectPath, source, workspaceKind string) (string, error) {
 	req := map[string]string{}
+	if workspaceKind != "" {
+		req["workspace_kind"] = workspaceKind
+	}
 	if sessionID != "" {
 		req["session_id"] = sessionID
 	}

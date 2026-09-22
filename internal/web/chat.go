@@ -86,7 +86,7 @@ func (s *Server) engineForChatContext(ctx context.Context, taskID, modeStr strin
 			return nil, fmt.Errorf("load conversation metadata: %w", err)
 		}
 		if meta != nil {
-			result, err := s.ensureConversation(ctx, taskID, "", "")
+			result, err := s.ensureConversation(ctx, taskID, "")
 			if err != nil {
 				return nil, err
 			}

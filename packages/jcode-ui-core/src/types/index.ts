@@ -39,6 +39,8 @@ export interface Message {
   /** Origin channel for inbound messages (e.g. 'wechat'). Drives the compact
    *  source label and any host-provided identity chrome. */
   source?: string
+  /** Display attribution supplied by multi-user hosts such as jcode Cloud. */
+  author?: string
   images?: ChatImage[]
   /** system-message severity. */
   level?: SystemLevel
