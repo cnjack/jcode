@@ -42,3 +42,12 @@ selected-only committed/uncommitted delivery, stale review and partial-push retr
 The Cloud browser acceptance additionally exercises actual encryption/pairing
 and real device readback. OAuth/provider calls and public deployment acceptance
 are tracked separately in Cloud's implementation log.
+
+
+Cloud-managed ChatGPT models declare `protocol: codex_responses` in the device
+catalog. The web adapter passes it to the common model factory, which uses the
+Responses transport with the Cloud device token; no local provider-auth account
+or upstream refresh token is required. Cloud Runner configurations use the same
+explicit protocol with a scoped run token. The test exercises the actual wire
+path, scoped bearer, strict Codex request fields and streamed reply against a
+local upstream fixture. Live OAuth inference is a separate acceptance step.

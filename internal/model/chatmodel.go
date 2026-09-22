@@ -451,6 +451,16 @@ func NewChatModelFromProvider(ctx context.Context, provider, modelName, baseURL 
 		}
 		return newManagedChatModel(ctx, provider, modelName, pc, vision, manager)
 	}
+	if pc.Protocol == "codex_responses" || pc.Protocol == "openai_responses" {
+		// Cloud resolves provider OAuth inside its proxy. This key is the scoped run
+		// credential, so no local provider-auth store or provider token is required.
+		token := pc.APIKey
+		return NewResponsesModel(ctx, &ResponsesModelConfig{
+			Model: modelName, BaseURL: baseURL, Headers: pc.Headers, ReasoningEffort: pc.ReasoningEffort, Vision: vision,
+			Codex:      pc.Protocol == "codex_responses",
+			Credential: func(context.Context) (string, map[string]string, error) { return token, nil, nil },
+		})
+	}
 	return NewChatModel(ctx, &ChatModelConfig{
 		Model:           modelName,
 		APIKey:          pc.APIKey,
