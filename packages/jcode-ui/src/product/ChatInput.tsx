@@ -743,6 +743,7 @@ export function ChatInput({
   }, [])
 
   const ingestBrowserFiles = useCallback((files: Iterable<File>) => {
+    if (host.stageAttachments) { host.stageAttachments(Array.from(files)); return }
     if (isUploadingFiles) return
     const pending: PendingDroppedFile[] = []
     for (const file of files) {
@@ -771,7 +772,7 @@ export function ChatInput({
       })
     }
     if (pending.length > 0) setPendingFiles((current) => [...current, ...pending])
-  }, [addImageFile, imageSupport, isUploadingFiles, strings.fileTooLarge])
+  }, [addImageFile, host.stageAttachments, imageSupport, isUploadingFiles, strings.fileTooLarge])
 
   const ingestNativePaths = useCallback(async (paths: string[]) => {
     if (isUploadingFiles) return
@@ -860,6 +861,11 @@ export function ChatInput({
   }
 
   function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    if (host.stageAttachments && e.clipboardData?.files.length) {
+      e.preventDefault()
+      host.stageAttachments(Array.from(e.clipboardData.files))
+      return
+    }
     if (!imageSupport) return
     const items = e.clipboardData?.items
     if (!items) return
@@ -1016,6 +1022,10 @@ export function ChatInput({
         textareaRef.current?.focus()
       }
       if (e.key === 'Escape') {
+        setShowModePicker(false)
+        setShowEffortPicker(false)
+        setShowAddMenu(false)
+        setShowContextPopup(false)
         if (showManageModels) {
           e.preventDefault()
           setShowManageModels(false)
@@ -1029,10 +1039,10 @@ export function ChatInput({
         }
       }
     }
-    document.addEventListener('click', onClick)
+    document.addEventListener('click', onClick, true)
     document.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('click', onClick)
+      document.removeEventListener('click', onClick, true)
       document.removeEventListener('keydown', onKey)
     }
   }, [showAgentPicker, showManageModels, showModelPicker])
@@ -1266,6 +1276,7 @@ export function ChatInput({
 
             <input
               ref={fileInputRef}
+              aria-label={strings.attachFiles}
               type="file"
               multiple
               onChange={handleFileSelect}

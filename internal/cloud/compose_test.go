@@ -713,3 +713,50 @@ func TestChatSendImagesForwarded(t *testing.T) {
 		t.Errorf("compose images[0] = %v", cimg)
 	}
 }
+
+func TestChatSendWorkspaceSelection(t *testing.T) {
+	for _, goal := range []bool{false, true} {
+		t.Run(fmt.Sprint(goal), func(t *testing.T) {
+			local, srv := newFakeComposeLocal(t)
+			conn := newTestConnector(t, "http://127.0.0.1:1", srv.URL)
+			status, result := conn.execChatSend(context.Background(), DeviceCommand{Kind: "chat.send", Payload: mustPayload(t, map[string]any{"text": "hello", "workspace_kind": "scratch", "goal_armed": goal})})
+			if status != "ok" {
+				t.Fatalf("%s %+v", status, result)
+			}
+			_, bodies := local.snapshot()
+			activation := bodies["/api/sessions/activate"][0]
+			if activation["workspace_kind"] != "scratch" || activation["project_path"] != nil || activation["focus"] != nil {
+				t.Fatalf("bad activation: %+v", activation)
+			}
+		})
+	}
+	local, srv := newFakeComposeLocal(t)
+	conn := newTestConnector(t, "http://127.0.0.1:1", srv.URL)
+	for _, payload := range []map[string]any{{"text": "hello", "workspace_kind": "unknown"}, {"text": "hello", "workspace_kind": "scratch", "project_path": "/tmp/folder"}} {
+		status, _ := conn.execChatSend(context.Background(), DeviceCommand{Kind: "chat.send", Payload: mustPayload(t, payload)})
+		if status != "error" {
+			t.Fatal("invalid workspace accepted")
+		}
+	}
+	calls, _ := local.snapshot()
+	if len(calls) != 0 {
+		t.Fatalf("invalid workspace had effects: %v", calls)
+	}
+}
+
+func TestCapabilitiesReportActualCurrentWorkspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/status" {
+			_, _ = w.Write([]byte(`{"pwd":"/actual/current","project":"/actual/current","workspace_kind":"project"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	conn := newTestConnector(t, "http://127.0.0.1:1", srv.URL)
+	caps := conn.collectCapabilities(context.Background())
+	if caps.CurrentWorkspace == nil || caps.CurrentWorkspace.Path != "/actual/current" || caps.CurrentWorkspace.Kind != "project" {
+		t.Fatalf("wrong current workspace: %+v", caps.CurrentWorkspace)
+	}
+}

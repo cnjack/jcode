@@ -129,3 +129,49 @@ func TestNewProjectSessionRejectsActiveManagedScratchPath(t *testing.T) {
 		t.Fatalf("code=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
+
+func TestActivateExplicitChatDoesNotChangeForeground(t *testing.T) {
+	s := stubFactoryServer(t)
+	foreground := s.activeEngine()
+	baseFactory := s.newEngine
+	s.newScratchEngine = func(taskID, pwd, modeName string) (*EngineConfig, error) {
+		cfg, err := baseFactory(taskID, pwd, modeName)
+		if err != nil {
+			return nil, err
+		}
+		cfg.WorkspaceKind = session.WorkspaceScratch
+		if cfg.Recorder != nil {
+			cfg.Recorder.SetWorkspaceKind(session.WorkspaceScratch)
+		}
+		return cfg, nil
+	}
+	var previous string
+	for range 2 {
+		rec := httptest.NewRecorder()
+		s.handleActivateSession(rec, httptest.NewRequest(http.MethodPost, "/api/sessions/activate", strings.NewReader(`{"workspace_kind":"scratch","source":"cloud"}`)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%d: %s", rec.Code, rec.Body.String())
+		}
+		var result activationResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.WorkspaceKind != session.WorkspaceScratch || result.Pwd == previous {
+			t.Fatalf("invalid scratch result: %+v", result)
+		}
+		if err := managedworkspace.ValidateScratchPath(result.Pwd); err != nil {
+			t.Fatal(err)
+		}
+		if s.activeEngine() != foreground {
+			t.Fatal("remote Chat changed Desktop foreground")
+		}
+		previous = result.Pwd
+	}
+	for _, body := range []string{`{"workspace_kind":"invalid"}`, `{"workspace_kind":"scratch","project_path":"/tmp/other"}`} {
+		rec := httptest.NewRecorder()
+		s.handleActivateSession(rec, httptest.NewRequest(http.MethodPost, "/api/sessions/activate", strings.NewReader(body)))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid selection accepted: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+}
