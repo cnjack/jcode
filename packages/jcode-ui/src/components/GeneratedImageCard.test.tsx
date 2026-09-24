@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GeneratedImageCard } from './GeneratedImageCard.js'
 
@@ -161,6 +162,51 @@ describe('GeneratedImageCard', () => {
     expect(screen.getByRole('status').textContent).toBe('Status unknown')
     expect(screen.getByText(/may have accepted the request/i)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /retry/i })).toBeNull()
+  })
+
+  it('stays revealed when the load lands before post-commit effects flush', async () => {
+    // Slow runners make React's scheduler yield between the commit that
+    // inserts the <img> and that commit's passive effects. A load delivered
+    // in that gap must not be undone by a later src-change reset.
+    const actGlobal = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    const previousActEnvironment = actGlobal.IS_REACT_ACT_ENVIRONMENT
+    actGlobal.IS_REACT_ACT_ENVIRONMENT = false
+    let now = performance.now()
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => (now += 10))
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    try {
+      const loaded = new Promise<void>((resolve) => {
+        const observer = new MutationObserver(() => {
+          const image = host.querySelector('img')
+          if (!image) return
+          observer.disconnect()
+          image.dispatchEvent(new Event('load'))
+          resolve()
+        })
+        observer.observe(host, { childList: true, subtree: true })
+      })
+      root.render(<GeneratedImageCard state="succeeded" imageSrc="blob:early" onOpenImage={() => undefined} />)
+      await loaded
+      clock.mockRestore()
+      await waitFor(() => expect(host.querySelector('.jcode-generated-image__preview-trigger')).not.toBeNull())
+      expect(host.querySelector('section')?.classList.contains('is-image-ready')).toBe(true)
+    } finally {
+      clock.mockRestore()
+      root.unmount()
+      host.remove()
+      actGlobal.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+    }
+  })
+
+  it('does not carry readiness over to a new image source', () => {
+    const view = render(<GeneratedImageCard state="succeeded" imageSrc="blob:first" onOpenImage={() => undefined} />)
+    fireEvent.load(screen.getByRole('img'))
+    expect(screen.getByRole('button', { name: 'Open image in a new window' })).toBeTruthy()
+    view.rerender(<GeneratedImageCard state="succeeded" imageSrc="blob:second" onOpenImage={() => undefined} />)
+    expect(screen.queryByRole('button', { name: 'Open image in a new window' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Image generated' }).getAttribute('aria-busy')).toBe('true')
   })
 
   it('leaves the busy state when a persisted image cannot be decoded', () => {
