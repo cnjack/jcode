@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"path"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -35,7 +37,7 @@ func (e *Env) NewShowArtifactTool(deps *ShowArtifactDeps) tool.InvokableTool {
 		Name: "show_artifact",
 		Desc: `Register a finished, user-consumable workspace file in the Web/Desktop Artifacts viewer.
 
-Call this only after writing and validating the final report, visualization, image, PDF, or data file. Do not register routine source edits, logs, temporary files, or build output. The path must be relative to the current local workspace. Re-register a path after a meaningful update. This tool records local metadata and does not upload or share anything with Cloud.`,
+Call this only after writing and validating the final report, visualization, image, PDF, or data file. Do not register routine source edits, logs, temporary files, or build output. The path must be relative to the current local workspace. Re-register a path after a meaningful update. When giving the user a download link, use the returned download_url as its href and download_name as its label rather than linking to the local path. This tool records local metadata and does not upload or share anything with Cloud.`,
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"path": {
 				Type: schema.String, Required: true,
@@ -44,7 +46,7 @@ Call this only after writing and validating the final report, visualization, ima
 			"title": {Type: schema.String, Desc: "Optional human-readable title (maximum 200 characters)."},
 			"kind": {
 				Type: schema.String, Desc: "Optional renderer hint; auto detects from content and extension.",
-				Enum: []string{"auto", "text", "markdown", "code", "html", "image", "pdf", "csv", "binary"},
+				Enum: []string{"auto", "text", "markdown", "code", "html", "image", "pdf", "csv", "spreadsheet", "binary"},
 			},
 			"focus": {Type: schema.Boolean, Desc: "Open the viewer for the active task. Defaults to true."},
 		}),
@@ -79,8 +81,9 @@ func (t *showArtifactTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	if t.deps.ForceNoFocus {
 		focus = false
 	}
+	sessionID := t.deps.SessionID()
 	record, err := t.deps.Service.Register(ctx, artifact.RegisterRequest{
-		SessionID: t.deps.SessionID(), Workspace: t.env.Pwd(), RelativePath: input.Path,
+		SessionID: sessionID, Workspace: t.env.Pwd(), RelativePath: input.Path,
 		Title: input.Title, Kind: input.Kind, Focus: focus,
 	}, t.deps.Recorder)
 	if err != nil {
@@ -89,10 +92,20 @@ func (t *showArtifactTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	if t.deps.Emit != nil {
 		t.deps.Emit("artifact_upserted", record)
 	}
+	downloadName := path.Base(strings.ReplaceAll(record.RelativePath, `\`, "/"))
+	if downloadName == "." || downloadName == "/" {
+		downloadName = record.Title
+	}
 	output, err := json.Marshal(map[string]any{
 		"artifact_id": record.ID, "path": record.RelativePath, "title": record.Title,
 		"kind": record.Kind, "revision": record.Revision,
-		"message": "Artifact is available in the Artifacts panel.",
+		"download_url": fmt.Sprintf(
+			"/api/tasks/%s/artifacts/%s/download",
+			url.PathEscape(sessionID),
+			url.PathEscape(record.ID),
+		),
+		"download_name": downloadName,
+		"message":       "Artifact is available in the Artifacts panel. Use download_url and download_name for its download link.",
 	})
 	if err != nil {
 		return "", err

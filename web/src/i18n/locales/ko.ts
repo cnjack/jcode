@@ -220,6 +220,7 @@ export default {
     thinking: '생각 중…',
     loadingConversation: '대화 불러오는 중…',
     attachFiles: '파일 첨부',
+    fileDownloadFailed: '파일을 저장할 수 없습니다.',
     fileUpload: {
       failed: '파일 업로드에 실패했습니다',
       unavailable: '이 작업에서는 파일을 업로드할 수 없습니다',
@@ -1323,6 +1324,8 @@ export default {
     downloadError: '이 산출물을 다운로드할 수 없습니다.',
     desktopError: '데스크톱에서 이 산출물을 열 수 없습니다.',
     noPreview: '미리보기를 사용할 수 없습니다. 파일을 다운로드하세요.',
+    worksheet: '워크시트',
+    previewLimit: '최대 {{rows}}개 행과 {{columns}}개 열을 표시합니다.',
     share: '공유',
     download: '다운로드',
     open: '기본 앱에서 열기',

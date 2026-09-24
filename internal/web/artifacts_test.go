@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +80,18 @@ func managedArtifactWebFixture(t *testing.T) (*Server, artifact.Record, []byte) 
 	}
 	eng := &Engine{taskID: recorder.UUID(), pwd: workspace, recorder: recorder}
 	return &Server{Engine: eng, tasks: map[string]*Engine{eng.taskID: eng}, artifacts: service}, record, content
+}
+
+func TestArtifactInlineLimitTreatsLegacyExcelRecordsAsBinary(t *testing.T) {
+	for _, record := range []artifact.Record{
+		{Kind: artifact.KindCSV, RelativePath: "report.xlsx"},
+		{Kind: artifact.KindCSV, StorageKind: artifact.StorageManaged, RelativeKey: "reports/report.xlsm"},
+		{Kind: artifact.KindSpreadsheet, RelativePath: "report.xlsb"},
+	} {
+		if got := artifactInlineLimit(record); got != artifact.MaxInlineBinarySize {
+			t.Errorf("artifactInlineLimit(%+v) = %d, want %d", record, got, artifact.MaxInlineBinarySize)
+		}
+	}
 }
 
 type fakeArtifactSharePublisher struct {
@@ -175,6 +188,23 @@ func TestManagedImageArtifactListContentDownloadDesktopAndSharePolicy(t *testing
 	if downloadW.Code != http.StatusOK ||
 		!strings.Contains(downloadW.Header().Get("Content-Disposition"), ".png") {
 		t.Fatalf("download status=%d disposition=%q", downloadW.Code, downloadW.Header().Get("Content-Disposition"))
+	}
+
+	headW := httptest.NewRecorder()
+	headReq := httptest.NewRequest(http.MethodHead, "/download", nil)
+	headReq.SetPathValue("id", record.SessionID)
+	headReq.SetPathValue("artifactID", record.ID)
+	srv.handleArtifactDownload(headW, headReq)
+	if headW.Code != http.StatusOK || headW.Body.Len() != 0 {
+		t.Fatalf("download head status=%d body=%d", headW.Code, headW.Body.Len())
+	}
+	missingHeadW := httptest.NewRecorder()
+	missingHeadReq := httptest.NewRequest(http.MethodHead, "/download", nil)
+	missingHeadReq.SetPathValue("id", record.SessionID)
+	missingHeadReq.SetPathValue("artifactID", "missing")
+	srv.handleArtifactDownload(missingHeadW, missingHeadReq)
+	if missingHeadW.Code != http.StatusNotFound {
+		t.Fatalf("missing artifact head status=%d, want %d", missingHeadW.Code, http.StatusNotFound)
 	}
 
 	var revealedPath string
@@ -314,6 +344,55 @@ func TestArtifactDownloadUsesSafeContentDisposition(t *testing.T) {
 	disposition := w.Header().Get("Content-Disposition")
 	if strings.ContainsAny(disposition, "\r\n") || w.Header().Get("X-Injected") != "" {
 		t.Fatalf("unsafe Content-Disposition: %q", disposition)
+	}
+}
+
+func TestTaskFileDownloadValidatesWorkspaceFileBeforeServing(t *testing.T) {
+	srv, record, workspace := artifactWebFixture(t, "示例销售数据.xlsx", []byte("workbook"))
+
+	headW := httptest.NewRecorder()
+	headReq := httptest.NewRequest(http.MethodHead, "/download?path="+url.QueryEscape("示例销售数据.xlsx"), nil)
+	headReq.SetPathValue("id", record.SessionID)
+	srv.handleTaskFileDownload(headW, headReq)
+	if headW.Code != http.StatusOK || headW.Body.Len() != 0 {
+		t.Fatalf("head status=%d body=%q", headW.Code, headW.Body.String())
+	}
+	if !strings.Contains(headW.Header().Get("Content-Disposition"), "示例销售数据.xlsx") {
+		t.Fatalf("content disposition=%q", headW.Header().Get("Content-Disposition"))
+	}
+
+	getW := httptest.NewRecorder()
+	getReq := httptest.NewRequest(http.MethodGet, "/download?path="+url.QueryEscape("示例销售数据.xlsx"), nil)
+	getReq.SetPathValue("id", record.SessionID)
+	srv.handleTaskFileDownload(getW, getReq)
+	if getW.Code != http.StatusOK || getW.Body.String() != "workbook" {
+		t.Fatalf("get status=%d body=%q", getW.Code, getW.Body.String())
+	}
+
+	for _, relativePath := range []string{"missing.xlsx", "../outside.xlsx"} {
+		missingW := httptest.NewRecorder()
+		missingReq := httptest.NewRequest(http.MethodHead, "/download?path="+url.QueryEscape(relativePath), nil)
+		missingReq.SetPathValue("id", record.SessionID)
+		srv.handleTaskFileDownload(missingW, missingReq)
+		if missingW.Code != http.StatusNotFound {
+			t.Fatalf("path %q status=%d, want %d", relativePath, missingW.Code, http.StatusNotFound)
+		}
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside.xlsx")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(workspace, "linked.xlsx")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Fatal(err)
+	}
+	symlinkW := httptest.NewRecorder()
+	symlinkReq := httptest.NewRequest(http.MethodHead, "/download?path=linked.xlsx", nil)
+	symlinkReq.SetPathValue("id", record.SessionID)
+	srv.handleTaskFileDownload(symlinkW, symlinkReq)
+	if symlinkW.Code != http.StatusNotFound {
+		t.Fatalf("symlink status=%d, want %d", symlinkW.Code, http.StatusNotFound)
 	}
 }
 

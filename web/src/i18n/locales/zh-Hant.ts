@@ -221,6 +221,7 @@ export default {
     thinking: '思考中…',
     loadingConversation: '載入對話中…',
     attachFiles: '附加檔案',
+    fileDownloadFailed: '無法儲存此檔案。',
     fileUpload: {
       failed: '檔案上傳失敗',
       unavailable: '目前任務無法上傳檔案',
@@ -1318,6 +1319,8 @@ export default {
     downloadError: '無法下載此產物。',
     desktopError: '無法在桌面端開啟此產物。',
     noPreview: '無法預覽，請下載檔案查看。',
+    worksheet: '工作表',
+    previewLimit: '最多顯示 {{rows}} 列、{{columns}} 欄。',
     share: '分享',
     download: '下載',
     open: '使用預設應用程式開啟',
