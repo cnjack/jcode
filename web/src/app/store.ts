@@ -450,6 +450,36 @@ interface ResolvedToolFields {
   presentation?: ToolCall['presentation']
 }
 
+type AskUserToolCall = ToolCall & {
+  askUserTaskId?: string
+  /** API receipt is visible, but the authoritative tool_result is still due. */
+  askUserPendingResult?: boolean
+}
+
+function hasPendingAskUserResult(tool: ToolCall): boolean {
+  return tool.name === 'ask_user' && (tool as AskUserToolCall).askUserPendingResult === true
+}
+
+/** Match placeholders without a model call ID by normalized question content,
+ * including the legacy single-question shape and JSON key-order differences. */
+function askUserQuestionsKey(args: string): string | undefined {
+  try {
+    const parsed = JSON.parse(args)
+    const questions: AskUserQuestion[] = parsed.questions?.length
+      ? parsed.questions
+      : parsed.question ? [{ question: parsed.question, options: parsed.options }] : []
+    if (!questions.length) return undefined
+    // The backend truncates headers and drops legacy option descriptions.
+    // Match the question and choices, not those presentation-only fields.
+    return JSON.stringify(questions.map((question) => [
+      question.question, !!question.multi_select,
+      (question.options || []).map((option) => option.label).filter(Boolean),
+    ]))
+  } catch {
+    return undefined
+  }
+}
+
 function applyResolvedToolFields(tool: ToolCall, fields: ResolvedToolFields): void {
   tool.output = fields.output
   tool.displayOutput = fields.displayOutput
@@ -464,7 +494,8 @@ function applyResolvedToolFields(tool: ToolCall, fields: ResolvedToolFields): vo
   if (tool.name === 'ask_user' || fields.name === 'ask_user') {
     tool.askUserId = undefined
     tool.askUserQuestions = undefined
-    delete (tool as ToolCall & { askUserTaskId?: string }).askUserTaskId
+    delete (tool as AskUserToolCall).askUserTaskId
+    delete (tool as AskUserToolCall).askUserPendingResult
   }
   if (fields.streams) tool.streams = fields.streams
   if (fields.meta) tool.meta = fields.meta
@@ -649,14 +680,30 @@ const chatSlice = createSlice({
         }
       }
       // ask_user_request can arrive before the matching tool_call and already
-      // insert a pending row. Fold this event into that row so the dock and
-      // timeline do not each render their own card.
+      // insert a pending row. The API can even resolve that row before the
+      // tool_call arrives. Keep its visible receipt and bind the late call to
+      // it so the following tool_result updates the same occurrence.
       if (a.payload.name === 'ask_user') {
+        const questionsKey = askUserQuestionsKey(a.payload.args)
+        let target = -1
         for (let i = s.timeline.length - 1; i >= 0; i--) {
           const item = s.timeline[i]
+          if (item.kind === 'message' && item.data.role === 'user') break
           if (item.kind !== 'tool' || item.data.name !== 'ask_user') continue
-          if (item.data.status !== 'running' || item.data.output) continue
+          if (!hasPendingAskUserResult(item.data) && (item.data.status !== 'running' || item.data.output)) continue
           if (item.data.toolCallID && a.payload.toolCallID && item.data.toolCallID !== a.payload.toolCallID) continue
+          if (!item.data.toolCallID && a.payload.args && (!questionsKey || askUserQuestionsKey(item.data.args) !== questionsKey)) continue
+          // Without an occurrence ID, identical concurrent requests are
+          // ambiguous. Never assign a late result to an arbitrary receipt.
+          if (target >= 0) {
+            target = -1
+            break
+          }
+          target = i
+        }
+        if (target >= 0) {
+          const item = s.timeline[target]
+          if (item.kind !== 'tool') return
           item.data.toolCallID = a.payload.toolCallID ?? item.data.toolCallID
           if (a.payload.args) item.data.args = a.payload.args
           item.data.displayInfo = a.payload.displayInfo ?? item.data.displayInfo
@@ -803,7 +850,7 @@ const chatSlice = createSlice({
           const item = s.timeline[i]
           if (item.kind === 'message' && item.data.role === 'user') break
           const unsettled = item.kind === 'tool' && (
-            item.data.status === 'running' || (
+            item.data.status === 'running' || hasPendingAskUserResult(item.data) || (
               item.data.status === 'done' && item.data.output === undefined &&
               item.data.error === undefined && item.data.phase !== 'terminal' &&
               item.data.meta?.exit_code === undefined && !item.data.denied
@@ -824,7 +871,7 @@ const chatSlice = createSlice({
         for (let i = s.timeline.length - 1; i >= 0; i--) {
           const item = s.timeline[i]
           if (item.kind === 'message' && item.data.role === 'user') break
-          if (item.kind === 'tool' && item.data.name === name && item.data.status === 'running') {
+          if (item.kind === 'tool' && item.data.name === name && (item.data.status === 'running' || hasPendingAskUserResult(item.data))) {
             target = i
             break
           }
@@ -1041,6 +1088,7 @@ const chatSlice = createSlice({
         if (item.kind !== 'tool' || item.data.askUserId !== a.payload.id) continue
         item.data.status = 'done'
         item.data.output = formatAskUserOutput(a.payload.answers)
+        ;(item.data as AskUserToolCall).askUserPendingResult = true
         item.data.askUserId = undefined
         item.data.askUserQuestions = undefined
         delete (item.data as ToolCall & { askUserTaskId?: string }).askUserTaskId
