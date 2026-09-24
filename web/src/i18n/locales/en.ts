@@ -54,6 +54,8 @@ export default {
     restarting: 'Restarting to finish update…',
     failed: 'Update failed',
     checkFailed: 'Check failed',
+    releaseNotes: 'Release notes',
+    cliUpgradeHint: 'To upgrade, run',
     later: 'Later',
     updateRestart: 'Update & restart',
     retry: 'Retry',

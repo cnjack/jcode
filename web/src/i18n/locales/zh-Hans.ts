@@ -49,6 +49,8 @@ export default {
     restarting: '正在重启以完成更新…',
     failed: '更新失败',
     checkFailed: '检查失败',
+    releaseNotes: '发布说明',
+    cliUpgradeHint: '升级请运行',
     later: '稍后',
     updateRestart: '更新并重启',
     retry: '重试',

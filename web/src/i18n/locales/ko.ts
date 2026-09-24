@@ -52,6 +52,8 @@ export default {
     restarting: '업데이트를 완료하기 위해 재시작 중…',
     failed: '업데이트 실패',
     checkFailed: '확인 실패',
+    releaseNotes: '릴리스 노트',
+    cliUpgradeHint: '업그레이드하려면 실행:',
     later: '나중에',
     updateRestart: '업데이트 후 재시작',
     retry: '재시도',

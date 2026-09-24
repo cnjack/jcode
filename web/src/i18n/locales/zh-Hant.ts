@@ -53,6 +53,8 @@ export default {
     restarting: '正在重新啟動以完成更新…',
     failed: '更新失敗',
     checkFailed: '檢查失敗',
+    releaseNotes: '發行說明',
+    cliUpgradeHint: '升級請執行',
     later: '稍後',
     updateRestart: '更新並重新啟動',
     retry: '重試',
