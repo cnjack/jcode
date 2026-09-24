@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/cnjack/jcode/internal/modelcatalog"
 )
 
 // ValidateResult is the structured outcome of a connectivity test against a
@@ -133,16 +137,23 @@ func countModels(r interface{ Read([]byte) (int, error) }) int {
 	return len(ml.Data)
 }
 
+// maxLiveModelsResponseBytes caps a live /models body. Rich catalogs
+// (OpenRouter, Copilot relays) carry per-model metadata and can run to a few
+// MiB, well above the 1MiB the plain count probe needs.
+const maxLiveModelsResponseBytes = 8 << 20
+
 // ListProviderModelsLive queries a provider's live /models endpoint and returns
-// the advertised model ids. It is best-effort: any failure (network, auth,
-// non-JSON body) yields an empty slice, since the catalog UI degrades to "no
-// catalog, add manually" rather than erroring.
-func ListProviderModelsLive(ctx context.Context, apiKey, baseURL string, headers map[string]string) []string {
+// the advertised models with whatever metadata the endpoint's dialect carries
+// (context window, vision, tool calls, reasoning-effort tiers, kind). It is
+// best-effort: any failure (network, auth, non-JSON or oversized body) yields
+// nil, since the catalog UI degrades to "no catalog, add manually" rather than
+// erroring.
+func ListProviderModelsLive(ctx context.Context, apiKey, baseURL string, headers map[string]string) []modelcatalog.Entry {
 	if baseURL == "" {
 		return nil
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/models", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/models", nil)
 	if err != nil {
 		return nil
 	}
@@ -160,15 +171,13 @@ func ListProviderModelsLive(ctx context.Context, apiKey, baseURL string, headers
 	if resp.StatusCode >= 400 {
 		return nil
 	}
-	var ml modelsList
-	if err := json.NewDecoder(resp.Body).Decode(&ml); err != nil {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxLiveModelsResponseBytes+1))
+	if err != nil || len(body) > maxLiveModelsResponseBytes {
 		return nil
 	}
-	ids := make([]string, 0, len(ml.Data))
-	for _, m := range ml.Data {
-		if m.ID != "" {
-			ids = append(ids, m.ID)
-		}
+	entries, err := modelcatalog.Decode(body)
+	if err != nil {
+		return nil
 	}
-	return ids
+	return entries
 }

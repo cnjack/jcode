@@ -14,6 +14,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/modelcatalog"
 	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 )
@@ -470,25 +471,48 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 	// Truly custom endpoint with no brand match: probe the live /models endpoint
 	// as a last resort. Many gateways support the OpenAI-compatible /models list;
 	// on any failure we fall back to just the configured models so the catalog is
-	// never empty/erroring.
+	// never empty/erroring. Rich dialects (Copilot relays, OpenRouter, LM Studio,
+	// …) carry context/vision/tool/effort metadata, projected the same way it
+	// will be persisted when the user enables the model.
 	if baseURL != "" {
-		if ids := model.ListProviderModelsLive(r.Context(), apiKey, baseURL, headers); len(ids) > 0 {
-			result := make([]catalogEntry, 0, len(ids))
-			seen := make(map[string]bool, len(ids))
-			for _, id := range ids {
-				if seen[id] {
+		if entries := model.ListProviderModelsLive(r.Context(), apiKey, baseURL, headers); len(entries) > 0 {
+			result := make([]catalogEntry, 0, len(entries)+len(configured))
+			seen := make(map[string]bool, len(entries))
+			for _, live := range entries {
+				if seen[live.ID] {
 					continue
 				}
-				seen[id] = true
-				if c := customSet[id]; c != nil {
-					result = append(result, customEntry(id))
-				} else {
-					result = append(result, catalogEntry{
-						ID: id,
-						Added: modelState.IsModelEnabled(
-							config.ModelRef{Provider: providerID, Model: id}, configured[id],
-						),
-					})
+				if customSet[live.ID] != nil {
+					seen[live.ID] = true
+					result = append(result, customEntry(live.ID))
+					continue
+				}
+				// Embeddings, image/audio models, picker-hidden rows and models
+				// that declare no tool support can't drive the agent, matching the
+				// tool-call-only filter the registry catalog applies.
+				if !live.Selectable() {
+					continue
+				}
+				seen[live.ID] = true
+				metadata := customModelConfigFromLive(s.registry, providerID, live)
+				result = append(result, catalogEntry{
+					ID:   live.ID,
+					Name: metadata.Name,
+					Added: modelState.IsModelEnabled(
+						config.ModelRef{Provider: providerID, Model: live.ID}, configured[live.ID],
+					),
+					Context:     metadata.Context,
+					Reasoning:   metadata.Reasoning,
+					Attachment:  metadata.Attachment,
+					EffortTiers: metadata.EffortTiers,
+				})
+			}
+			// Keep configured models the endpoint no longer advertises visible so
+			// they can still be edited or removed.
+			for _, m := range providerConfig.CustomModels {
+				if !seen[m.ID] {
+					seen[m.ID] = true
+					result = append(result, customEntry(m.ID))
 				}
 			}
 			writeJSON(w, http.StatusOK, result)
@@ -514,6 +538,7 @@ func managedModelConfigFromLive(
 		ID: live.ID, Name: live.Name, ToolCall: true, Managed: true,
 		Protocol: string(live.Protocol), Vendor: live.Vendor,
 		Attachment: live.Attachment, Context: live.Context,
+		Reasoning: live.Reasoning, EffortTiers: append([]string(nil), live.EffortTiers...),
 	}
 	if result.Name == "" {
 		result.Name = live.ID
@@ -541,13 +566,66 @@ func managedModelConfigFromLive(
 	if result.Context == 0 && metadata.Limit != nil {
 		result.Context = metadata.Limit.Context
 	}
-	for _, option := range metadata.ReasoningOptions {
-		if option.Type == "effort" && len(option.Values) > 0 {
-			result.EffortTiers = append([]string(nil), option.Values...)
-			break
+	if len(result.EffortTiers) == 0 {
+		result.EffortTiers = registryEffortTiers(metadata)
+	}
+	return result
+}
+
+// customModelConfigFromLive projects one live /models entry of an API-key
+// custom endpoint onto the custom-model row persisted when the user enables
+// it. Whatever the endpoint declares wins; only unknowns are filled from the
+// built-in registry (exact id first, then a versioned sibling of the
+// advertised vendor), so bare-id gateways still get sensible metadata.
+func customModelConfigFromLive(
+	registry *model.ModelRegistry,
+	providerID string,
+	live modelcatalog.Entry,
+) config.CustomModelConfig {
+	result := config.CustomModelConfig{
+		ID: live.ID, Name: live.Name, ToolCall: true, Context: live.Context,
+	}
+	metadata := findManagedModelMetadata(registry, providerID, live.Vendor, live.ID)
+	// Only an exact registry row may rename the model; a related sibling
+	// would mislabel it (gpt-5.6 is not "GPT-5.5").
+	if result.Name == "" && metadata != nil && metadata.ID == live.ID {
+		result.Name = metadata.Name
+	}
+	if result.Name == "" {
+		result.Name = live.ID
+	}
+	if live.Attachment != nil {
+		result.Attachment = *live.Attachment
+	} else if metadata != nil {
+		result.Attachment = metadata.Attachment
+	}
+	if live.Reasoning != nil {
+		result.Reasoning = *live.Reasoning
+	} else if metadata != nil {
+		result.Reasoning = metadata.Reasoning
+	}
+	if result.Context == 0 && metadata != nil && metadata.Limit != nil {
+		result.Context = metadata.Limit.Context
+	}
+	if result.Reasoning {
+		result.EffortTiers = append([]string(nil), live.EffortTiers...)
+		if len(result.EffortTiers) == 0 {
+			result.EffortTiers = registryEffortTiers(metadata)
 		}
 	}
 	return result
+}
+
+func registryEffortTiers(metadata *model.RegistryModel) []string {
+	if metadata == nil {
+		return nil
+	}
+	for _, option := range metadata.ReasoningOptions {
+		if option.Type == "effort" && len(option.Values) > 0 {
+			return append([]string(nil), option.Values...)
+		}
+	}
+	return nil
 }
 
 func findManagedModelMetadata(
@@ -1292,6 +1370,13 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	s.publishConfigSnapshotLocked(cfg)
 	s.cfgMu.Unlock()
 	configLocked = false
+	// Visibility state outlives config rows; without this, re-adding a provider
+	// with the same id revives its old "enabled" models as config-less ghosts.
+	if state, stateErr := config.LoadModelState(); stateErr == nil && state.ForgetProvider(providerID) {
+		if stateErr := config.SaveModelState(state); stateErr != nil {
+			config.Logger().Printf("[providers] clear model state for deleted provider %q: %v", providerID, stateErr)
+		}
+	}
 	applyErr := s.rebuildProviderDependents(providerID, "delete")
 	s.syncProviderConfigsBestEffort()
 	if applyErr != nil {

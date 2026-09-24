@@ -99,9 +99,14 @@ type Model struct {
 	// xAI's prompt_image_token_price. Chat UIs use this when the static
 	// registry has not yet listed the model.
 	Attachment bool `json:"attachment,omitempty"`
-	// Context is the provider-declared context window when the catalog
-	// includes one (xAI context_length). Zero means unknown.
+	// Context is the provider-declared prompt budget when the catalog
+	// includes one (xAI context_length, Copilot capabilities.limits). Zero
+	// means unknown.
 	Context int `json:"context,omitempty"`
+	// Reasoning and EffortTiers mirror an advertised reasoning_effort list
+	// (Copilot capabilities.supports.reasoning_effort).
+	Reasoning   bool     `json:"reasoning,omitempty"`
+	EffortTiers []string `json:"effort_tiers,omitempty"`
 }
 
 // ModelKind separates inference catalogs that share /models but require
