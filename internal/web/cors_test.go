@@ -138,6 +138,27 @@ func TestCORSMiddlewareAllowsTrustedOriginsAndNonBrowserClients(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewarePreflightAllowsHead(t *testing.T) {
+	r := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:53913/api/tasks/task-1/artifacts/file-1/download", nil)
+	r.Host = "127.0.0.1:53913"
+	r.Header.Set("Origin", "http://127.0.0.1:5173")
+	r.Header.Set("Access-Control-Request-Method", http.MethodHead)
+	r.Header.Set("Access-Control-Request-Headers", "Authorization")
+
+	rec := httptest.NewRecorder()
+	corsMiddleware(http.NotFoundHandler()).ServeHTTP(rec, r)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status=%d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodHead) {
+		t.Fatalf("Access-Control-Allow-Methods=%q, want HEAD", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(got, "Authorization") {
+		t.Fatalf("Access-Control-Allow-Headers=%q, want Authorization", got)
+	}
+}
+
 func TestCORSMiddlewarePreflightAllowsPatch(t *testing.T) {
 	r := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:53913/api/account-preferences", nil)
 	r.Host = "127.0.0.1:53913"

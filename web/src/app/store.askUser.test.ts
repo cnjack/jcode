@@ -39,6 +39,55 @@ describe('formatAskUserOutput', () => {
 })
 
 describe('addToolCall ask_user merge', () => {
+  it.each([
+    { question: 'Deploy?', options: [{ label: 'MLX', description: 'Local' }, { label: 'CUDA' }] },
+    { questions: [{ header: 'Long header from the model', question: 'Deploy?', options: [{ label: 'MLX' }, { label: 'CUDA' }] }] },
+  ])('matches backend-normalized questions to the original arguments: %j', (args) => {
+    store.dispatch(chatActions.attachAskUser({
+      toolName: 'ask_user', askUserId: 'ask-normalized',
+      questions: [{ header: 'Long header', question: 'Deploy?', options: [{ label: 'MLX' }, { label: 'CUDA' }] }],
+    }))
+    store.dispatch(chatActions.resolveAskUserItem({ id: 'ask-normalized', answers: [] }))
+    store.dispatch(chatActions.addToolCall({ name: 'ask_user', args: JSON.stringify(args), toolCallID: 'tc-normalized' }))
+    store.dispatch(chatActions.resolveToolCall({ name: 'ask_user', toolCallID: 'tc-normalized', output: 'The user did not provide any answers.' }))
+    const timeline = store.getState().chat.timeline
+    expect(timeline).toHaveLength(1)
+    expect(timeline[0].data).toMatchObject({ toolCallID: 'tc-normalized', status: 'done', output: 'The user did not provide any answers.' })
+  })
+
+  it('binds a late call to its answered placeholder instead of a different pending question', () => {
+    const questions = [{ question: 'First?', header: 'First' }]
+    store.dispatch(chatActions.attachAskUser({ toolName: 'ask_user', askUserId: 'ask-first', questions }))
+    store.dispatch(chatActions.resolveAskUserItem({ id: 'ask-first', answers: [{ question_header: 'First', answer: 'Yes' }] }))
+    store.dispatch(chatActions.attachAskUser({
+      toolName: 'ask_user', askUserId: 'ask-second', questions: [{ question: 'Second?', header: 'Second' }],
+    }))
+    store.dispatch(chatActions.addToolCall({
+      name: 'ask_user', args: JSON.stringify({ questions: [{ header: 'First', question: 'First?' }] }), toolCallID: 'tc-first',
+    }))
+    store.dispatch(chatActions.resolveToolCall({ name: 'ask_user', toolCallID: 'tc-first', output: "User's answer: Yes" }))
+    const timeline = store.getState().chat.timeline
+    expect(timeline).toHaveLength(2)
+    expect(timeline[0].data).toMatchObject({ status: 'done', toolCallID: 'tc-first', output: "User's answer: Yes" })
+    expect(timeline[1].data).toMatchObject({ status: 'running', askUserId: 'ask-second' })
+  })
+
+  it('keeps separate answers to repeated questions after the first result is final', () => {
+    const questions = [{ question: 'Continue?' }]
+    for (const id of ['first', 'second']) {
+      store.dispatch(chatActions.attachAskUser({ toolName: 'ask_user', askUserId: id, questions }))
+      store.dispatch(chatActions.resolveAskUserItem({ id, answers: [{ question_header: '', answer: 'Yes' }] }))
+      store.dispatch(chatActions.addToolCall({ name: 'ask_user', args: JSON.stringify({ questions }), toolCallID: id }))
+      store.dispatch(chatActions.resolveToolCall({ name: 'ask_user', toolCallID: id, output: "User's answer: Yes" }))
+    }
+    const timeline = store.getState().chat.timeline
+    expect(timeline).toHaveLength(2)
+    expect(timeline.map((item) => item.data)).toMatchObject([
+      { toolCallID: 'first', output: "User's answer: Yes" },
+      { toolCallID: 'second', output: "User's answer: Yes" },
+    ])
+  })
+
   it('folds a late tool_call into the pending ask_user_request row', () => {
     store.dispatch(
       chatActions.attachAskUser({
@@ -94,6 +143,41 @@ describe('resolveAskUserItem', () => {
 })
 
 describe('submitAskUser', () => {
+  it.each(['before-submit', 'after-submit'])(
+    'keeps one receipt when tool_call arrives %s and tool_result follows the API response',
+    async (callOrder) => {
+      vi.spyOn(api, 'askUser').mockResolvedValue(undefined as never)
+      const questions = [{ header: 'Deploy', question: 'How should we deploy?' }]
+      store.dispatch(chatActions.attachAskUser({
+        toolName: 'ask_user', askUserId: 'ask-late', questions,
+      }))
+      const original = store.getState().chat.timeline[0]
+      const call = chatActions.addToolCall({
+        name: 'ask_user', args: JSON.stringify({ questions }), toolCallID: 'tc-late',
+      })
+      if (callOrder === 'before-submit') store.dispatch(call)
+
+      await store.dispatch(submitAskUser({
+        id: 'ask-late', answers: [{ question_header: 'Deploy', answer: 'MLX 可以吗？' }],
+      })).unwrap()
+      if (callOrder === 'after-submit') store.dispatch(call)
+      store.dispatch(chatActions.resolveToolCall({
+        name: 'ask_user', toolCallID: 'tc-late', output: "User's answer: MLX 可以吗？",
+        durationMs: 38724,
+      }))
+
+      const timeline = store.getState().chat.timeline
+      expect(timeline).toHaveLength(1)
+      expect(timeline[0].seq).toBe(original.seq)
+      expect(timeline[0].data.id).toBe(original.data.id)
+      expect(timeline[0].data).toMatchObject({
+        toolCallID: 'tc-late', status: 'done', output: "User's answer: MLX 可以吗？",
+        meta: { duration_ms: 38724 },
+      })
+      expect((timeline[0].data as { askUserId?: string }).askUserId).toBeUndefined()
+    },
+  )
+
   it('optimistically resolves the card after a successful API submit', async () => {
     const askUser = vi.spyOn(api, 'askUser').mockResolvedValue(undefined as never)
     store.dispatch(

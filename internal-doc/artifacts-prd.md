@@ -161,7 +161,8 @@ Artifacts 列表继续使用当前 RightPanel 的宽度模型。选中产物后�
 | PNG/JPEG/WebP/GIF/SVG | 图片预览、缩放 | 同 Web，可默认应用打开 |
 | PDF | 内嵌 PDF 预览或浏览器 fallback | 同 Web，可默认应用打开 |
 | CSV/TSV | 有界表格预览、原始文本下载 | 同 Web，可默认应用打开 |
-| XLSX/Office/其他 | 元数据 + 下载 | 元数据 + 默认应用打开/定位 |
+| Excel（XLS/XLSX/XLSM/XLSB） | 每工作表最多预览 200 行、50 列，按单元格格式显示并可切换工作表 | 同 Web，可默认应用打开 |
+| 其他 Office/其他 | 元数据 + 下载 | 元数据 + 默认应用打开/定位 |
 
 超出内嵌预览大小限制的文件仍可作为 Artifact 登记，但 Viewer 显示“文件过大，无法内嵌预览”，并提供下载或 Desktop 外部打开。unsupported、missing、loading、too-large 和 error 都必须是显式状态，不能退化为空白 Viewer。
 
@@ -230,9 +231,9 @@ Artifact 必须属于一个明确的 `task_id/session UUID`（Web 中二者同�
 
 当前前台会话成功登记后，通过已有 WebSocket 通道发送 `artifact_upserted`。界面在 500ms 内更新列表；`focus=true` 时打开 Viewer。后台或非当前会话只更新未查看状态，不能抢焦点。automation run 详情和 reconnect 必须从 session entries/list API 对账，不能依赖 WebSocket 不丢事件。
 
-### FR-5：安全预览
+### FR-5：安全预览与下载
 
-Web 只能通过 Artifact ID 获取经过再次校验的内容，不接受任意绝对路径。每次 content/download/open 都重新验证 session ownership、canonical containment、regular file 和 symlink，Artifact ID 不是永久授权。
+Artifact Viewer 只能通过 Artifact ID 获取经过再次校验的内容。Chat Markdown 允许下载 task workspace 中的相对文件路径，但不接受绝对路径；请求必须绑定当前 task，并在每次 HEAD/GET 时重新验证工作区 containment、regular file、敏感路径和 symlink。Artifact ID 不是永久授权。
 
 安全预览的最低合同：HTML iframe 仅允许 `sandbox="allow-scripts"`，禁止 `allow-same-origin`、form、popup、top navigation 和联网；SVG 只能作为 image document；Markdown 默认禁用 raw HTML；不得把 Artifact HTML/SVG 注入主 React DOM；内容响应必须带 `X-Content-Type-Options: nosniff` 和对应 CSP。`.git/**`、`.jcode/**`、`.env`、private key 等敏感路径必须拒绝，Artifact 不能成为 Files 权限旁路。
 
@@ -256,7 +257,7 @@ CLI/TUI 与 ACP 的工具目录中不存在 `show_artifact`。静态/eager 工�
 
 - 预览元数据更新 P95 小于 500ms；大文件内容按需加载，不阻塞 Agent run。
 - Artifact 登记必须是幂等操作，同一路径重试不会产生重复列表项。
-- 文件大小采用三档合同：文本/HTML/CSV inline 5 MiB，图片/PDF inline 25 MiB；本地 download 250 MiB；Phase 3 Cloud share 25 MiB。超限分别返回 `artifact_too_large` 或 `artifact_share_too_large`，不影响本地登记。
+- 文件大小采用三档合同：文本/HTML/CSV inline 5 MiB，图片/PDF/Excel inline 25 MiB；本地 download 250 MiB；Phase 3 Cloud share 25 MiB。超限分别返回 `artifact_too_large` 或 `artifact_share_too_large`，不影响本地登记。
 - 不在 JSONL、WebSocket 或日志中写入 Artifact 文件正文。
 - 所有诊断使用 `config.Logger()`，不得污染 TUI stdout/stderr。
 - API 和前端状态要支持一个会话至少 100 个 Artifact，列表仍保持可用。
@@ -277,7 +278,7 @@ MVP 发布后关注：
 
 ## 13. Phase 1 MVP 验收标准
 
-1. 在 Web/Desktop 中要求 Agent 生成 HTML、Markdown、图片、PDF 或 CSV，Agent 可以调用工具并自动打开对应 renderer；分别验证 HTML sandbox、Markdown raw HTML 禁止、图片缩放、PDF fallback 和 CSV 有界表格。
+1. 在 Web/Desktop 中要求 Agent 生成 HTML、Markdown、图片、PDF、CSV 或 Excel，Agent 可以调用工具并自动打开对应 renderer；分别验证 HTML sandbox、Markdown raw HTML 禁止、图片缩放、PDF fallback、CSV 有界表格和 Excel 工作表预览。
 2. 刷新 Web、重启 Desktop、切换后再返回会话，Artifact 列表可以从 session entries 恢复。
 3. 同一路径连续登记两次只显示一个列表项，revision 增加且内容刷新。
 4. 文件删除后，历史 Artifact 仍在列表中并显示 missing。
@@ -339,7 +340,7 @@ Cloud K8s 测试必须使用真实对象存储和部署配置；mock 仅用于�
 
 ### Phase 2：增强
 
-- XLSX 表格预览与更多 Office 元数据
+- 更多 Office 元数据
 - Artifact 全屏、多 Artifact 对比、手动“标记为 Artifact”
 - 受控的对话内 Artifact 链接
 - 内容摘要、缩略图和更精细的未读体验

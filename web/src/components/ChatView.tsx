@@ -12,11 +12,14 @@
 
 import { AskUserCard, Thread } from 'jcode-ui'
 import { GoalBanner, ChatInput } from 'jcode-ui/product'
+import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppSelector } from '../app/hooks'
 import { useProductComposerHost } from '../app/composerHost'
 import kimiBackground from '../assets/kimi-light-background.webp'
 import zhipuBackground from '../assets/zhipu-light-background.webp'
+import { apiBase } from '../lib/apiBase'
+import { saveFileLink, validateServiceFileLink } from '../lib/saveFileLink'
 import { ConversationLoadingView } from './ConversationLoadingView'
 import { RemoteConnectionNotice } from './RemoteConnectionNotice'
 
@@ -62,6 +65,25 @@ function PendingIndicator() {
 
 export function ChatView({ readOnly }: ChatViewProps) {
   const { t } = useTranslation()
+  const taskId = useAppSelector((s) => s.session.currentSessionId)
+  const onDownloadFile = useCallback((href: string, fileName: string): boolean => {
+    const base = apiBase || document.baseURI
+    try {
+      if (new URL(href, base).origin !== new URL(base).origin) return false
+    } catch {
+      return false
+    }
+
+    void saveFileLink(href, fileName, taskId).catch((error: unknown) => {
+      console.error('Failed to save linked file', error)
+      window.alert(t('chat.fileDownloadFailed'))
+    })
+    return true
+  }, [t, taskId])
+  const validateDownloadFile = useCallback(
+    (href: string, _fileName: string) => validateServiceFileLink(href, taskId),
+    [taskId],
+  )
   const turnDurationLabel = (durationMs: number) => {
     const totalSeconds = Math.max(0, Math.round(durationMs / 1000))
     const hours = Math.floor(totalSeconds / 3600)
@@ -112,7 +134,13 @@ export function ChatView({ readOnly }: ChatViewProps) {
     return (
       <div className="chat-panel flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1">
-          <Thread overscanBottom={8} renderPending={() => <PendingIndicator />} {...turnStrings} />
+          <Thread
+            overscanBottom={8}
+            renderPending={() => <PendingIndicator />}
+            onDownloadFile={onDownloadFile}
+            validateDownloadFile={validateDownloadFile}
+            {...turnStrings}
+          />
         </div>
       </div>
     )
@@ -191,6 +219,8 @@ export function ChatView({ readOnly }: ChatViewProps) {
           overscanBottom={28}
           hidePendingAskUser
           renderPending={pendingAskUser ? () => null : () => <PendingIndicator />}
+          onDownloadFile={onDownloadFile}
+          validateDownloadFile={validateDownloadFile}
           {...turnStrings}
         />
       </div>

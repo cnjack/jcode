@@ -222,6 +222,30 @@ export const api = {
     requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/content`),
   artifactDownload: (taskId: string, artifactId: string) =>
     requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/download`),
+  artifactDownloadAvailable: async (taskId: string, artifactId: string) => {
+    const headers = new Headers()
+    const token = getAuthToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    const response = await fetch(
+      `${apiBase}/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+      { method: 'HEAD', headers, cache: 'no-store' },
+    )
+    if (response.status === 401) notifyAuthExpired()
+    return response.ok
+  },
+  workspaceFileDownload: (taskId: string, path: string) =>
+    requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/files/download?path=${encodeURIComponent(path)}`),
+  workspaceFileDownloadAvailable: async (taskId: string, path: string) => {
+    const headers = new Headers()
+    const token = getAuthToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    const response = await fetch(
+      `${apiBase}/api/tasks/${encodeURIComponent(taskId)}/files/download?path=${encodeURIComponent(path)}`,
+      { method: 'HEAD', headers, cache: 'no-store' },
+    )
+    if (response.status === 401) notifyAuthExpired()
+    return response.ok
+  },
   markArtifactViewed: (taskId: string, artifactId: string, revision: number) =>
     requestVoid(
       `/api/tasks/${encodeURIComponent(taskId)}/artifacts/viewed`,

@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"github.com/cnjack/jcode/internal/modelcatalog"
 )
 
 const maxModelCatalogResponseBytes = 1 << 20
@@ -111,11 +113,11 @@ func (manager *Manager) doModelCatalogJSON(request *http.Request) (int, any, err
 }
 
 func parseManagedModels(method Method, payload any) []Model {
-	entries := modelEntries(payload)
+	entries := modelcatalog.RawEntries(payload)
 	models := make([]Model, 0, len(entries))
 	seen := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
-		model, ok := parseManagedModel(method, entry.value, entry.fallbackID)
+		model, ok := parseManagedModel(method, entry.Value, entry.FallbackID)
 		if !ok {
 			continue
 		}
@@ -129,172 +131,38 @@ func parseManagedModels(method Method, payload any) []Model {
 	return models
 }
 
-type modelEntry struct {
-	value      any
-	fallbackID string
-}
-
-func modelEntries(payload any) []modelEntry {
-	if list, ok := payload.([]any); ok {
-		return wrapModelEntries(list)
-	}
-	object, ok := payload.(map[string]any)
-	if !ok {
-		return nil
-	}
-	for _, key := range []string{"data", "items"} {
-		if list, ok := object[key].([]any); ok {
-			return wrapModelEntries(list)
-		}
-	}
-	if list, ok := object["models"].([]any); ok {
-		return wrapModelEntries(list)
-	}
-	if modelMap, ok := object["models"].(map[string]any); ok {
-		entries := make([]modelEntry, 0, len(modelMap))
-		for id, value := range modelMap {
-			entries = append(entries, modelEntry{value: value, fallbackID: id})
-		}
-		return entries
-	}
-	return nil
-}
-
-func wrapModelEntries(input []any) []modelEntry {
-	entries := make([]modelEntry, 0, len(input))
-	for _, value := range input {
-		entries = append(entries, modelEntry{value: value})
-	}
-	return entries
-}
-
+// parseManagedModel delegates dialect handling (ids, names, Copilot
+// capabilities, xAI image pricing, …) to modelcatalog and layers the
+// method-specific kind and wire protocol on top.
 func parseManagedModel(method Method, value any, fallbackID string) (Model, bool) {
-	if id, ok := value.(string); ok {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			return Model{}, false
-		}
-		return Model{ID: id, Name: id, Protocol: protocolForManagedModel(method, ""), Kind: kindForManagedModel(method, id)}, true
-	}
-	object, ok := value.(map[string]any)
+	entry, ok := modelcatalog.ParseEntry(value, fallbackID)
 	if !ok {
-		if strings.TrimSpace(fallbackID) == "" {
-			return Model{}, false
-		}
-		id := strings.TrimSpace(fallbackID)
-		return Model{ID: id, Name: id, Protocol: protocolForManagedModel(method, ""), Kind: kindForManagedModel(method, id)}, true
-	}
-	if method == MethodGitHubCopilot {
-		if enabled, exists := object["model_picker_enabled"].(bool); exists && !enabled {
-			return Model{}, false
-		}
-	}
-	id := firstModelString(object, "slug", "id", "model")
-	if id == "" {
-		id = strings.TrimSpace(fallbackID)
-	}
-	if id == "" {
-		id = firstModelString(object, "name")
-	}
-	if id == "" {
 		return Model{}, false
 	}
-	name := firstModelString(object, "name", "display_name", "displayName")
+	if method == MethodGitHubCopilot && entry.Hidden {
+		return Model{}, false
+	}
+	name := entry.Name
 	if name == "" {
-		name = id
+		name = entry.ID
 	}
-	vendor := firstModelString(object, "vendor", "owned_by", "ownedBy", "provider", "owner")
-	kind := kindForManagedModel(method, id)
-	return Model{
-		ID:         id,
-		Name:       name,
-		Vendor:     vendor,
-		Protocol:   protocolForManagedModel(method, vendor),
-		Kind:       kind,
-		Attachment: managedModelAttachment(kind, object),
-		Context:    firstModelInt(object, "context_length", "context_window", "max_context_length"),
-	}, true
-}
-
-func firstModelString(object map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+	kind := kindForManagedModel(method, entry.ID)
+	model := Model{
+		ID:       entry.ID,
+		Name:     name,
+		Vendor:   entry.Vendor,
+		Protocol: protocolForManagedModel(method, entry.Vendor),
+		Kind:     kind,
+		Context:  entry.Context,
+	}
+	if kind == ModelKindChat {
+		model.Attachment = entry.Attachment != nil && *entry.Attachment
+		if entry.Reasoning != nil && *entry.Reasoning {
+			model.Reasoning = true
+			model.EffortTiers = append([]string(nil), entry.EffortTiers...)
 		}
 	}
-	return ""
-}
-
-func firstModelNumber(object map[string]any, keys ...string) (float64, bool) {
-	for _, key := range keys {
-		switch value := object[key].(type) {
-		case json.Number:
-			parsed, err := value.Float64()
-			if err == nil {
-				return parsed, true
-			}
-		case float64:
-			return value, true
-		case int:
-			return float64(value), true
-		case int64:
-			return float64(value), true
-		}
-	}
-	return 0, false
-}
-
-func firstModelInt(object map[string]any, keys ...string) int {
-	value, ok := firstModelNumber(object, keys...)
-	if !ok || value <= 0 {
-		return 0
-	}
-	return int(value)
-}
-
-func managedModelAttachment(kind ModelKind, object map[string]any) bool {
-	if kind != ModelKindChat || object == nil {
-		return false
-	}
-	if price, ok := firstModelNumber(object, "prompt_image_token_price"); ok && price > 0 {
-		return true
-	}
-	if flag, ok := object["supports_image"].(bool); ok && flag {
-		return true
-	}
-	if flag, ok := object["vision"].(bool); ok && flag {
-		return true
-	}
-	return managedModelListsImageInput(object)
-}
-
-func managedModelListsImageInput(object map[string]any) bool {
-	for _, key := range []string{"input_modalities", "modalities"} {
-		switch value := object[key].(type) {
-		case []any:
-			if anyStringEquals(value, "image") {
-				return true
-			}
-		case map[string]any:
-			if anyStringEquals(value["input"], "image") || anyStringEquals(value["input_modalities"], "image") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func anyStringEquals(value any, target string) bool {
-	list, ok := value.([]any)
-	if !ok {
-		return false
-	}
-	for _, item := range list {
-		if text, ok := item.(string); ok && strings.EqualFold(strings.TrimSpace(text), target) {
-			return true
-		}
-	}
-	return false
+	return model, true
 }
 
 func protocolForManagedModel(method Method, vendor string) Protocol {

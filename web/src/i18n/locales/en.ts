@@ -227,6 +227,7 @@ export default {
     thinking: 'Thinking…',
     loadingConversation: 'Loading conversation…',
     attachFiles: 'Attach files',
+    fileDownloadFailed: 'Could not save this file.',
     fileUpload: {
       failed: 'File upload failed',
       unavailable: 'File upload is unavailable for this task',
@@ -1457,6 +1458,8 @@ export default {
     downloadError: "Couldn't download this artifact.",
     desktopError: "Couldn't open this artifact on the desktop.",
     noPreview: 'Preview is unavailable. Download the file instead.',
+    worksheet: 'Worksheet',
+    previewLimit: 'Showing up to {{rows}} rows and {{columns}} columns.',
     share: 'Share',
     download: 'Download',
     open: 'Open in default app',

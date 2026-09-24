@@ -12,8 +12,8 @@
  * identity. System and WeChat messages keep a compact visible source label.
  */
 
-import { memo, useCallback, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import {
   ArrowPathIcon,
   CheckIcon,
@@ -46,13 +46,24 @@ export interface MessageProps {
   message: MessageData
   /** Allow editing (typically user messages when idle). */
   canEdit?: boolean
+  /** Handle links to downloadable files with a host-provided save flow. */
+  onDownloadFile?: (href: string, fileName: string) => boolean
+  /** Check that a file is available from the host before enabling its link. */
+  validateDownloadFile?: (href: string, fileName: string) => Promise<boolean | null>
   /** Hide the legacy footer duration when a completed-turn disclosure owns it. */
   showDuration?: boolean
   /** Optional chrome overrides (avatar / header / footer tail). */
   slots?: MessageSlots
 }
 
-export const Message = memo(function Message({ message, canEdit, showDuration = true, slots }: MessageProps) {
+export const Message = memo(function Message({
+  message,
+  canEdit,
+  onDownloadFile,
+  validateDownloadFile,
+  showDuration = true,
+  slots,
+}: MessageProps) {
   const actions = useRuntimeActions()
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -207,7 +218,12 @@ export const Message = memo(function Message({ message, canEdit, showDuration = 
           </div>
         </div>
       ) : (
-        <MarkdownBody html={message.content} bubble={isUser} />
+        <MarkdownBody
+          html={message.content}
+          bubble={isUser}
+          onDownloadFile={onDownloadFile}
+          validateDownloadFile={validateDownloadFile}
+        />
       )}
 
       {message.sources && message.sources.length > 0 && (
@@ -341,24 +357,121 @@ export const Message = memo(function Message({ message, canEdit, showDuration = 
   )
 })
 
-const MarkdownBody = memo(function MarkdownBody({ html, bubble }: { html: string; bubble?: boolean }) {
+const MarkdownBody = memo(function MarkdownBody({
+  html,
+  bubble,
+  onDownloadFile,
+  validateDownloadFile,
+}: {
+  html: string
+  bubble?: boolean
+  onDownloadFile?: MessageProps['onDownloadFile']
+  validateDownloadFile?: MessageProps['validateDownloadFile']
+}) {
   // Streaming-stable rendering: unclosed fences/emphasis are completed before
   // parse, and finished top-level blocks are cached so long threads don't
   // re-render whole documents per token.
   const sanitized = useStreamingMarkdown(html)
   const unbindRef = useRef<(() => void) | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const verificationRef = useRef(new Map<string, Promise<boolean | null>>())
+  const availabilityRef = useRef(new Map<string, 'checking' | 'available' | 'unavailable' | 'external'>())
   const bind = useCallback((el: HTMLDivElement | null) => {
+    rootRef.current = el
     unbindRef.current?.()
     unbindRef.current = el ? bindCodeBlockCopy(el) : null
   }, [])
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root || !onDownloadFile || !validateDownloadFile) return
+    let active = true
+
+    for (const link of root.querySelectorAll<HTMLAnchorElement>('a')) {
+      const fileName = downloadFileName(link)
+      if (!fileName) continue
+      const href = link.dataset.jcodeOriginalHref ?? link.getAttribute('href') ?? link.href
+      link.dataset.jcodeOriginalHref = href
+
+      let verification = verificationRef.current.get(href)
+      if (!verification) {
+        availabilityRef.current.set(href, 'checking')
+        setDownloadLinkState(link, 'checking')
+        verification = Promise.resolve().then(() => validateDownloadFile(href, fileName))
+        verificationRef.current.set(href, verification)
+      } else {
+        setDownloadLinkState(link, availabilityRef.current.get(href) ?? 'checking')
+      }
+
+      void verification.then((available) => {
+        const state = available === null ? 'external' : available ? 'available' : 'unavailable'
+        availabilityRef.current.set(href, state)
+        if (active && link.isConnected) setDownloadLinkState(link, state)
+      }).catch(() => {
+        availabilityRef.current.set(href, 'unavailable')
+        if (active && link.isConnected) setDownloadLinkState(link, 'unavailable')
+      })
+    }
+
+    return () => { active = false }
+  }, [onDownloadFile, sanitized, validateDownloadFile])
+  const handleClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (!onDownloadFile) return
+    const target = event.target instanceof Element ? event.target.closest('a') : null
+    if (!target || !event.currentTarget.contains(target)) return
+
+    const fileName = downloadFileName(target)
+    if (!fileName) return
+    const href = target.dataset.jcodeOriginalHref ?? target.getAttribute('href') ?? target.href
+    const state = availabilityRef.current.get(href)
+    if (validateDownloadFile && state !== 'available' && state !== 'external') {
+      event.preventDefault()
+      return
+    }
+    if (state === 'external') return
+
+    if (onDownloadFile(href, fileName)) {
+      event.preventDefault()
+    }
+  }, [onDownloadFile, validateDownloadFile])
   return (
     <div
       ref={bind}
+      onClick={handleClick}
       className={`jcode-message__body jcode-prose jcode-selectable jcode-gutter max-w-none break-words${bubble ? ' jcode-message-bubble' : ''}`}
       dangerouslySetInnerHTML={{ __html: sanitized }}
     />
   )
 })
+
+function setDownloadLinkState(link: HTMLAnchorElement, state: 'checking' | 'available' | 'unavailable' | 'external'): void {
+  link.dataset.jcodeDownloadState = state
+  if (state === 'available' || state === 'external') {
+    const href = link.dataset.jcodeOriginalHref
+    if (href) link.setAttribute('href', href)
+    link.removeAttribute('aria-disabled')
+    link.removeAttribute('tabindex')
+    return
+  }
+  link.removeAttribute('href')
+  link.setAttribute('aria-disabled', 'true')
+  link.tabIndex = -1
+}
+
+function downloadFileName(link: HTMLAnchorElement): string | null {
+  const declaredName = link.getAttribute('download')?.trim()
+  if (declaredName) return declaredName
+
+  const visibleName = link.textContent?.trim().replace(/[。.,!?;:)\]）】]+$/u, '')
+  if (visibleName && /\.[a-z\d]{1,12}$/i.test(visibleName)) return visibleName.split(/[\\/]/).pop() ?? visibleName
+
+  try {
+    const pathName = decodeURIComponent(new URL(link.dataset.jcodeOriginalHref ?? link.href, document.baseURI).pathname)
+    const pathBaseName = pathName.split('/').pop() ?? ''
+    return /\.[a-z\d]{1,12}$/i.test(pathBaseName) ? pathBaseName : null
+  } catch {
+    return null
+  }
+}
 
 function formatDuration(ms?: number): string {
   if (!ms || ms < 0) return ''

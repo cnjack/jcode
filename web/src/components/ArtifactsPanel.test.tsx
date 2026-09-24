@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Provider } from 'react-redux'
+import * as XLSX from 'xlsx'
 import { sessionActions, store } from '../app/store'
 import { i18n } from '../i18n'
 import { ArtifactsPanel, canOpenArtifactOnDesktop } from './ArtifactsPanel'
@@ -138,6 +139,60 @@ describe('ArtifactsPanel', () => {
     expect(mocks.markArtifactViewed).not.toHaveBeenCalled()
     fireEvent.load(image)
     await waitFor(() => expect(mocks.markArtifactViewed).toHaveBeenCalledWith('artifact-task', 'generated-image', 3))
+  })
+
+  it('renders Excel artifacts as worksheet tables, including legacy CSV metadata', async () => {
+    const firstSheet = XLSX.utils.aoa_to_sheet([
+      ['name', 'total', 'used'],
+      ['admin-credit-summary', 35000, 13930],
+    ])
+    firstSheet.B2.z = '#,##0'
+    firstSheet.C2.z = '#,##0'
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, firstSheet, 'Summary')
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['source'], ['from CSV']]), 'Source')
+    const workbookBytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
+    mocks.artifacts.mockResolvedValue([{
+      ...htmlArtifact,
+      id: 'excel-artifact',
+      title: 'total/used',
+      relative_path: '181-2026-09-24-split.xlsx',
+      kind: 'csv',
+      media_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }])
+    mocks.artifactContent.mockResolvedValue(new Blob([workbookBytes]))
+
+    renderPanel()
+    expect(await screen.findByRole('table')).toBeTruthy()
+    expect(screen.getByText('admin-credit-summary')).toBeTruthy()
+    expect(screen.getByText('35,000')).toBeTruthy()
+    expect(screen.getByText('13,930')).toBeTruthy()
+    expect(await screen.findByRole('combobox', { name: 'Worksheet' })).toBeTruthy()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Worksheet' }), { target: { value: 'Source' } })
+    expect(await screen.findByText('from CSV')).toBeTruthy()
+    await waitFor(() => expect(mocks.markArtifactViewed).toHaveBeenCalledWith('artifact-task', 'excel-artifact', 1))
+  })
+
+  it('bounds Excel previews to 200 rows and 50 columns', async () => {
+    const rows = Array.from({ length: 201 }, (_, row) =>
+      Array.from({ length: 51 }, (_, column) => `${row}-${column}`))
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'Data')
+    mocks.artifacts.mockResolvedValue([{
+      ...htmlArtifact,
+      id: 'large-excel',
+      title: 'Large spreadsheet',
+      relative_path: 'large.xlsx',
+      kind: 'spreadsheet',
+    }])
+    mocks.artifactContent.mockResolvedValue(new Blob([XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })]))
+
+    renderPanel()
+    const table = await screen.findByRole('table')
+    expect(screen.getAllByRole('row')).toHaveLength(201)
+    expect(screen.queryByText('200-0')).toBeNull()
+    expect(screen.queryByText('0-50')).toBeNull()
+    expect(table).toBeTruthy()
   })
 
   it('hides Cloud sharing completely when the user is not logged in', async () => {

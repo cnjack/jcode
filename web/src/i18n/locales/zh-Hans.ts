@@ -217,6 +217,7 @@ export default {
     thinking: '思考中…',
     loadingConversation: '加载会话中…',
     attachFiles: '添加附件',
+    fileDownloadFailed: '无法保存此文件。',
     fileUpload: {
       failed: '文件上传失败',
       unavailable: '当前任务无法上传文件',
@@ -1432,6 +1433,8 @@ export default {
     downloadError: '无法下载此产物。',
     desktopError: '无法在桌面端打开此产物。',
     noPreview: '无法预览，请下载文件查看。',
+    worksheet: '工作表',
+    previewLimit: '最多显示 {{rows}} 行、{{columns}} 列。',
     share: '分享',
     download: '下载',
     open: '使用默认应用打开',
