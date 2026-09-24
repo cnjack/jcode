@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/cnjack/jcode/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 // Skill represents a loaded skill with metadata and content.
@@ -274,7 +275,7 @@ func (l *Loader) SlashCommands() []*Skill {
 	return result
 }
 
-// parseSkill parses a SKILL.md content with optional YAML-like frontmatter.
+// parseSkill parses a SKILL.md content with optional YAML frontmatter.
 // Frontmatter fields: name, description, slash
 func parseSkill(dirName, content string, builtin bool, path string) *Skill {
 	sk := &Skill{
@@ -305,8 +306,29 @@ func parseSkill(dirName, content string, builtin bool, path string) *Skill {
 	return sk
 }
 
-// parseFrontmatter extracts simple key: value pairs from frontmatter text.
+// parseFrontmatter extracts skill metadata from YAML frontmatter.
 func parseFrontmatter(fm string, sk *Skill) {
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(fm), &document); err == nil &&
+		len(document.Content) > 0 && document.Content[0].Kind == yaml.MappingNode {
+		mapping := document.Content[0]
+		for i := 0; i+1 < len(mapping.Content); i += 2 {
+			key, value := mapping.Content[i], mapping.Content[i+1]
+			if key.Kind != yaml.ScalarNode || value.Kind != yaml.ScalarNode {
+				continue
+			}
+			switch key.Value {
+			case "name":
+				sk.Name = value.Value
+			case "description":
+				sk.Description = value.Value
+			case "slash":
+				sk.Slash = value.Value
+			}
+		}
+		return
+	}
+
 	scanner := bufio.NewScanner(strings.NewReader(fm))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
