@@ -1,20 +1,17 @@
 package command
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"runtime"
-	"strings"
 
 	"github.com/spf13/cobra"
-)
 
-type githubRelease struct {
-	TagName string `json:"tag_name"`
-}
+	"github.com/cnjack/jcode/internal/release"
+)
 
 func NewUpdateCmd() *cobra.Command {
 	return &cobra.Command{
@@ -31,12 +28,13 @@ func runUpdate() error {
 
 	fmt.Println("Checking for updates...")
 
-	latest, err := getLatestVersion()
+	info, err := release.Latest(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to check latest version: %w", err)
 	}
+	latest := info.Tag
 
-	if normalizeVersion(latest) == normalizeVersion(currentVersion) {
+	if release.Normalize(latest) == release.Normalize(currentVersion) {
 		fmt.Printf("Already up to date: %s\n", currentVersion)
 		return nil
 	}
@@ -127,29 +125,6 @@ func runUpdate() error {
 	fmt.Printf("Updated successfully: %s -> %s\n", currentVersion, latest)
 	fmt.Printf("Binary: %s\n", execPath)
 	return nil
-}
-
-func getLatestVersion() (string, error) {
-	resp, err := http.Get("https://api.github.com/repos/cnjack/jcode/releases/latest") // #nosec G107
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode)
-	}
-
-	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return "", err
-	}
-
-	return release.TagName, nil
-}
-
-func normalizeVersion(v string) string {
-	return strings.TrimPrefix(v, "v")
 }
 
 func resolveExecutablePath(path string) (string, error) {

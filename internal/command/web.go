@@ -1262,6 +1262,8 @@ func startWebServer(runtime webServerRuntime) error {
 		OpenBrowser:          runtime.openBrowser,
 		Pwd:                  runtime.pwd,
 		Version:              Version,
+		GitCommit:            GitCommit,
+		BuildTime:            BuildTime,
 		Agent:                bootEC.Agent,
 		CreateAgent:          bootEC.CreateAgent,
 		RebuildForMode:       bootEC.RebuildForMode,
