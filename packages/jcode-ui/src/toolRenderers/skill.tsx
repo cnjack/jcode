@@ -5,6 +5,17 @@
 import { memo, useMemo } from 'react'
 import type { ToolRendererProps } from 'jcode-ui-core/adapters'
 
+function skillDescription(output?: string): string {
+  const match = output?.match(/\bdescription=("(?:\\.|[^"\\])*")/)
+  if (!match) return ''
+  try {
+    const value: unknown = JSON.parse(match[1])
+    return typeof value === 'string' ? value : ''
+  } catch {
+    return match[1].slice(1, -1)
+  }
+}
+
 export const SkillRenderer = memo(function SkillRenderer({
   args,
   output,
@@ -18,8 +29,7 @@ export const SkillRenderer = memo(function SkillRenderer({
     } catch {
       // ignore
     }
-    const descMatch = (output ?? '').match(/description="([^"]*)"/)
-    return { name: n, description: descMatch ? (descMatch[1] ?? '') : '' }
+    return { name: n, description: skillDescription(output) }
   }, [args, output])
 
   return (
@@ -35,7 +45,7 @@ export const SkillRenderer = memo(function SkillRenderer({
         )}
       </div>
       {description && (
-        <div className="mt-1 text-[11px] leading-snug" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
+        <div className="mt-1 line-clamp-2 text-[11px] leading-snug" title={description} style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           {description}
         </div>
       )}
