@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod desktop_apps;
+mod downloads;
 mod dropped_files;
 mod shell_env;
 mod sidecar;
@@ -120,6 +121,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_sidecar_port,
             dropped_files::read_dropped_image,
+            downloads::save_download_as,
             desktop_apps::list_workspace_applications,
             desktop_apps::open_workspace_in_application
         ])

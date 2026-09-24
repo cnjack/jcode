@@ -152,7 +152,7 @@ export interface FileContent {
   content: string
 }
 
-export type ArtifactKind = 'text' | 'markdown' | 'code' | 'html' | 'image' | 'pdf' | 'csv' | 'binary'
+export type ArtifactKind = 'text' | 'markdown' | 'code' | 'html' | 'image' | 'pdf' | 'csv' | 'spreadsheet' | 'binary'
 export type ArtifactStatus = 'available' | 'missing' | 'unsupported' | 'too_large' | 'error'
 
 export interface ArtifactRecord {

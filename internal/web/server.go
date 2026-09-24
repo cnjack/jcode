@@ -473,6 +473,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/tasks/{id}/uploads", s.handleTaskUpload)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/content", s.handleArtifactContent)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/download", s.handleArtifactDownload)
+	mux.HandleFunc("HEAD /api/tasks/{id}/artifacts/{artifactID}/download", s.handleArtifactDownload)
+	mux.HandleFunc("GET /api/tasks/{id}/files/download", s.handleTaskFileDownload)
+	mux.HandleFunc("HEAD /api/tasks/{id}/files/download", s.handleTaskFileDownload)
 	mux.HandleFunc("PATCH /api/tasks/{id}/artifacts/viewed", s.handleArtifactsViewed)
 	mux.HandleFunc("POST /api/tasks/{id}/artifacts/{artifactID}/shares", s.handleCreateArtifactShare)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/shares", s.handleListArtifactShares)
@@ -954,7 +957,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Max-Age", "86400")

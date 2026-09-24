@@ -9,6 +9,26 @@ import (
 	"time"
 )
 
+func TestClassifyExcelWorkbookExtensions(t *testing.T) {
+	for _, ext := range []string{".xls", ".xlsx", ".xlsm", ".xlsb"} {
+		t.Run(ext, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "report"+ext)
+			if err := os.WriteFile(path, []byte("PK\x03\x04 workbook"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, hint := range []Kind{KindAuto, KindCSV} {
+				kind, _, err := classifyFile(path, hint)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if kind != KindSpreadsheet {
+					t.Fatalf("classifyFile(%q, %q) kind=%q, want %q", ext, hint, kind, KindSpreadsheet)
+				}
+			}
+		})
+	}
+}
+
 type recordSink struct {
 	records []Record
 	err     error

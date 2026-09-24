@@ -40,6 +40,10 @@ import { CompletedTurnCard } from './CompletedTurnCard.js'
 import { useToolRegistry } from './ToolRegistryContext.js'
 
 export interface ThreadProps {
+  /** Handle links to downloadable files with a host-provided save flow. */
+  onDownloadFile?: (href: string, fileName: string) => boolean
+  /** Check that a file is available from the host before enabling its link. */
+  validateDownloadFile?: (href: string, fileName: string) => Promise<boolean | null>
   /** Disable virtualization (short/replay timelines). Default true. */
   virtualize?: boolean
   /** Empty-state node (typically `<ThreadWelcome>`). */
@@ -68,6 +72,8 @@ export interface ThreadProps {
 }
 
 export function Thread({
+  onDownloadFile,
+  validateDownloadFile,
   virtualize,
   emptyState,
   suggestions,
@@ -112,6 +118,8 @@ export function Thread({
         durationLabel: turnDurationLabel,
         expandLabel: turnExpandLabel,
         collapseLabel: turnCollapseLabel,
+        onDownloadFile,
+        validateDownloadFile,
       })}
       renderPending={renderPending ?? (() => <DefaultPending label={pendingLabel} />)}
       renderEmpty={emptyState ? () => emptyState : undefined}
@@ -132,6 +140,8 @@ interface TurnRenderStrings {
   durationLabel?: (durationMs: number) => string
   expandLabel?: string
   collapseLabel?: string
+  onDownloadFile?: (href: string, fileName: string) => boolean
+  validateDownloadFile?: (href: string, fileName: string) => Promise<boolean | null>
 }
 
 function renderItem(item: ThreadItem, isRunning: boolean, turnStrings: TurnRenderStrings): ReactNode {
@@ -140,6 +150,8 @@ function renderItem(item: ThreadItem, isRunning: boolean, turnStrings: TurnRende
       <Message
         message={item.data}
         canEdit={item.data.role === 'user' && !isRunning}
+        onDownloadFile={turnStrings.onDownloadFile}
+        validateDownloadFile={turnStrings.validateDownloadFile}
       />
     )
   }
@@ -158,6 +170,8 @@ function renderItem(item: ThreadItem, isRunning: boolean, turnStrings: TurnRende
         durationLabel={turnStrings.durationLabel}
         expandLabel={turnStrings.expandLabel}
         collapseLabel={turnStrings.collapseLabel}
+        onDownloadFile={turnStrings.onDownloadFile}
+        validateDownloadFile={turnStrings.validateDownloadFile}
       />
     )
   }

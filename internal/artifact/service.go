@@ -26,15 +26,16 @@ import (
 type Kind string
 
 const (
-	KindAuto     Kind = "auto"
-	KindText     Kind = "text"
-	KindMarkdown Kind = "markdown"
-	KindCode     Kind = "code"
-	KindHTML     Kind = "html"
-	KindImage    Kind = "image"
-	KindPDF      Kind = "pdf"
-	KindCSV      Kind = "csv"
-	KindBinary   Kind = "binary"
+	KindAuto        Kind = "auto"
+	KindText        Kind = "text"
+	KindMarkdown    Kind = "markdown"
+	KindCode        Kind = "code"
+	KindHTML        Kind = "html"
+	KindImage       Kind = "image"
+	KindPDF         Kind = "pdf"
+	KindCSV         Kind = "csv"
+	KindSpreadsheet Kind = "spreadsheet"
+	KindBinary      Kind = "binary"
 )
 
 var ErrTooLarge = errors.New("artifact is too large")
@@ -402,35 +403,48 @@ func (s *Service) Open(ctx context.Context, sessionID, workspace, artifactID str
 	if sensitivePath(record.RelativePath) {
 		return Record{}, nil, os.ErrNotExist
 	}
-	validated, err := validateWorkspaceFile(workspace, record.RelativePath)
+	file, info, err := s.OpenWorkspaceFile(ctx, workspace, record.RelativePath)
 	if err != nil {
 		return Record{}, nil, err
-	}
-	root, err := os.OpenRoot(workspace)
-	if err != nil {
-		return Record{}, nil, fmt.Errorf("open artifact workspace: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-	file, err := root.Open(filepath.FromSlash(record.RelativePath))
-	if err != nil {
-		return Record{}, nil, fmt.Errorf("open artifact file: %w", err)
-	}
-	info, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return Record{}, nil, fmt.Errorf("stat artifact file: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		_ = file.Close()
-		return Record{}, nil, fmt.Errorf("artifact path must identify a regular file")
-	}
-	if !os.SameFile(validated.info, info) || hasMultipleHardLinks(info) {
-		_ = file.Close()
-		return Record{}, nil, fmt.Errorf("artifact path changed or has multiple hard links")
 	}
 	record.Size = info.Size()
 	record.Status = StatusAvailable
 	return record, file, nil
+}
+
+// OpenWorkspaceFile securely opens an existing relative file in a workspace
+// without requiring it to have been registered as an artifact.
+func (s *Service) OpenWorkspaceFile(ctx context.Context, workspace, relativePath string) (*os.File, os.FileInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	validated, err := validateWorkspaceFile(workspace, relativePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	root, err := os.OpenRoot(workspace)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open artifact workspace: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	file, err := root.Open(filepath.FromSlash(validated.relativePath))
+	if err != nil {
+		return nil, nil, fmt.Errorf("open artifact file: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("stat artifact file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("artifact path must identify a regular file")
+	}
+	if !os.SameFile(validated.info, info) || hasMultipleHardLinks(info) {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("artifact path changed or has multiple hard links")
+	}
+	return file, info, nil
 }
 
 func stableID(sessionID, relativePath string) string {
@@ -571,7 +585,7 @@ func classifyFile(path string, hint Kind) (Kind, string, error) {
 		mediaType = http.DetectContentType(sample[:n])
 	}
 	detected := kindForExtension(ext, mediaType)
-	if hint != KindAuto {
+	if hint != KindAuto && detected != KindSpreadsheet {
 		detected = hint
 	}
 	return detected, strings.Split(mediaType, ";")[0], nil
@@ -579,7 +593,7 @@ func classifyFile(path string, hint Kind) (Kind, string, error) {
 
 func validKind(kind Kind) bool {
 	switch kind {
-	case KindAuto, KindText, KindMarkdown, KindCode, KindHTML, KindImage, KindPDF, KindCSV, KindBinary:
+	case KindAuto, KindText, KindMarkdown, KindCode, KindHTML, KindImage, KindPDF, KindCSV, KindSpreadsheet, KindBinary:
 		return true
 	default:
 		return false
@@ -594,6 +608,8 @@ func kindForExtension(ext, mediaType string) Kind {
 		return KindHTML
 	case ".csv", ".tsv":
 		return KindCSV
+	case ".xls", ".xlsx", ".xlsm", ".xlsb":
+		return KindSpreadsheet
 	case ".pdf":
 		return KindPDF
 	case ".go", ".rs", ".py", ".js", ".jsx", ".ts", ".tsx", ".css", ".scss", ".json", ".yaml", ".yml", ".toml", ".sql", ".sh":

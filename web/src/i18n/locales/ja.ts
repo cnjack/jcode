@@ -220,6 +220,7 @@ export default {
     thinking: '考え中…',
     loadingConversation: '会話を読み込み中…',
     attachFiles: 'ファイルを添付',
+    fileDownloadFailed: 'ファイルを保存できませんでした。',
     fileUpload: {
       failed: 'ファイルのアップロードに失敗しました',
       unavailable: 'このタスクではファイルをアップロードできません',
@@ -1324,6 +1325,8 @@ export default {
     downloadError: 'この成果物をダウンロードできませんでした。',
     desktopError: 'デスクトップでこの成果物を開けませんでした。',
     noPreview: 'プレビューできません。ファイルをダウンロードしてください。',
+    worksheet: 'ワークシート',
+    previewLimit: '{{rows}} 行、{{columns}} 列まで表示しています。',
     share: '共有',
     download: 'ダウンロード',
     open: '既定のアプリで開く',
