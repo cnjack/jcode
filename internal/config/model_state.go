@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -157,6 +158,42 @@ func removeModelRef(refs []ModelRef, ref ModelRef) []ModelRef {
 		}
 	}
 	return result
+}
+
+// ForgetProvider drops every ref (recent, favorite, enabled, disabled, effort
+// override) belonging to providerID and reports whether anything changed.
+// Called when a provider is deleted so a later provider with the same id
+// starts clean instead of resurrecting stale "enabled" models.
+func (s *ModelState) ForgetProvider(providerID string) bool {
+	if s == nil || providerID == "" {
+		return false
+	}
+	changed := false
+	keep := func(refs []ModelRef) []ModelRef {
+		if len(refs) == 0 {
+			return refs
+		}
+		result := make([]ModelRef, 0, len(refs))
+		for _, ref := range refs {
+			if ref.Provider == providerID {
+				changed = true
+				continue
+			}
+			result = append(result, ref)
+		}
+		return result
+	}
+	s.Recent = keep(s.Recent)
+	s.Favorite = keep(s.Favorite)
+	s.EnabledModels = keep(s.EnabledModels)
+	s.DisabledModels = keep(s.DisabledModels)
+	for key := range s.EffortOverrides {
+		if strings.HasPrefix(key, providerID+"/") {
+			delete(s.EffortOverrides, key)
+			changed = true
+		}
+	}
+	return changed
 }
 
 // effortKey is the lookup key for per-model effort overrides: "provider/model".

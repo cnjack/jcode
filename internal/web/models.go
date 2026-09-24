@@ -16,6 +16,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/modelcatalog"
 	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 )
@@ -753,7 +754,7 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 			return
 		}
 		if !managedConfigChanged {
-			customConfigChanged, err = s.ensureCustomModelConfigured(req.Provider, req.Model)
+			customConfigChanged, err = s.ensureCustomModelConfigured(r.Context(), req.Provider, req.Model)
 			if err != nil {
 				config.Logger().Printf(
 					"[models] custom model persistence failed provider=%q model=%q: %v",
@@ -791,7 +792,7 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 // API-key provider's live /models catalog. Visibility state alone cannot teach
 // the config-backed registry about a previously unknown model, so without this
 // row the switch appears to save but the chat picker has nothing to render.
-func (s *Server) ensureCustomModelConfigured(providerID, modelID string) (bool, error) {
+func (s *Server) ensureCustomModelConfigured(ctx context.Context, providerID, modelID string) (bool, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return false, fmt.Errorf("load config for custom provider %q: %w", providerID, err)
@@ -806,6 +807,8 @@ func (s *Server) ensureCustomModelConfigured(providerID, modelID string) (bool, 
 			return false, nil
 		}
 	}
+	modelIDs := append([]string{modelID}, legacyEnabledCustomModels(providerID, provider, modelID)...)
+	rows := s.discoverCustomModelMetadata(ctx, providerID, provider, modelIDs)
 
 	configChanged := false
 	s.cfgMu.Lock()
@@ -820,15 +823,18 @@ func (s *Server) ensureCustomModelConfigured(providerID, modelID string) (bool, 
 		if pc == nil || pc.Auth != nil || strings.TrimSpace(pc.BaseURL) == "" {
 			return errors.New("custom provider configuration changed while enabling model")
 		}
+		present := make(map[string]bool, len(pc.CustomModels)+len(rows))
 		for _, existing := range pc.CustomModels {
-			if existing.ID == modelID {
-				return nil
-			}
+			present[existing.ID] = true
 		}
-		pc.CustomModels = append(pc.CustomModels, config.CustomModelConfig{
-			ID: modelID, Name: modelID, ToolCall: true,
-		})
-		configChanged = true
+		for _, row := range rows {
+			if present[row.ID] {
+				continue
+			}
+			present[row.ID] = true
+			pc.CustomModels = append(pc.CustomModels, row)
+			configChanged = true
+		}
 		return nil
 	})
 	if err != nil {
@@ -838,6 +844,60 @@ func (s *Server) ensureCustomModelConfigured(providerID, modelID string) (bool, 
 	s.cfgMu.Unlock()
 	configLocked = false
 	return configChanged, nil
+}
+
+// legacyEnabledCustomModels returns models enabled for providerID only in
+// model_state.json (older clients, or a provider re-created by hand under the
+// same id). /api/models projects those as bare ids while the provider has no
+// configured chat models; the first persisted row makes config authoritative
+// and would silently hide them, so they are persisted alongside it.
+func legacyEnabledCustomModels(providerID string, provider *config.ProviderConfig, exclude string) []string {
+	if provider.HasConfiguredChatModels() || provider.ImageEndpoint != nil {
+		return nil
+	}
+	state, err := config.LoadModelState()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{exclude: true}
+	var ids []string
+	for _, ref := range state.EnabledModels {
+		if ref.Provider != providerID || ref.Model == "" || seen[ref.Model] || !state.IsModelEnabled(ref, false) {
+			continue
+		}
+		seen[ref.Model] = true
+		ids = append(ids, ref.Model)
+	}
+	return ids
+}
+
+// discoverCustomModelMetadata resolves the rows persisted for models enabled
+// from a custom endpoint's catalog: the live /models entry (name, context,
+// vision, effort tiers, …) with registry gap-filling, exactly as the catalog
+// showed it. The single fetch runs outside the config lock; a model the
+// endpoint is unreachable for or no longer lists falls back to registry
+// metadata for its bare id.
+func (s *Server) discoverCustomModelMetadata(
+	ctx context.Context,
+	providerID string,
+	provider *config.ProviderConfig,
+	modelIDs []string,
+) []config.CustomModelConfig {
+	live := make(map[string]modelcatalog.Entry)
+	for _, entry := range model.ListProviderModelsLive(ctx, provider.APIKey, provider.BaseURL, provider.Headers) {
+		if _, duplicate := live[entry.ID]; !duplicate {
+			live[entry.ID] = entry
+		}
+	}
+	rows := make([]config.CustomModelConfig, 0, len(modelIDs))
+	for _, id := range modelIDs {
+		entry, ok := live[id]
+		if !ok {
+			entry = modelcatalog.Entry{ID: id}
+		}
+		rows = append(rows, customModelConfigFromLive(s.registry, providerID, entry))
+	}
+	return rows
 }
 
 func (s *Server) ensureManagedModelConfigured(
