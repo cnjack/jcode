@@ -335,6 +335,65 @@ func TestDecodeResponsesSSEDeduplicatesDoneAndCompletedItems(t *testing.T) {
 	}
 }
 
+// Reasoning models interleave several encrypted reasoning items with tool
+// calls in one response. Each lands in its own stream chunk, and Eino's
+// ChatModelAgent concatenates the chunks with schema.ConcatMessages — which
+// must merge the opaque item lists rather than reject two non-zero values.
+func TestResponsesStreamChunksWithMultipleReasoningItemsConcat(t *testing.T) {
+	stream := "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs-1\",\"summary\":[],\"encrypted_content\":\"cipher-1\"}}\n\n" +
+		"data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"call_id\":\"call-a\",\"name\":\"first\",\"arguments\":\"{}\"}}\n\n" +
+		"data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"reasoning\",\"id\":\"rs-2\",\"summary\":[],\"encrypted_content\":\"cipher-2\"}}\n\n" +
+		"data: {\"type\":\"response.output_item.done\",\"output_index\":3,\"item\":{\"type\":\"function_call\",\"call_id\":\"call-b\",\"name\":\"second\",\"arguments\":\"{}\"}}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n"
+	var chunks []*schema.Message
+	_, err := decodeResponsesSSE(strings.NewReader(stream), func(chunk *schema.Message) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := schema.ConcatMessages(chunks)
+	if err != nil {
+		t.Fatalf("ConcatMessages: %v", err)
+	}
+	items := responsemeta.FromExtra(merged.Extra)
+	if len(items) != 2 ||
+		!strings.Contains(string(items[0]), "cipher-1") || !strings.Contains(string(items[1]), "cipher-2") {
+		t.Fatalf("opaque items = %s", items)
+	}
+	if len(merged.ToolCalls) != 2 {
+		t.Fatalf("tool calls = %#v", merged.ToolCalls)
+	}
+}
+
+// GitHub Copilot re-encrypts every item per event: the reasoning item in
+// response.completed carries a different id and ciphertext than the same item
+// in output_item.done. Replaying both would duplicate the turn's reasoning.
+func TestDecodeResponsesSSEDeduplicatesReencryptedReasoningByOutputIndex(t *testing.T) {
+	stream := "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs-done\",\"summary\":[],\"encrypted_content\":\"cipher-done\"}}\n\n" +
+		"data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"call_id\":\"call-a\",\"name\":\"first\",\"arguments\":\"{}\"}}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[" +
+		"{\"type\":\"reasoning\",\"id\":\"rs-completed\",\"summary\":[],\"encrypted_content\":\"cipher-completed\"}," +
+		"{\"type\":\"function_call\",\"call_id\":\"call-a\",\"name\":\"first\",\"arguments\":\"{}\"}]}}\n\n"
+	var chunks []*schema.Message
+	_, err := decodeResponsesSSE(strings.NewReader(stream), func(chunk *schema.Message) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := schema.ConcatMessages(chunks)
+	if err != nil {
+		t.Fatalf("ConcatMessages: %v", err)
+	}
+	items := responsemeta.FromExtra(merged.Extra)
+	if len(items) != 1 || !strings.Contains(string(items[0]), "cipher-done") {
+		t.Fatalf("opaque items = %s", items)
+	}
+}
+
 func TestDecodeResponsesSSEPreservesOutputIndexesForParallelToolCalls(t *testing.T) {
 	stream := "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"call_id\":\"call-a\",\"name\":\"first\",\"arguments\":\"{}\"}}\n\n" +
 		"data: {\"type\":\"response.output_item.done\",\"output_index\":5,\"item\":{\"type\":\"function_call\",\"call_id\":\"call-b\",\"name\":\"second\",\"arguments\":\"{}\"}}\n\n" +
