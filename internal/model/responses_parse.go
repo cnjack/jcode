@@ -10,9 +10,33 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/jcode/internal/model/responsemeta"
 )
+
+// Eino concatenates streamed chunks (ChatModelAgent history, callbacks) with
+// schema.ConcatMessages, which rejects an Extra key present in more than one
+// chunk unless its value type has a registered concat function. Every
+// encrypted reasoning item is emitted as its own chunk, and reasoning models
+// interleave several of them with tool calls in one response, so lists of raw
+// JSON must concatenate by appending. Consumers read the merged value through
+// responsemeta.FromExtra, which re-normalizes and bounds it.
+func init() {
+	compose.RegisterStreamChunkConcatFunc(concatRawMessageLists)
+}
+
+func concatRawMessageLists(lists [][]json.RawMessage) ([]json.RawMessage, error) {
+	total := 0
+	for _, list := range lists {
+		total += len(list)
+	}
+	out := make([]json.RawMessage, 0, total)
+	for _, list := range lists {
+		out = append(out, list...)
+	}
+	return out, nil
+}
 
 const (
 	maxResponsesJSONBytes      = 16 << 20
@@ -256,7 +280,7 @@ type responsesSSEEvent struct {
 	Delta       string              `json:"delta"`
 	Message     string              `json:"message"`
 	Code        string              `json:"code"`
-	OutputIndex int                 `json:"output_index"`
+	OutputIndex *int                `json:"output_index"`
 	Item        json.RawMessage     `json:"item"`
 	Response    *responsesEnvelope  `json:"response"`
 	Error       *responsesErrorBody `json:"error"`
@@ -273,7 +297,12 @@ type responsesSSEState struct {
 	completed          bool
 	emittedToolCalls   map[string]bool
 	emittedOpaqueItems map[string]bool
-	usage              responsesUsage
+	// GitHub Copilot re-encrypts id and encrypted_content on every event, so
+	// the same reasoning item arrives with a different ciphertext in
+	// output_item.done and response.completed. output_index is the only
+	// stable identity across the two.
+	emittedOpaqueIndexes map[int]bool
+	usage                responsesUsage
 }
 
 func decodeResponsesSSE(
@@ -282,6 +311,7 @@ func decodeResponsesSSE(
 ) (responsesUsage, error) {
 	state := &responsesSSEState{
 		emittedToolCalls: make(map[string]bool), emittedOpaqueItems: make(map[string]bool),
+		emittedOpaqueIndexes: make(map[int]bool),
 	}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64<<10), maxResponsesSSEEventBytes)
@@ -366,7 +396,10 @@ func (s *responsesSSEState) handleEvent(
 		s.sawReasoningDelta = true
 		return emit(&schema.Message{Role: schema.Assistant, ReasoningContent: event.Delta})
 	case "response.output_item.done":
-		return s.emitItem(event.Item, event.OutputIndex, emit)
+		if event.OutputIndex == nil {
+			return s.emitItem(event.Item, 0, false, emit)
+		}
+		return s.emitItem(event.Item, *event.OutputIndex, true, emit)
 	case "response.completed", "response.incomplete":
 		if event.Response == nil {
 			return fmt.Errorf("responses API completion event is missing response")
@@ -417,17 +450,17 @@ func (s *responsesSSEState) emitEnvelopeFallback(
 		switch item.Type {
 		case "message":
 			if !s.sawTextDelta && !s.emittedTextItem {
-				if err := s.emitItem(raw, outputIndex, emit); err != nil {
+				if err := s.emitItem(raw, outputIndex, true, emit); err != nil {
 					return err
 				}
 			}
 		case "reasoning":
-			if err := s.emitItem(raw, outputIndex, emit); err != nil {
+			if err := s.emitItem(raw, outputIndex, true, emit); err != nil {
 				return err
 			}
 		case "function_call":
 			if !s.emittedToolCalls[item.CallID] {
-				if err := s.emitItem(raw, outputIndex, emit); err != nil {
+				if err := s.emitItem(raw, outputIndex, true, emit); err != nil {
 					return err
 				}
 			}
@@ -445,6 +478,7 @@ func (s *responsesSSEState) emitEnvelopeFallback(
 func (s *responsesSSEState) emitItem(
 	raw json.RawMessage,
 	outputIndex int,
+	indexKnown bool,
 	emit func(*schema.Message) error,
 ) error {
 	message, err := messageFromResponsesItem(raw, outputIndex)
@@ -476,10 +510,13 @@ func (s *responsesSSEState) emitItem(
 			s.emittedReasoning = true
 		}
 		if item.EncryptedContent != "" {
-			if s.emittedOpaqueItems[item.EncryptedContent] {
+			if s.emittedOpaqueItems[item.EncryptedContent] || (indexKnown && s.emittedOpaqueIndexes[outputIndex]) {
 				message.Extra = nil
 			} else {
 				s.emittedOpaqueItems[item.EncryptedContent] = true
+				if indexKnown {
+					s.emittedOpaqueIndexes[outputIndex] = true
+				}
 			}
 		}
 	case "function_call":
