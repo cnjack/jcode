@@ -198,6 +198,19 @@ func (f *FakeBackend) ReadClipboard(context.Context) (string, error) {
 
 func (f *FakeBackend) Perform(_ context.Context, act Action) error {
 	f.mu.Lock()
+	// Mirror the native helper: raw keyboard/pointer input brings the target
+	// forward before any event is posted; semantic AX actions reach the target
+	// in the background. The hook runs afterwards, so it can still simulate a
+	// user switching away mid-action.
+	if focusEffectOf(act) == focusTaken && f.frontmost.BundleID != act.BundleID {
+		f.frontmost = App{BundleID: act.BundleID, Name: act.BundleID, Running: true}
+		for _, a := range f.apps {
+			if a.BundleID == act.BundleID {
+				f.frontmost = a
+				break
+			}
+		}
+	}
 	hook := f.PerformHook
 	f.mu.Unlock()
 	if hook != nil {

@@ -61,6 +61,14 @@ type Session struct {
 	// difference between rejecting a click and landing it on the wrong button.
 	// See uitree.Snapshot.
 	uidSeq int
+	// lastApp is the app this session most recently observed (open, snapshot or
+	// screenshot). An action with neither app nor uid falls back to it when the
+	// frontmost app is not granted — typically jcode's own window, which the
+	// user had to click to approve the call.
+	lastApp string
+	// names caches display names seen from the backend, for messages about
+	// apps that are not currently frontmost.
+	names map[string]string
 
 	maxBatch int
 }
@@ -75,6 +83,7 @@ func newSession(mgr *Manager, b Backend) *Session {
 		prevText:      map[string]string{},
 		dirty:         map[string]bool{},
 		observedEpoch: map[string]uint64{},
+		names:         map[string]string{},
 		backendGen:    backendGeneration(b),
 		maxBatch:      mgr.MaxBatch(),
 	}
@@ -201,38 +210,41 @@ func (s *Session) TierFor(bundleID string) Tier {
 	return base
 }
 
-// FrontmostBundle returns the bundle id of the focused app, or "" if it cannot
-// be determined. Feeds the approval layer, which needs the live app identity
-// because a click carries no bundle id in its args — exactly the reason
-// browser-use reads the origin from the live session rather than from args.
-func (s *Session) FrontmostBundle(ctx context.Context) string {
+// ActTargets returns the bundle ids a computer_act call would act on, resolved
+// exactly as Act resolves them (see resolveTarget). Feeds the approval layer:
+// per-app interact permission must be checked against the app the input will
+// reach, which is not necessarily the frontmost one — while the user approves
+// the call in jcode, jcode itself is frontmost. Returns nil when any target
+// cannot be named; an unnamed app is one the user cannot have approved.
+func (s *Session) ActTargets(ctx context.Context, steps []ActRequest) []string {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.mgr.uiMu.Lock()
 	defer s.mgr.uiMu.Unlock()
 	if _, err := s.refreshPolicyLocked(); err != nil {
-		return ""
+		return nil
 	}
-	app, err := s.backend.Frontmost(ctx)
+	front, err := s.frontmost(ctx)
 	if err != nil {
-		return ""
+		return nil
 	}
-	s.syncBackendGeneration()
-	return app.BundleID
+	seen := map[string]bool{}
+	out := make([]string, 0, 1)
+	for _, st := range steps {
+		target := s.resolveTarget(st, front)
+		if target.BundleID == "" {
+			return nil
+		}
+		if !seen[target.BundleID] {
+			seen[target.BundleID] = true
+			out = append(out, target.BundleID)
+		}
+	}
+	return out
 }
 
-// gate is the enforcement point, and it runs immediately before every single
-// action — including each step inside a batch.
-//
-// This is forced by the input model, not chosen. A synthesized event is
-// delivered to whatever holds focus; the coordinate carries no target identity.
-// There is no "click in app X" primitive at the event layer, only "click at
-// (x,y), wherever that lands". So the only sound question is: at this instant,
-// is the frontmost app allowed, and at what tier?
-//
-// Checking once per batch instead would be a TOCTOU hole: step 2 switches apps,
-// steps 3..20 land somewhere unapproved.
-func (s *Session) gate(ctx context.Context, action string) (App, error) {
+// frontmost reads the focused app.
+func (s *Session) frontmost(ctx context.Context) (App, error) {
 	front, err := s.backend.Frontmost(ctx)
 	if err != nil {
 		// interpretErr first: a locked screen or a user takeover reported here
@@ -245,20 +257,107 @@ func (s *Session) gate(ctx context.Context, action string) (App, error) {
 		return App{}, fmt.Errorf("cannot determine the frontmost app: %w", err)
 	}
 	s.syncBackendGeneration()
+	if front.BundleID != "" && front.Name != "" {
+		s.mu.Lock()
+		s.names[front.BundleID] = front.Name
+		s.mu.Unlock()
+	}
+	return front, nil
+}
+
+// resolveTarget names the app one step acts on: the explicit app, else the app
+// whose latest snapshot minted the uid, else the frontmost app when it is
+// granted, else the app this session last observed.
+//
+// Only the frontmost fallback depends on focus. It cannot be the rule: approving
+// a computer_act means clicking in jcode, so jcode is frontmost when every
+// approved call starts. The target is always an identity taken from session
+// state, never re-read from the model's display text.
+func (s *Session) resolveTarget(st ActRequest, front App) App {
 	s.mu.Lock()
-	allowed := s.allow[front.BundleID]
+	defer s.mu.Unlock()
+	bundle := strings.TrimSpace(st.App)
+	if bundle == "" && st.UID != "" {
+		// uids are minted from one session-wide counter and never rebound, so
+		// at most one app's latest snapshot can hold a given uid.
+		for b, snap := range s.snaps {
+			if _, ok := snap.UIDs[st.UID]; ok {
+				bundle = b
+				break
+			}
+		}
+	}
+	if bundle == "" {
+		if s.allow[front.BundleID] || s.lastApp == "" {
+			return front
+		}
+		bundle = s.lastApp
+	}
+	if bundle == front.BundleID {
+		return front
+	}
+	name := s.names[bundle]
+	if name == "" {
+		name = bundle
+	}
+	return App{BundleID: bundle, Name: name, Running: true}
+}
+
+// gate is the enforcement point, and it runs immediately before every single
+// action — including each step inside a batch: is the target app granted, and
+// does its tier permit this action?
+//
+// Checking once per batch instead would be a TOCTOU hole: a policy change or a
+// step that targets a different app must not ride an earlier step's check.
+//
+// The gate no longer asks "is the target frontmost". A synthesized event still
+// goes to whatever holds focus, so the backend owns that invariant at the
+// mutation boundary: semantic AX actions address the target's element
+// directly, and raw input first brings the target forward, then re-checks the
+// frontmost app immediately before posting each event.
+func (s *Session) gate(target App, action string) error {
+	s.mu.Lock()
+	allowed := s.allow[target.BundleID]
 	s.mu.Unlock()
 	if !allowed {
-		return App{}, &NotAllowedError{BundleID: front.BundleID, AppName: front.Name}
+		return &NotAllowedError{BundleID: target.BundleID, AppName: target.Name}
 	}
-	tier := s.TierFor(front.BundleID)
+	tier := s.TierFor(target.BundleID)
 	if !tier.Allows(action) {
-		return App{}, &TierError{
-			BundleID: front.BundleID, AppName: front.Name,
+		return &TierError{
+			BundleID: target.BundleID, AppName: target.Name,
 			Tier: tier, Action: action,
 		}
 	}
-	return front, nil
+	return nil
+}
+
+// focusEffect describes what an action does to keyboard focus, so a batch can
+// tell a focus change it caused from one the user caused.
+type focusEffect int
+
+const (
+	// focusKept: a semantic AX action on a referenced element. It reaches the
+	// target in the background and leaves focus alone.
+	focusKept focusEffect = iota
+	// focusMaybe: AX first (AXPress/AXShowMenu); only the raw-click fallback
+	// brings the target forward.
+	focusMaybe
+	// focusTaken: raw keyboard/pointer input. The backend brings the target
+	// forward before posting it.
+	focusTaken
+)
+
+func focusEffectOf(act Action) focusEffect {
+	switch act.Kind {
+	case "set_value", "menu", "select_text":
+		return focusKept
+	case "click", "rclick":
+		if act.Ref != 0 {
+			return focusMaybe
+		}
+	}
+	return focusTaken
 }
 
 // checkAllowed gates a read against the allowlist only (reads are TierRead, and
@@ -364,6 +463,7 @@ func (s *Session) snapshotLocked(ctx context.Context, bundleID, filter string, m
 	s.uidSeq = snap.NextUID
 	s.snaps[bundleID] = snap
 	s.prevText[bundleID] = snap.Text
+	s.lastApp = bundleID
 	delete(s.dirty, bundleID)
 	s.observedEpoch[bundleID] = s.mgr.uiEpoch
 	s.mu.Unlock()
@@ -430,6 +530,7 @@ func (s *Session) ScreenshotVisual(ctx context.Context, bundleID string) (Screen
 	delete(s.snaps, bundleID)
 	delete(s.prevText, bundleID)
 	delete(s.dirty, bundleID)
+	s.lastApp = bundleID
 	s.observedEpoch[bundleID] = s.mgr.uiEpoch
 	s.mu.Unlock()
 	return shot, nil
@@ -437,6 +538,9 @@ func (s *Session) ScreenshotVisual(ctx context.Context, bundleID string) (Screen
 
 // ActRequest is one action as the model expressed it.
 type ActRequest struct {
+	// App optionally names the target bundle id. See resolveTarget for the
+	// default.
+	App       string   `json:"app"`
 	Action    string   `json:"action"`
 	UID       string   `json:"uid"`
 	Value     string   `json:"value"`
@@ -491,6 +595,12 @@ func (s *Session) Act(ctx context.Context, steps []ActRequest) (string, error) {
 	}()
 
 	var log strings.Builder
+	// expectFront is the set of apps that may legitimately be frontmost when the
+	// next step starts: whatever was in front when the batch began, plus apps
+	// this batch itself brought forward. Anything else means focus moved under
+	// us — the user switched apps — and the batch must stop rather than take
+	// focus back from the person at the keyboard.
+	expectFront := map[string]bool{}
 	for i, st := range steps {
 		// Normalize the action ONCE, here, and use that single value for the
 		// gate, the flag check and the payload alike.
@@ -506,9 +616,19 @@ func (s *Session) Act(ctx context.Context, steps []ActRequest) (string, error) {
 		if st.Action == "" {
 			return log.String(), fmt.Errorf("step %d: action is required", i+1)
 		}
-		// Re-gate before every step. See gate().
-		front, err := s.gate(ctx, st.Action)
+		front, err := s.frontmost(ctx)
 		if err != nil {
+			return log.String(), fmt.Errorf("step %d of %d refused: %w", i+1, len(steps), err)
+		}
+		if i == 0 {
+			expectFront[front.BundleID] = true
+		} else if !expectFront[front.BundleID] {
+			return log.String(), fmt.Errorf("step %d of %d: %w: %q came to the front during this batch",
+				i+1, len(steps), ErrControlInterrupted, front.Name)
+		}
+		target := s.resolveTarget(st, front)
+		// Re-gate before every step. See gate().
+		if err := s.gate(target, st.Action); err != nil {
 			return log.String(), fmt.Errorf("step %d of %d refused: %w", i+1, len(steps), err)
 		}
 		if err := s.checkFlags(st); err != nil {
@@ -516,15 +636,15 @@ func (s *Session) Act(ctx context.Context, steps []ActRequest) (string, error) {
 		}
 		var resolvedRef int64
 		if st.UID != "" {
-			ref, err := s.resolveUID(front.BundleID, st.UID)
+			ref, err := s.resolveUID(target.BundleID, st.UID)
 			if err != nil {
 				return log.String(), fmt.Errorf("step %d of %d: %w", i+1, len(steps), err)
 			}
 			resolvedRef = ref
 		}
 		s.mu.Lock()
-		needsSnapshot := s.dirty[front.BundleID]
-		observedEpoch, observed := s.observedEpoch[front.BundleID]
+		needsSnapshot := s.dirty[target.BundleID]
+		observedEpoch, observed := s.observedEpoch[target.BundleID]
 		s.mu.Unlock()
 		if needsSnapshot {
 			return log.String(), fmt.Errorf(
@@ -538,9 +658,9 @@ func (s *Session) Act(ctx context.Context, steps []ActRequest) (string, error) {
 		}
 
 		act := Action{
-			// The target is the *verified* frontmost app, not anything the model
-			// supplied. Identity is resolved once, here, at the gate.
-			BundleID:  front.BundleID,
+			// The target is the gated app resolved above from session state, not
+			// a display name the model supplied. Identity is resolved once, here.
+			BundleID:  target.BundleID,
 			Kind:      st.Action,
 			UID:       st.UID,
 			Value:     st.Value,
@@ -559,11 +679,20 @@ func (s *Session) Act(ctx context.Context, steps []ActRequest) (string, error) {
 			Pages:     st.Pages,
 		}
 		act.Ref = resolvedRef
-		touched[front.BundleID] = true
+		touched[target.BundleID] = true
 		if err := s.backend.Perform(ctx, act); err != nil {
 			return log.String(), fmt.Errorf("step %d of %d: %w", i+1, len(steps), interpretErr(err))
 		}
-		fmt.Fprintf(&log, "%d. %s%s in %q\n", i+1, st.Action, uidSuffix(st), front.Name)
+		switch focusEffectOf(act) {
+		case focusTaken:
+			expectFront = map[string]bool{target.BundleID: true}
+		default:
+			// An AX action may make its own app activate itself (a button that
+			// opens a window). That is the app this batch is driving, not the
+			// user switching away; HID input still re-checks per event.
+			expectFront[target.BundleID] = true
+		}
+		fmt.Fprintf(&log, "%d. %s%s in %q\n", i+1, st.Action, uidSuffix(st), target.Name)
 	}
 	fmt.Fprintf(&log, "(%d/%d actions completed)", len(steps), len(steps))
 	return log.String(), nil

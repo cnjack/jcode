@@ -1722,7 +1722,7 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
 		return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
 	})
-	approvalState.SetComputerAppFunc(env.CurrentComputerApp)
+	approvalState.SetComputerTargetsFunc(env.ComputerActTargets)
 	st.approvalState = approvalState
 
 	// Provide the config/platform needed to lazily build the LLM reviewer when

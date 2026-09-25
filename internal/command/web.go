@@ -539,13 +539,12 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		// the active tab's origin from THIS task's session.
 		tappr.SetBrowserOriginFunc(tenv.CurrentBrowserOrigin)
 
-		// Same shape for computer use: origin ↔ bundle id, and computer_act's
-		// args carry no app identity, so the frontmost app must come from THIS
-		// task's session.
+		// Same shape for computer use: origin ↔ bundle id. computer_act's target
+		// apps (from its uid/app args) are resolved by THIS task's session.
 		tappr.SetComputerPermFunc(func(bundleID, class string) bool {
 			return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
 		})
-		tappr.SetComputerAppFunc(tenv.CurrentComputerApp)
+		tappr.SetComputerTargetsFunc(tenv.ComputerActTargets)
 
 		// Wire THIS task's todo/goal stores to THIS task's recorder + handler, so
 		// todos persist on resume and goal changes reach the task's UI and session

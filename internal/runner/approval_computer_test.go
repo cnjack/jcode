@@ -40,10 +40,10 @@ func TestDecideComputerAppPermission(t *testing.T) {
 	}
 }
 
-// computer_act carries no app identity in its args — a click is just a click —
-// so the per-app check must read the frontmost app from the live session. This
-// is the exact counterpart of TestDecideBrowserInteractUsesSessionOrigin.
-func TestDecideComputerInteractUsesLiveApp(t *testing.T) {
+// computer_act's target apps come from the session's resolution of the args
+// (explicit app, or the app whose snapshot minted the uid) — not whichever
+// window is frontmost, which during approval is jcode itself.
+func TestDecideComputerInteractUsesResolvedTargets(t *testing.T) {
 	s := NewApprovalState("/tmp", false)
 	var asked []string
 	s.SetComputerPermFunc(func(bundleID, class string) bool {
@@ -51,23 +51,36 @@ func TestDecideComputerInteractUsesLiveApp(t *testing.T) {
 		return bundleID == "com.apple.Notes" && class == "interact"
 	})
 
-	// No app provider → unknown app → must prompt, never auto-approve.
+	// No resolver → unknown app → must prompt, never auto-approve.
 	if got := s.decide("computer_act", `{"action":"click"}`); got != decisionPrompt {
-		t.Errorf("computer_act with an unknown frontmost app must prompt, got %v", got)
+		t.Errorf("computer_act with an unknown target must prompt, got %v", got)
 	}
 
-	s.SetComputerAppFunc(func() string { return "com.apple.Notes" })
-	if got := s.decide("computer_act", `{"action":"click"}`); got != decisionAutoApprove {
-		t.Errorf("computer_act on a pre-approved frontmost app should auto-approve, got %v", got)
+	var gotArgs string
+	s.SetComputerTargetsFunc(func(args string) []string {
+		gotArgs = args
+		return []string{"com.apple.Notes"}
+	})
+	if got := s.decide("computer_act", `{"action":"click","uid":"e1"}`); got != decisionAutoApprove {
+		t.Errorf("computer_act on a pre-approved target should auto-approve, got %v", got)
+	}
+	if gotArgs != `{"action":"click","uid":"e1"}` {
+		t.Errorf("the resolver did not receive the tool args: %q", gotArgs)
 	}
 	if len(asked) == 0 || asked[len(asked)-1] != "com.apple.Notes/interact" {
-		t.Errorf("the permission check did not use the live frontmost app: %v", asked)
+		t.Errorf("the permission check did not use the resolved target: %v", asked)
 	}
 
-	// A different frontmost app is a different decision, even with identical args.
-	s.SetComputerAppFunc(func() string { return "com.googlecode.iterm2" })
+	// A different target is a different decision, even with identical args.
+	s.SetComputerTargetsFunc(func(string) []string { return []string{"com.googlecode.iterm2"} })
 	if got := s.decide("computer_act", `{"action":"click"}`); got != decisionPrompt {
-		t.Errorf("computer_act must prompt when the frontmost app is not pre-approved, got %v", got)
+		t.Errorf("computer_act must prompt when the target is not pre-approved, got %v", got)
+	}
+
+	// A batch spanning apps is auto-approved only if every app is.
+	s.SetComputerTargetsFunc(func(string) []string { return []string{"com.apple.Notes", "com.googlecode.iterm2"} })
+	if got := s.decide("computer_act", `{"steps":[]}`); got != decisionPrompt {
+		t.Errorf("a batch touching a non-approved app must prompt, got %v", got)
 	}
 }
 
@@ -75,10 +88,10 @@ func TestDecideComputerInteractUsesLiveApp(t *testing.T) {
 func TestDecideComputerEmptyAppNeverPreapproves(t *testing.T) {
 	s := NewApprovalState("/tmp", false)
 	s.SetComputerPermFunc(func(string, string) bool { return true }) // maximally permissive
-	s.SetComputerAppFunc(func() string { return "" })
+	s.SetComputerTargetsFunc(func(string) []string { return nil })
 
 	if got := s.decide("computer_act", `{"action":"click"}`); got != decisionPrompt {
-		t.Error("an empty bundle id must never pre-approve, even with a permissive hook")
+		t.Error("an unresolved target must never pre-approve, even with a permissive hook")
 	}
 	if got := s.decide("computer_open", `{"app":"  "}`); got != decisionPrompt {
 		t.Error("a blank app arg must never pre-approve")

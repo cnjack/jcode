@@ -74,10 +74,24 @@ user than driving pixels.
 - You do not need to wait or sleep between an action and the next snapshot. The runtime
   already waits for the UI to settle.
 
-## Tiers — what you may do depends on which app is in front
+## Which app an action reaches
+
+jcode itself is usually the frontmost window, because the user approves your calls in
+it. `computer_act` therefore does **not** act on "whatever is in front":
+
+- A **uid names its app.** `click`/`set_value`/`menu`/`select_text` on a uid go to the
+  app whose snapshot minted that uid, and most of them work in the background without
+  stealing focus.
+- **Keyboard and pointer input** (`type`, `press`, coordinate clicks, `dblclick`,
+  `hover`, `scroll`, `drag`) brings the target app to the front first, then sends input.
+- When an action has no uid, pass **`app=<bundle id>`** (for example
+  `app=com.apple.calculator` for `press`/`type`). Without it, the target is the frontmost
+  app if it is granted, otherwise the app you last opened or snapshotted.
+
+## Tiers — what you may do depends on the target app
 
 Every app has a tier, shown in `computer_apps` and in each snapshot header. The tier is
-checked **at the moment of the action**, against whichever app is frontmost then.
+checked **at the moment of the action**, against the app that action targets.
 
 - **`full`** — most apps. Everything is permitted.
 - **`click`** — terminals and IDEs (Terminal, iTerm, VS Code, Xcode, JetBrains, …).
@@ -119,8 +133,9 @@ via a different app, is working against the user's safety, not around a bug.
 If a tool reports that computer control was interrupted, **the user took over** — they
 moved the mouse, switched apps, or stopped you. Stop computer work and say so plainly
 ("Looks like you took over — I've stopped."). Do not fight for control of the machine
-someone is sitting at. A frontmost-app change is also a takeover signal and is checked
-before every action. Do not assume every mouse movement inside the same app can be
+someone is sitting at. Within a batch, another app coming to the front (other than the
+one jcode just activated) is a takeover signal, and keyboard/pointer events re-check the
+frontmost app before each event. Do not assume every mouse movement inside the same app can be
 detected; observe fresh state and stop if it no longer matches the intended workflow. If
 the screen is locked, stop entirely; an agent driving a machine its owner believes is
 secured is not something to work around.
