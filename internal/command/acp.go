@@ -706,7 +706,7 @@ func (a *acpAgent) buildAgentSession(
 	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
 		return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
 	})
-	approvalState.SetComputerAppFunc(env.CurrentComputerApp)
+	approvalState.SetComputerTargetsFunc(env.ComputerActTargets)
 
 	approvalState.SetHandler(acpHandler)
 

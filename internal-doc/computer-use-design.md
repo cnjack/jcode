@@ -448,18 +448,39 @@ unknown bundle id) breaks every third-party app and trains users to override.
 Users may **tighten** a tier per-app in settings; **loosening below the table's
 value requires an explicit per-app override with a warning.**
 
-### 4.3 Layer 3 — frontmost check at action time
+### 4.3 Layer 3 — target check at action time
 
 Checked immediately before **every** action, including each step inside a batch.
 
-This is **forced by the input model, not chosen.** A synthesized CGEvent is
-delivered to whatever currently holds focus — the coordinate carries no target
-identity. There is no "click in app X" primitive at the event layer; there is
-only "click at (x,y), wherever that lands". So the only sound enforcement point
-is: at the instant of the action, is the frontmost app allowed, and at what tier?
+Each step names its **target app** explicitly — the `app` arg, else the app whose
+snapshot minted the uid (uids are session-unique), else the frontmost app if
+granted, else the last observed app. The target, not "whatever is frontmost",
+is what gets allowlist- and tier-checked. This matters in practice: while the
+user approves a call, jcode itself is frontmost, so gating the frontmost app
+would retarget every uid at jcode.
 
-Anything less is a TOCTOU hole: check at batch start, app switches at step 2,
-steps 3–20 land in an unapproved app.
+Delivery then depends on the input class (`focusEffectOf` in Go mirrors the
+daemon's `handlePerform`):
+
+- **AX mutations** (`set_value`, `menu`, `select_text`, and `click`/`rclick` on
+  a ref via AXPress/AXShowMenu) address an element of the target process
+  directly and work in the background.
+- **HID input** (`type`, `press`, coordinates, `dblclick`, `hover`, `scroll`,
+  `drag`, and ref clicks with no AX action) is delivered to whatever holds
+  focus — a CGEvent carries no target identity. The daemon first brings the
+  target forward (macOS 14+ cooperative activation ignores
+  `NSRunningApplication.activate()` from a background process, so it uses
+  AXFrontmost, then LaunchServices via `/usr/bin/open -b`), re-verifies the
+  bound window, and re-checks `requireFrontmost` before **every event**.
+
+Takeover detection: within a batch, any app coming to the front other than a
+target jcode just activated aborts with a takeover; the per-event frontmost
+check covers the gap between activation and input. Accepted gap: the first step
+of a new call may activate its target even if the user switched away between
+calls.
+
+Anything less than per-event checking for HID input is a TOCTOU hole: check at
+batch start, app switches at step 2, steps 3–20 land in an unapproved app.
 
 Codex hits the same problem and solves it differently — its policy wrapper
 **re-pins the approved `appPath` over the user-supplied `app` string** and
@@ -477,10 +498,9 @@ Reuses `decideBrowser`'s exact structure (`runner/approval.go:341-373`) as
 - **read-only tier** → the shared `noApprovalNeeded` map: `computer_snapshot`,
   `computer_screenshot`, `computer_apps`.
 - `computer_open` → per-app preapproval, class `launch`.
-- `computer_act` → per-app preapproval, class `interact`, **app identity from
-  the live session, not from args** — a click carries no bundle id. This mirrors
-  `browserActiveOrigin()` (`approval.go:356`) precisely, and for the identical
-  reason.
+- `computer_act` → per-app preapproval, class `interact`, for **every target
+  app the session resolves from the args** (`Session.ActTargets`, the same
+  resolution `Act` uses). An unresolvable target always prompts.
 - `computer_read kind=clipboard` → **always prompt**, never preapprovable. The
   clipboard holds passwords; users copy them constantly.
 
@@ -490,7 +510,7 @@ whole approval structure transfers:
 | browser-use                | computer-use              |
 |----------------------------|---------------------------|
 | origin (`https://x.com`)   | bundle id (`com.apple.Notes`) |
-| `SetBrowserOriginFunc`     | `SetComputerAppFunc`      |
+| `SetBrowserOriginFunc`     | `SetComputerTargetsFunc`  |
 | `SetBrowserPermFunc`       | `SetComputerPermFunc`     |
 | `BrowserSitePermission`    | `ComputerAppPermission`   |
 | class: navigate / interact | class: launch / interact / clipboard |

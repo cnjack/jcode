@@ -325,7 +325,9 @@ func handleLaunch(_ req: AppRequest) throws {
     cfg.activates = true
     let sem = DispatchSemaphore(value: 0)
     var launchErr: Error?
-    NSWorkspace.shared.openApplication(at: url, configuration: cfg) { _, err in
+    var launched: NSRunningApplication?
+    NSWorkspace.shared.openApplication(at: url, configuration: cfg) { app, err in
+        launched = app
         launchErr = err
         sem.signal()
     }
@@ -333,6 +335,10 @@ func handleLaunch(_ req: AppRequest) throws {
         throw DaemonError(code: Code.unknown, message: "launch timed out after 10 seconds")
     }
     if let e = launchErr { throw DaemonError(code: Code.unknown, message: e.localizedDescription) }
+    // cfg.activates is ignored for a background caller on macOS 14+, and the
+    // user asked to open this app, so bring it forward. Best effort: later
+    // actions activate on demand and surface their own errors.
+    if let app = launched { try? bringToFront(app) }
 }
 
 func handleReadClipboard() -> ReadClipboardResult {
@@ -820,34 +826,34 @@ func handlePerform(_ req: PerformRequest, _ session: Session) throws {
     try requireAccessibilityTrusted()
     try checkScreenUnlocked()
     let a = req.action
-    // The Go tier gate and this dispatch are separate RPCs. Re-check in the
-    // process that actually posts input so a focus switch in between cannot
-    // route a key/click into an ungranted app.
-    let front = try requireFrontmost(a.bundle_id)
-    let currentRoot = accessibilityRoot(front)
-    guard session.matchesBoundWindow(
-        a.bundle_id, processIdentifier: front.processIdentifier, rootWindow: currentRoot) else {
-        throw DaemonError(code: Code.userIntervened,
-                          message: "process or focused window changed since the last snapshot/screenshot")
-    }
+    // The Go side resolved and tier-gated this exact bundle id. Re-resolve the
+    // process here and pin it to the window the last observation bound, so a
+    // relaunch or window switch in between cannot retarget refs/coordinates.
+    let target = try runningApp(a.bundle_id)
+    try requireBoundWindow(a.bundle_id, target, session)
+    // Focus classes mirror internal/computer focusEffectOf: set_value/menu/
+    // select_text are pure AX and keep focus; click/rclick on a ref try AX
+    // first; everything else is HID input and needs the target in front.
     switch a.kind {
     case "set_value":
         guard let ref = a.ref, let el = session.boundRegistry(for: a.bundle_id)?.element(ref) else {
             throw DaemonError(code: Code.accessibilityError, message: "no live element for ref")
         }
-        try requireFrontmost(a.bundle_id)
         let r = AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, (a.value ?? "") as CFString)
         if r != .success { throw mutationAXError("set_value", r) }
     case "menu":
         guard let ref = a.ref, let el = session.boundRegistry(for: a.bundle_id)?.element(ref), let name = a.name else {
             throw DaemonError(code: Code.accessibilityError, message: "menu needs a live element and an action name")
         }
-        try requireFrontmost(a.bundle_id)
         let r = AXUIElementPerformAction(el, name as CFString)
         if r != .success { throw mutationAXError("action \(name)", r) }
+    case "click" where a.ref != nil, "rclick" where a.ref != nil:
+        try performRefClick(a, target, session)
     case "click", "dblclick", "rclick":
-        try performClick(a, session)
+        try foregroundTarget(a.bundle_id, target, session)
+        try synthClick(kind: a.kind, at: actionPoint(a, session), bundleID: a.bundle_id)
     case "hover":
+        try foregroundTarget(a.bundle_id, target, session)
         let point = try actionPoint(a, session)
         guard let event = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
                                   mouseCursorPosition: point, mouseButton: .left) else {
@@ -856,20 +862,23 @@ func handlePerform(_ req: PerformRequest, _ session: Session) throws {
         try requireFrontmost(a.bundle_id)
         event.post(tap: .cghidEventTap)
     case "drag":
+        try foregroundTarget(a.bundle_id, target, session)
         try synthDrag(a, session)
     case "type":
+        try foregroundTarget(a.bundle_id, target, session)
         try focusReferencedElement(a, session)
         try synthType(a.text ?? "", bundleID: a.bundle_id)
     case "press":
+        try foregroundTarget(a.bundle_id, target, session)
         try synthKey(a.key ?? "", bundleID: a.bundle_id)
     case "scroll":
+        try foregroundTarget(a.bundle_id, target, session)
         try synthScroll(a, session)
     case "select_text":
         guard let ref = a.ref, let el = session.boundRegistry(for: a.bundle_id)?.element(ref) else {
             throw DaemonError(code: Code.accessibilityError, message: "select_text needs a live element")
         }
         let text = a.value ?? ""
-        try requireFrontmost(a.bundle_id)
         var result = AXUIElementSetAttributeValue(el, kAXSelectedTextAttribute as CFString, text as CFString)
         if result == .cannotComplete { throw mutationAXError("select_text", result) }
         if result != .success {
@@ -935,6 +944,102 @@ func requireFrontmost(_ bundleID: String) throws -> NSRunningApplication {
                           message: "frontmost app changed before input; expected \(bundleID)")
     }
     return front
+}
+
+// MARK: - Target activation
+//
+// Actions name their target app explicitly; the daemon does not infer it from
+// whatever is frontmost (while the user approves a call, jcode itself is). AX
+// mutations (AXPress, AXValue, named actions) reach a background app directly.
+// Synthesized HID events go to whatever holds focus, so those first bring the
+// target forward — and every event still re-checks requireFrontmost, which is
+// what turns a user switching away mid-action into a takeover.
+
+func isFrontmost(_ app: NSRunningApplication) -> Bool {
+    NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
+}
+
+func waitFrontmost(_ app: NSRunningApplication, timeout: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if isFrontmost(app) { return true }
+        Thread.sleep(forTimeInterval: 0.03)
+    }
+    return isFrontmost(app)
+}
+
+// openBundleInForeground asks LaunchServices (via /usr/bin/open) to activate
+// the app. macOS 14+ cooperative activation ignores NSRunningApplication
+// .activate() from a background process like this daemon; LaunchServices
+// activation is still honored. stdio goes to /dev/null so the child can never
+// write into the RPC stream.
+func openBundleInForeground(_ bundleID: String) {
+    var actions: posix_spawn_file_actions_t? = nil
+    guard posix_spawn_file_actions_init(&actions) == 0 else { return }
+    defer { posix_spawn_file_actions_destroy(&actions) }
+    for fd in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] {
+        posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", fd == STDIN_FILENO ? O_RDONLY : O_WRONLY, 0)
+    }
+    let exe = "/usr/bin/open"
+    var argv: [UnsafeMutablePointer<CChar>?] = [exe, "-b", bundleID].map { strdup($0) } + [nil]
+    defer { for a in argv { free(a) } }
+    var pid = pid_t()
+    guard posix_spawn(&pid, exe, &actions, nil, &argv, _NSGetEnviron()!.pointee) == 0 else { return }
+    let child = WorkerProcess(pid: pid)
+    let deadline = Date().addingTimeInterval(3)
+    while child.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+    if child.isRunning {
+        child.killNow()
+        child.reapInBackground()
+    }
+}
+
+// bringToFront activates the target app and raises its focused window.
+// Layered because no single mechanism is reliable from a background process:
+// AXFrontmost first (quiet, no side effects), then LaunchServices.
+func bringToFront(_ app: NSRunningApplication) throws {
+    let bundleID = app.bundleIdentifier ?? "pid \(app.processIdentifier)"
+    if !isFrontmost(app) {
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        _ = AXUIElementSetAttributeValue(axApp, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        if !waitFrontmost(app, timeout: 0.3) {
+            _ = app.activate(options: [])
+            if let bundle = app.bundleIdentifier { openBundleInForeground(bundle) }
+            guard waitFrontmost(app, timeout: 1.5) else {
+                throw DaemonError(code: Code.accessibilityError,
+                                  message: "could not bring \(bundleID) to the front for keyboard/pointer input; prefer uid actions (click/set_value work in the background) or ask the user to switch to it")
+            }
+        }
+        // Frontmost flips before the window server finishes moving key focus;
+        // give it a beat so the first event is not delivered to the old window.
+        Thread.sleep(forTimeInterval: 0.15)
+    }
+    let window = accessibilityRoot(app)
+    _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+    _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+}
+
+// requireBoundWindow checks that the target is still the process and window the
+// last snapshot/screenshot observed, so refs and coordinates mean what the
+// model saw.
+func requireBoundWindow(_ bundleID: String, _ app: NSRunningApplication, _ session: Session) throws {
+    guard session.matchesBoundWindow(
+        bundleID, processIdentifier: app.processIdentifier, rootWindow: accessibilityRoot(app)) else {
+        throw DaemonError(code: Code.userIntervened,
+                          message: "process or focused window changed since the last snapshot/screenshot")
+    }
+}
+
+// foregroundTarget brings the target forward for HID input and re-verifies the
+// bound window: activation can surface a different window (or a reopen event
+// can create one), and input must not land in a window the model never saw.
+func foregroundTarget(_ bundleID: String, _ app: NSRunningApplication, _ session: Session) throws {
+    try bringToFront(app)
+    guard session.matchesBoundWindow(
+        bundleID, processIdentifier: app.processIdentifier, rootWindow: accessibilityRoot(app)) else {
+        throw DaemonError(code: Code.accessibilityError,
+                          message: "\(bundleID) showed a different window when it came to the front; take a fresh computer_snapshot and retry")
+    }
 }
 
 func focusedWindowFrame(_ bundleID: String) throws -> CGRect {
@@ -1011,30 +1116,24 @@ func actionPoint(_ a: ActionWire, _ session: Session) throws -> CGPoint {
     return point
 }
 
-func performClick(_ a: ActionWire, _ session: Session) throws {
-    if let ref = a.ref {
-        guard let el = session.boundRegistry(for: a.bundle_id)?.element(ref) else {
-            throw DaemonError(code: Code.accessibilityError, message: "no live element for ref")
-        }
-        if a.kind == "click" {
-            try requireFrontmost(a.bundle_id)
-            let result = AXUIElementPerformAction(el, kAXPressAction as CFString)
-            if result == .success { return }
-            if result == .cannotComplete { throw mutationAXError("click", result) }
-        }
-        if a.kind == "rclick" {
-            try requireFrontmost(a.bundle_id)
-            let result = AXUIElementPerformAction(el, kAXShowMenuAction as CFString)
-            if result == .success { return }
-            if result == .cannotComplete { throw mutationAXError("right click", result) }
-        }
+// performRefClick presses a referenced element through Accessibility, which
+// works while the app is in the background. Only elements with no AXPress /
+// AXShowMenu fall back to a synthesized click, which needs the target in front.
+func performRefClick(_ a: ActionWire, _ target: NSRunningApplication, _ session: Session) throws {
+    guard let ref = a.ref, let el = session.boundRegistry(for: a.bundle_id)?.element(ref) else {
+        throw DaemonError(code: Code.accessibilityError, message: "no live element for ref")
     }
+    let axAction = a.kind == "rclick" ? kAXShowMenuAction : kAXPressAction
+    let result = AXUIElementPerformAction(el, axAction as CFString)
+    if result == .success { return }
+    if result == .cannotComplete { throw mutationAXError(a.kind == "rclick" ? "right click" : "click", result) }
+    try foregroundTarget(a.bundle_id, target, session)
     try synthClick(kind: a.kind, at: actionPoint(a, session), bundleID: a.bundle_id)
 }
 
 // synthClick posts a mouse click at a resolved point. Input is delivered to
 // whatever holds focus — the coordinate carries no target identity — which is
-// exactly why the Go side re-checks the frontmost app before every action.
+// exactly why every event re-checks that the target is still frontmost.
 func synthClick(kind: String, at pt: CGPoint, bundleID: String) throws {
     let (down, up, button): (CGEventType, CGEventType, CGMouseButton)
     if kind == "rclick" {
@@ -1359,7 +1458,9 @@ func requestCaptureWorkerPermission() -> String {
 
 func handleCapture(_ req: AppRequest, _ session: Session) throws -> CaptureResult {
     try checkScreenUnlocked()
-    let app = try requireFrontmost(req.app)
+    // ScreenCaptureKit captures a window by pid whether or not it is in front,
+    // so the target need not be frontmost (jcode usually is, mid-approval).
+    let app = try runningApp(req.app)
 
     guard #available(macOS 14.0, *) else {
         throw DaemonError(code: Code.unknown, message: "screenshot requires macOS 14+")
@@ -1453,7 +1554,7 @@ func handleCapture(_ req: AppRequest, _ session: Session) throws -> CaptureResul
             try? FileManager.default.removeItem(atPath: path)
             throw DaemonError(code: Code.unknown, message: "capture helper returned invalid window metadata")
         }
-        let current = try requireFrontmost(req.app)
+        let current = try runningApp(req.app)
         let currentWindow = accessibilityRoot(current)
         guard current.processIdentifier == app.processIdentifier,
               CFEqual(currentWindow, targetWindow) else {

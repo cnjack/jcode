@@ -239,25 +239,42 @@ func dispatchComputer(ctx context.Context, env *Env, sess *computer.Session, nam
 // computerAct accepts either a single action or a batch of steps, and
 // normalizes the single form into a one-step batch so there is one code path.
 func computerAct(ctx context.Context, sess *computer.Session, argsJSON string) (string, error) {
+	steps, err := parseComputerActSteps(argsJSON)
+	if err != nil {
+		return "", err
+	}
+	return sess.Act(ctx, steps)
+}
+
+// parseComputerActSteps decodes computer_act args into a batch. A top-level
+// app applies to every step that does not name its own.
+func parseComputerActSteps(argsJSON string) ([]computer.ActRequest, error) {
 	var in struct {
 		computer.ActRequest
 		Steps []computer.ActRequest `json:"steps"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+		return nil, fmt.Errorf("invalid args: %w", err)
 	}
 	steps := in.Steps
 	if len(steps) == 0 {
 		if strings.TrimSpace(in.Action) == "" {
-			return "", fmt.Errorf("give either action=... or steps=[...]")
+			return nil, fmt.Errorf("give either action=... or steps=[...]")
 		}
 		steps = []computer.ActRequest{in.ActRequest}
 	} else if strings.TrimSpace(in.Action) != "" {
 		// Both forms at once is ambiguous about ordering, and guessing would
 		// silently drop one of them.
-		return "", fmt.Errorf("give either action=... or steps=[...], not both")
+		return nil, fmt.Errorf("give either action=... or steps=[...], not both")
 	}
-	return sess.Act(ctx, steps)
+	if app := strings.TrimSpace(in.App); app != "" {
+		for i := range steps {
+			if strings.TrimSpace(steps[i].App) == "" {
+				steps[i].App = app
+			}
+		}
+	}
+	return steps, nil
 }
 
 // --- Tool schemas ---
@@ -306,12 +323,16 @@ func computerScreenshotInfo() *schema.ToolInfo {
 func computerActInfo() *schema.ToolInfo {
 	return &schema.ToolInfo{
 		Name: "computer_act",
-		Desc: "Perform one interaction, or a batch of them, on the frontmost app. " +
-			"Reference elements by the uid from the latest computer_snapshot; coordinates are a fallback for UI the " +
-			"accessibility tree cannot see. Actions: click, dblclick, rclick, hover, type, press, set_value, scroll, drag, select_text, menu. " +
+		Desc: "Perform one interaction, or a batch of them, in a granted app. " +
+			"Reference elements by the uid from the latest computer_snapshot — a uid already names its app, and uid clicks/set_value work " +
+			"even while jcode stays in front. Coordinates are a fallback for UI the accessibility tree cannot see. " +
+			"Keyboard and pointer input (type, press, coordinates, scroll, drag, hover) brings the target app to the front first. " +
+			"Pass app=<bundle id> when an action has no uid; otherwise it goes to the frontmost app if granted, else to the app you last opened or snapshotted. " +
+			"Actions: click, dblclick, rclick, hover, type, press, set_value, scroll, drag, select_text, menu. " +
 			"Pass steps=[{...},{...}] to run a predictable sequence in one call — each step is checked independently and the batch stops at the first failure or refusal. " +
-			"What is permitted depends on the frontmost app's tier: browsers are read-only (use browser_* instead) and terminals/IDEs cannot receive typed input (use execute instead).",
+			"What is permitted depends on the target app's tier: browsers are read-only (use browser_* instead) and terminals/IDEs cannot receive typed input (use execute instead).",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"app":       strParam("Target app bundle id (e.g. com.apple.calculator). Optional with a uid; recommended for keyboard input and coordinates. Applies to every step that does not set its own.", false),
 			"action":    strParam("One of: click, dblclick, rclick, hover, type, press, set_value, scroll, drag, select_text, menu.", false),
 			"uid":       strParam("Element uid from the latest snapshot (e.g. e3). Preferred over coordinates.", false),
 			"value":     strParam("New value for set_value; option text for select_text.", false),

@@ -227,23 +227,28 @@ func (e *Env) ComputerSession(ctx context.Context) (*computer.Session, error) {
 	return sess, nil
 }
 
-// CurrentComputerApp returns the bundle id of the frontmost app, or "" when no
-// session is open. The approval layer uses it to scope per-app permissions for
-// computer_act, whose args carry no app identity — a click is just a click. This
-// is the exact counterpart of CurrentBrowserOrigin, and exists for the same
-// reason.
-func (e *Env) CurrentComputerApp() string {
+// ComputerActTargets returns the bundle ids a computer_act call with these
+// args would act on, or nil when no session is open or a target cannot be
+// named. The approval layer uses it to scope per-app interact permissions: the
+// input reaches the app the uid (or explicit app) names, not whichever window
+// is frontmost — which, while the user approves the call, is jcode itself. This
+// is the counterpart of CurrentBrowserOrigin.
+func (e *Env) ComputerActTargets(toolArgs string) []string {
 	e.computerMu.Lock()
 	sess := e.computerSession
 	e.computerMu.Unlock()
 	if sess == nil {
-		return ""
+		return nil
+	}
+	steps, err := parseComputerActSteps(toolArgs)
+	if err != nil {
+		return nil
 	}
 	// Bounded: an unanswered TCC prompt presents as a multi-minute hang, and the
 	// approval path must not be the thing that wedges.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	return sess.FrontmostBundle(ctx)
+	return sess.ActTargets(ctx, steps)
 }
 
 // CloseComputer closes this task's computer session if one was opened. The

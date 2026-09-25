@@ -49,11 +49,10 @@ type ApprovalState struct {
 	// The browser/computer pair here is exact: origin ↔ bundle id.
 	computerPerm func(bundleID, class string) bool
 
-	// computerApp reports the bundle id of the frontmost app. computer_act
-	// carries no app identity in its args (a click is just a click), so the app
-	// for a per-app permission check must come from the live session. nil means
-	// "unknown app" (→ prompt). Set by the frontend.
-	computerApp func() string
+	// computerTargets resolves the bundle ids a computer_act call would act on,
+	// from its args plus live session state (a uid names the app whose snapshot
+	// minted it). nil/empty means "unknown app" (→ prompt). Set by the frontend.
+	computerTargets func(toolArgs string) []string
 
 	// reviewer is the optional LLM auto-reviewer consulted for calls that would
 	// otherwise prompt the user (nil → disabled; behavior unchanged). transcriptFn
@@ -91,11 +90,11 @@ func (s *ApprovalState) SetComputerPermFunc(fn func(bundleID, class string) bool
 	s.mu.Unlock()
 }
 
-// SetComputerAppFunc installs the frontmost-app provider used to scope per-app
-// permissions for computer_act (whose args carry no app identity).
-func (s *ApprovalState) SetComputerAppFunc(fn func() string) {
+// SetComputerTargetsFunc installs the target-app resolver used to scope per-app
+// permissions for computer_act.
+func (s *ApprovalState) SetComputerTargetsFunc(fn func(toolArgs string) []string) {
 	s.mu.Lock()
-	s.computerApp = fn
+	s.computerTargets = fn
 	s.mu.Unlock()
 }
 
@@ -474,14 +473,20 @@ func (s *ApprovalState) decideComputer(toolName, toolArgs string) (approvalDecis
 		}
 		return decisionPrompt, true
 	case "computer_act":
-		// Interaction. The app comes from the live session (the frontmost
-		// window), not the args — a click carries no bundle id — so a per-app
-		// interact=allow can actually take effect. Same reasoning as
-		// browser_act reading the origin from the session.
-		if s.computerPreapproved(s.computerActiveApp(), "interact") {
-			return decisionAutoApprove, true
+		// Interaction. The apps come from the session's own resolution of the
+		// args (explicit app, or the app whose snapshot minted the uid) — the
+		// same resolution Act uses — so a per-app interact=allow applies to the
+		// app the input will actually reach. Every target must be pre-approved.
+		targets := s.computerActTargets(toolArgs)
+		if len(targets) == 0 {
+			return decisionPrompt, true
 		}
-		return decisionPrompt, true
+		for _, bundleID := range targets {
+			if !s.computerPreapproved(bundleID, "interact") {
+				return decisionPrompt, true
+			}
+		}
+		return decisionAutoApprove, true
 	}
 	return decisionPrompt, false
 }
@@ -502,15 +507,15 @@ func (s *ApprovalState) computerPreapproved(bundleID, class string) bool {
 	return fn(bundleID, class)
 }
 
-// computerActiveApp returns the frontmost app's bundle id, or "".
-func (s *ApprovalState) computerActiveApp() string {
+// computerActTargets returns the apps a computer_act call targets, or nil.
+func (s *ApprovalState) computerActTargets(toolArgs string) []string {
 	s.mu.Lock()
-	fn := s.computerApp
+	fn := s.computerTargets
 	s.mu.Unlock()
 	if fn == nil {
-		return ""
+		return nil
 	}
-	return fn()
+	return fn(toolArgs)
 }
 
 // browserPreapproved consults the site-permission hook (nil → always prompt).

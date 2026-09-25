@@ -249,12 +249,172 @@ func TestBatchAbortsWhenFrontmostChangesMidBatch(t *testing.T) {
 		{Action: "type", Text: "e"},
 	}
 	_, err := s.Act(context.Background(), steps)
-	var te *TierError
-	if !errors.As(err, &te) {
-		t.Fatalf("batch did not re-gate after the frontmost app changed; got %v", err)
+	if !errors.Is(err, ErrControlInterrupted) {
+		t.Fatalf("batch did not stop after the frontmost app changed under it; got %v", err)
 	}
 	if got := len(f.Actions()); got != 2 {
 		t.Fatalf("expected the batch to stop after 2 actions, but %d reached the backend: %+v", got, f.Actions())
+	}
+}
+
+// jcodeApp stands in for jcode's own window: frontmost whenever the user has
+// just approved a call, and never granted.
+var jcodeApp = App{BundleID: "com.cnjack.jcode", Name: "jcode", Running: true}
+
+// The bug this pins: the user approves computer_act by clicking in jcode, so
+// jcode is frontmost when the call runs. Resolving the uid against the
+// frontmost app rejected every uid as stale ("not in the latest snapshot of
+// com.cnjack.jcode"). The uid names its app; a semantic click reaches it in the
+// background and leaves focus where the user put it.
+func TestUIDActionTargetsItsSnapshotAppWhileJcodeIsFrontmost(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	f.SetFrontmost(jcodeApp)
+
+	out, err := s.Act(context.Background(), []ActRequest{
+		{Action: "click", UID: "e1"},
+		{Action: "set_value", UID: "e2", Value: "hello"},
+	})
+	if err != nil {
+		t.Fatalf("uid actions on a granted background app failed: %v", err)
+	}
+	actions := f.Actions()
+	if len(actions) != 2 || actions[0].BundleID != notesID || actions[0].Ref != 101 ||
+		actions[1].BundleID != notesID || actions[1].Ref != 102 {
+		t.Fatalf("actions did not target the snapshot's app: %+v", actions)
+	}
+	if !strings.Contains(out, notesID) {
+		t.Errorf("log does not name the target app: %s", out)
+	}
+	if front, _ := f.Frontmost(context.Background()); front.BundleID != jcodeApp.BundleID {
+		t.Errorf("semantic actions stole focus: frontmost is %q", front.BundleID)
+	}
+}
+
+// Raw input with neither app nor uid goes to the app the session last
+// observed when the frontmost app is not granted — and the backend brings it
+// forward first, so the keystroke cannot land in jcode.
+func TestRawInputFallsBackToLastObservedApp(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	f.SetFrontmost(jcodeApp)
+
+	if _, err := s.Act(context.Background(), []ActRequest{
+		{Action: "type", Text: "1"},
+		{Action: "press", Key: "return"},
+	}); err != nil {
+		t.Fatalf("raw input to the observed app failed: %v", err)
+	}
+	for _, act := range f.Actions() {
+		if act.BundleID != notesID {
+			t.Fatalf("raw input targeted %q, want %q: %+v", act.BundleID, notesID, f.Actions())
+		}
+	}
+	if front, _ := f.Frontmost(context.Background()); front.BundleID != notesID {
+		t.Errorf("raw input did not bring the target forward: frontmost is %q", front.BundleID)
+	}
+}
+
+// An explicit target is gated exactly like the frontmost app used to be: it
+// must be granted, and its tier bounds the action.
+func TestExplicitTargetIsGated(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	_, err := s.Act(context.Background(), []ActRequest{{App: itermID, Action: "click", X: floatCoord(1), Y: floatCoord(1)}})
+	var na *NotAllowedError
+	if !errors.As(err, &na) || na.BundleID != itermID {
+		t.Fatalf("an ungranted explicit target was not refused: %v", err)
+	}
+
+	if _, err := s.Open(context.Background(), itermID); err != nil {
+		t.Fatalf("Open iterm: %v", err)
+	}
+	f.SetFrontmost(notesApp)
+	_, err = s.Act(context.Background(), []ActRequest{{App: itermID, Action: "type", Text: "rm -rf /"}})
+	var te *TierError
+	if !errors.As(err, &te) || te.BundleID != itermID {
+		t.Fatalf("an explicit terminal target escaped its tier while Notes was frontmost: %v", err)
+	}
+	if len(f.Actions()) != 0 {
+		t.Fatalf("a refused action reached the backend: %+v", f.Actions())
+	}
+}
+
+// A uid is only valid for the app that minted it: naming a different app does
+// not rebind it.
+func TestExplicitTargetDoesNotRebindAnotherAppsUID(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open notes: %v", err)
+	}
+	if _, err := s.Open(context.Background(), itermID); err != nil {
+		t.Fatalf("Open iterm: %v", err)
+	}
+	if _, err := s.Snapshot(context.Background(), notesID, "", 0, true); err != nil {
+		t.Fatalf("refresh notes: %v", err)
+	}
+	notesUID := s.snaps[notesID].Refs[101]
+	_, err := s.Act(context.Background(), []ActRequest{{App: itermID, Action: "click", UID: notesUID}})
+	if err == nil {
+		t.Fatal("a Notes uid was accepted for iTerm")
+	}
+	if len(f.Actions()) != 0 {
+		t.Fatalf("a mismatched uid reached the backend: %+v", f.Actions())
+	}
+}
+
+// Once a batch has brought the target forward, the user switching back (to
+// jcode or anywhere else) is a takeover: the batch stops instead of taking
+// focus back from the person at the keyboard.
+func TestBatchStopsWhenUserSwitchesAwayAfterActivation(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	f.SetFrontmost(jcodeApp)
+	n := 0
+	f.PerformHook = func(fb *FakeBackend, _ Action) error {
+		n++
+		if n == 1 {
+			// Runs after the fake brought Notes forward for this keystroke;
+			// the user then clicks back into jcode.
+			fb.SetFrontmost(jcodeApp)
+		}
+		return nil
+	}
+	_, err := s.Act(context.Background(), []ActRequest{
+		{Action: "type", Text: "a"},
+		{Action: "type", Text: "b"},
+	})
+	if !errors.Is(err, ErrControlInterrupted) {
+		t.Fatalf("batch kept going after the user switched away: %v", err)
+	}
+	if got := len(f.Actions()); got != 1 {
+		t.Fatalf("expected 1 action before the stop, got %d: %+v", got, f.Actions())
+	}
+}
+
+func TestActTargetsMatchesActResolution(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	f.SetFrontmost(jcodeApp)
+
+	got := s.ActTargets(context.Background(), []ActRequest{
+		{Action: "click", UID: "e1"},
+		{Action: "press", Key: "return"},
+		{App: itermID, Action: "click", X: floatCoord(1), Y: floatCoord(1)},
+	})
+	if strings.Join(got, ",") != notesID+","+itermID {
+		t.Fatalf("ActTargets = %v, want [%s %s]", got, notesID, itermID)
 	}
 }
 
