@@ -192,6 +192,7 @@ func spawnDaemon(p helperPaths) (*exec.Cmd, error) {
 	if bin == "" {
 		return nil, fmt.Errorf("helper daemon binary (jcode-computerd) not found next to jcode")
 	}
+	bin = launchableHelperBin(bin)
 	cmd := exec.Command(bin,
 		"--socket", p.socket,
 		"--token-file", p.tokenFile,
@@ -210,7 +211,8 @@ func spawnDaemon(p helperPaths) (*exec.Cmd, error) {
 // with an env override for the desktop shell. The .app bundle is preferred
 // over the bare binary: only the bundle gives the helpers their own stable
 // TCC identity ("jcode Computer Use", with its own icon) instead of a
-// per-binary row in System Settings.
+// per-binary row in System Settings. A bundle nested in the desktop app is
+// launched from an external copy; see helper_install.go.
 func helperBinPath() string {
 	if p := os.Getenv("JCODE_COMPUTERD"); p != "" {
 		if isExecutable(p) {

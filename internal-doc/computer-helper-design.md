@@ -759,6 +759,34 @@ riding the same insight: **the .app bundle is the unit of TCC identity.**
    cdhash (known dev-mode re-prompt limitation, same as identity churn per
    rebuild).
 
+   **Nested bundles are relocated before launch (2026-09-24).** tccd
+   attributes Screen Recording (`kTCCServiceScreenCapture`) to the
+   *outermost* `.app` containing the requesting executable, while
+   Accessibility stays on the inner bundle — verified in tccd logs on macOS 26
+   for a helper under `Contents/Resources`, `Contents/Helpers` and
+   `Contents/Library/LoginItems`, main executable or not. The desktop build
+   ships `jcode-computerd.app` inside `jcode.app`, so its capture worker and
+   onboarding UI were checked against the "jcode" row the user is never asked
+   to enable. `helper_install.go` therefore mirrors a nested helper bundle to
+   `~/Library/Application Support/jcode/jcode-computerd.app` (content-digest
+   compared on each spawn, staged + swapped under a lock, re-copied after app
+   updates) and launches the daemon from there; standalone CLI layouts run in
+   place. Copy failures fall back to the in-place helper. A related trap: a
+   TCC row first granted to an ad-hoc dev build stays pinned to that build's
+   cdhash, so a Developer ID build reads as denied while System Settings shows
+   the switch on (tccd logs `matchesCodeRequirement … status: -67050`); the
+   fix is `tccutil reset Accessibility|ScreenCapture com.cnjack.jcode.computerd`.
+
+   **Screen Recording never prompts on macOS 27 (26A428, 2026-09-24).** With
+   no TCC row, both `CGRequestScreenCaptureAccess` and ScreenCaptureKit
+   (`SCShareableContent`, via replayd) get `auth_reason=5` (service policy),
+   `prompt_type=0`, `DB Action:None` from tccd — no alert, and no toggled-off
+   row appears in the list. Reproduced with a fresh, un-nested test bundle, so
+   it is OS policy, not our identity. The only way in is adding the helper
+   manually, so the onboarding drag bar now targets whichever list the user
+   last clicked **Allow** for (falling back to the other missing grant) and
+   swaps its hint accordingly.
+
 ---
 
 ## 11. Implementation status (2026-07-16)

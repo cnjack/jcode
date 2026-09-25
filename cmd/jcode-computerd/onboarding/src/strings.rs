@@ -15,6 +15,7 @@ pub struct Strings {
     pub granted: &'static str,
     pub all_set: &'static str,
     pub drag_hint: &'static str,
+    pub drag_hint_sr: &'static str,
     pub app_name: &'static str,
 }
 
@@ -30,6 +31,7 @@ pub const EN: Strings = Strings {
     granted: "Allowed",
     all_set: "All set — jcode can now use apps on this Mac",
     drag_hint: "Drag jcode Computer Use into the list above to allow Accessibility",
+    drag_hint_sr: "Drag jcode Computer Use into the list above to allow Screen Recording",
     app_name: "jcode Computer Use",
 };
 
@@ -44,6 +46,7 @@ pub const ZH_HANS: Strings = Strings {
     granted: "已允许",
     all_set: "已就绪 — jcode 现在可以操作这台 Mac 上的应用了",
     drag_hint: "将 jcode Computer Use 拖入上方列表，以允许辅助功能",
+    drag_hint_sr: "将 jcode Computer Use 拖入上方列表，以允许屏幕录制",
     app_name: "jcode Computer Use",
 };
 
@@ -59,6 +62,7 @@ pub const ZH_HANT: Strings = Strings {
     granted: "已允許",
     all_set: "已就緒 — jcode 現在可以操作這部 Mac 上的應用程式了",
     drag_hint: "將 jcode Computer Use 拖移到上方列表，以允許輔助使用",
+    drag_hint_sr: "將 jcode Computer Use 拖移到上方列表，以允許螢幕錄影",
     app_name: "jcode Computer Use",
 };
 
@@ -73,6 +77,7 @@ pub const JA: Strings = Strings {
     granted: "許可済み",
     all_set: "設定完了 — jcode がこの Mac のアプリを操作できるようになりました",
     drag_hint: "jcode Computer Use を上のリストにドラッグして、アクセシビリティを許可してください",
+    drag_hint_sr: "jcode Computer Use を上のリストにドラッグして、画面収録を許可してください",
     app_name: "jcode Computer Use",
 };
 
@@ -87,6 +92,7 @@ pub const KO: Strings = Strings {
     granted: "허용됨",
     all_set: "설정 완료 — 이제 jcode가 이 Mac의 앱을 사용할 수 있습니다",
     drag_hint: "위 목록으로 jcode Computer Use를 드래그하여 손쉬운 사용을 허용하세요",
+    drag_hint_sr: "위 목록으로 jcode Computer Use를 드래그하여 화면 기록을 허용하세요",
     app_name: "jcode Computer Use",
 };
 
