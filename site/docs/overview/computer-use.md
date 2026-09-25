@@ -96,6 +96,23 @@ cannot silently begin controlling the real desktop.
 - **Screen Recording not granted:** use the Screen Recording row's button,
   enable the capture helper/app, and follow macOS's restart instruction if one
   appears.
+- **No Screen Recording prompt and jcode Computer Use isn't in the list:**
+  newer macOS releases may not show the Screen Recording prompt. With System
+  Settings open on **Screen & System Audio Recording**, drag the
+  **jcode Computer Use** tile from the floating bar into the list. You can
+  also click **+**, press **⌘⇧G**, enter
+  `~/Library/Application Support/jcode/jcode-computerd.app`, and turn the new
+  switch on.
+- **The switch is on in System Settings but jcode still says not granted:**
+  the saved permission belongs to a different build of the helper (common
+  after running a local dev build). Remove **jcode Computer Use** from both
+  lists with the **−** button, or run
+  `tccutil reset Accessibility com.cnjack.jcode.computerd` and
+  `tccutil reset ScreenCapture com.cnjack.jcode.computerd`, then restart jcode
+  and choose **Request permission** again.
+- The desktop app runs its helper from
+  `~/Library/Application Support/jcode/jcode-computerd.app` so both permissions
+  belong to **jcode Computer Use**. jcode keeps that copy up to date.
 - **The current task does not show the tools:** use **Check again** first. If a
   model-provider error prevented the live tool refresh, start a new task; the
   saved setting will already be in effect.

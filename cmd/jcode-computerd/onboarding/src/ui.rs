@@ -5,13 +5,15 @@
 //! - **Dialog** — "Enable jcode Computer Use": the icon, one sentence of why,
 //!   and an Allow row per grant. Allow fires the real TCC prompt *from this
 //!   process* (helper-bundle identity) and deep-links the exact Settings pane.
-//! - **Drag bar** — a floating panel that exists only while (a) Accessibility
-//!   is still missing and (b) the System Settings window is on screen. It
+//! - **Drag bar** — a floating panel that exists only while (a) a grant is
+//!   still missing and (b) the System Settings window is on screen. It
 //!   re-derives both facts every tick from the Settings window's position
 //!   (locator.rs) and shows, hides, and re-anchors itself accordingly; the
 //!   chip inside is an NSDraggingSource carrying the .app's file URL, so the
-//!   user can drag the helper straight into the Accessibility list when a
-//!   previously-denied grant means macOS won't re-prompt.
+//!   user can drag the helper straight into the permission list when macOS
+//!   won't prompt: after an earlier denial, and — for Screen Recording on
+//!   macOS 27 — always (tccd answers CGRequestScreenCaptureAccess and
+//!   ScreenCaptureKit with "service policy" deny, no alert, no list row).
 
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
@@ -256,6 +258,35 @@ impl DragChipView {
 
 // ─── Controller ─────────────────────────────────────────────────────────────
 
+/// Which permission list the drag bar is guiding the user into.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Pane {
+    Accessibility,
+    ScreenRecording,
+}
+
+impl Pane {
+    /// The list the bar should target: the one the user last asked for while
+    /// it is still missing, otherwise whichever grant is still missing
+    /// (Accessibility first — it gates everything).
+    fn pick(last: Pane, ax_granted: bool, sr_granted: bool) -> Option<Pane> {
+        match last {
+            Pane::ScreenRecording if !sr_granted => Some(Pane::ScreenRecording),
+            Pane::Accessibility if !ax_granted => Some(Pane::Accessibility),
+            _ if !ax_granted => Some(Pane::Accessibility),
+            _ if !sr_granted => Some(Pane::ScreenRecording),
+            _ => None,
+        }
+    }
+
+    fn hint(self, s: &Strings) -> &'static str {
+        match self {
+            Pane::Accessibility => s.drag_hint,
+            Pane::ScreenRecording => s.drag_hint_sr,
+        }
+    }
+}
+
 pub struct ControllerIvars {
     strings: &'static Strings,
     // Never read back, but load-bearing: the strong reference is what keeps
@@ -263,6 +294,9 @@ pub struct ControllerIvars {
     #[allow(dead_code)]
     dialog: Retained<NSWindow>,
     panel: Retained<NSPanel>,
+    panel_hint: Retained<NSTextField>,
+    drag_pane: Cell<Pane>,
+    shown_hint: Cell<Option<Pane>>,
     ax_button: Retained<NSButton>,
     ax_granted: Retained<NSTextField>,
     sr_button: Retained<NSButton>,
@@ -288,12 +322,17 @@ define_class!(
             // a toggled-off row in the list) *and* land the user on the pane:
             // when an earlier denial means macOS won't re-alert, the pane —
             // and the drag bar that will anchor to it — is the only way in.
+            self.ivars().drag_pane.set(Pane::Accessibility);
             tcc::request_accessibility();
             open_pane(tcc::accessibility_pane());
         }
 
         #[unsafe(method(allowScreenRecording:))]
         fn allow_screen_recording(&self, _sender: Option<&AnyObject>) {
+            // Point the drag bar at the Screen Recording list before Settings
+            // comes up, so the first tick after the pane opens already shows
+            // the right hint.
+            self.ivars().drag_pane.set(Pane::ScreenRecording);
             tcc::request_screen_recording();
             open_pane(tcc::screen_recording_pane());
         }
@@ -330,7 +369,7 @@ impl Controller {
         ivars.sr_button.setHidden(sr);
         ivars.sr_granted.setHidden(!sr);
 
-        self.position_drag_bar(ax);
+        self.position_drag_bar(Pane::pick(ivars.drag_pane.get(), ax, sr));
 
         if ax && sr {
             match ivars.done_since.get() {
@@ -370,20 +409,28 @@ impl Controller {
     /// System Settings window's position. Requiring Settings to be the
     /// *frontmost app* — not merely on screen — keeps the floating bar from
     /// hovering over unrelated work while Settings sits buried in a corner.
-    fn position_drag_bar(&self, ax_granted: bool) {
+    fn position_drag_bar(&self, target: Option<Pane>) {
         let mtm = MainThreadMarker::from(self);
-        let panel = &self.ivars().panel;
-        let settings = if ax_granted || !crate::locator::settings_is_frontmost() {
-            None
-        } else {
-            find_settings_window()
+        let ivars = self.ivars();
+        let panel = &ivars.panel;
+        let settings = match target {
+            Some(_) if crate::locator::settings_is_frontmost() => find_settings_window(),
+            _ => None,
         };
-        let Some(win) = settings else {
+        let (Some(win), Some(pane)) = (settings, target) else {
             if panel.isVisible() {
                 unsafe { panel.orderOut(None) };
             }
             return;
         };
+        if ivars.shown_hint.get() != Some(pane) {
+            ivars.shown_hint.set(Some(pane));
+            unsafe {
+                ivars
+                    .panel_hint
+                    .setStringValue(&NSString::from_str(pane.hint(ivars.strings)));
+            }
+        }
 
         // CG global coordinates (top-left origin, y down) → AppKit screen
         // coordinates (bottom-left of the primary display, y up). The primary
@@ -577,7 +624,7 @@ fn build_drag_bar(
     s: &'static Strings,
     identity: &Identity,
     icon: &NSImage,
-) -> Retained<NSPanel> {
+) -> (Retained<NSPanel>, Retained<NSTextField>) {
     let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
     let panel: Retained<NSPanel> = unsafe {
         msg_send![
@@ -666,7 +713,7 @@ fn build_drag_bar(
         effect.addSubview(&chip);
     }
 
-    panel
+    (panel, hint)
 }
 
 /// Render a window's content into a PNG by drawing our own view hierarchy —
@@ -702,12 +749,15 @@ pub fn run(s: &'static Strings, options: RunOptions) -> ! {
 
     let (dialog, ax_button, ax_granted, sr_button, sr_granted, subtitle) =
         build_dialog(mtm, s, &icon);
-    let panel = build_drag_bar(mtm, s, &identity, &icon);
+    let (panel, panel_hint) = build_drag_bar(mtm, s, &identity, &icon);
 
     let controller = Controller::alloc(mtm).set_ivars(ControllerIvars {
         strings: s,
         dialog: dialog.clone(),
         panel: panel.clone(),
+        panel_hint,
+        drag_pane: Cell::new(Pane::Accessibility),
+        shown_hint: Cell::new(Some(Pane::Accessibility)),
         ax_button: ax_button.clone(),
         ax_granted,
         sr_button: sr_button.clone(),
@@ -755,4 +805,20 @@ pub fn run(s: &'static Strings, options: RunOptions) -> ! {
     }
     app.run();
     unreachable!("NSApplication.run returned");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Pane;
+
+    #[test]
+    fn drag_bar_follows_last_requested_missing_grant() {
+        use Pane::*;
+        assert_eq!(Pane::pick(Accessibility, false, false), Some(Accessibility));
+        assert_eq!(Pane::pick(ScreenRecording, false, false), Some(ScreenRecording));
+        assert_eq!(Pane::pick(ScreenRecording, false, true), Some(Accessibility));
+        assert_eq!(Pane::pick(Accessibility, true, false), Some(ScreenRecording));
+        assert_eq!(Pane::pick(Accessibility, true, true), None);
+        assert_eq!(Pane::pick(ScreenRecording, true, true), None);
+    }
 }
