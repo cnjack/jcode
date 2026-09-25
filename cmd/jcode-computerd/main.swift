@@ -981,7 +981,8 @@ func openBundleInForeground(_ bundleID: String) {
         posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", fd == STDIN_FILENO ? O_RDONLY : O_WRONLY, 0)
     }
     let exe = "/usr/bin/open"
-    var argv: [UnsafeMutablePointer<CChar>?] = [exe, "-b", bundleID].map { strdup($0) } + [nil]
+    let args: [String] = [exe, "-b", bundleID]
+    var argv: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) } + [nil]
     defer { for a in argv { free(a) } }
     var pid = pid_t()
     guard posix_spawn(&pid, exe, &actions, nil, &argv, _NSGetEnviron()!.pointee) == 0 else { return }
