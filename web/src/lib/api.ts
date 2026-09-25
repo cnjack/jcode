@@ -103,6 +103,10 @@ export const api = {
     request<{ status: string; version: string; pwd: string; project?: string; workspace_key?: string; workspace_kind?: WorkspaceKind; provider: string; model: string; agent?: string; mode: string; session_id: string; fresh_session?: boolean; recent_project?: string; recent_session_id?: string; recent_workspace_kind?: WorkspaceKind; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
       '/api/health',
     ),
+  // version reports the running jcode build; check=true also asks the server
+  // to look up the latest GitHub release (never done implicitly).
+  version: (check = false) =>
+    request<VersionInfoResponse>(check ? '/api/version?check=1' : '/api/version'),
   // authVerify validates a token typed into the login gate. skipAuth keeps a 401
   // (wrong token) from tripping the global expiry handler — the gate shows it.
   authVerify: (token: string) =>
@@ -222,6 +226,30 @@ export const api = {
     requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/content`),
   artifactDownload: (taskId: string, artifactId: string) =>
     requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/download`),
+  artifactDownloadAvailable: async (taskId: string, artifactId: string) => {
+    const headers = new Headers()
+    const token = getAuthToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    const response = await fetch(
+      `${apiBase}/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+      { method: 'HEAD', headers, cache: 'no-store' },
+    )
+    if (response.status === 401) notifyAuthExpired()
+    return response.ok
+  },
+  workspaceFileDownload: (taskId: string, path: string) =>
+    requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/files/download?path=${encodeURIComponent(path)}`),
+  workspaceFileDownloadAvailable: async (taskId: string, path: string) => {
+    const headers = new Headers()
+    const token = getAuthToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    const response = await fetch(
+      `${apiBase}/api/tasks/${encodeURIComponent(taskId)}/files/download?path=${encodeURIComponent(path)}`,
+      { method: 'HEAD', headers, cache: 'no-store' },
+    )
+    if (response.status === 401) notifyAuthExpired()
+    return response.ok
+  },
   markArtifactViewed: (taskId: string, artifactId: string, revision: number) =>
     requestVoid(
       `/api/tasks/${encodeURIComponent(taskId)}/artifacts/viewed`,
@@ -799,6 +827,18 @@ export interface DevOptionsLangfuseStatus {
   public_key_set: boolean
   secret_key_set: boolean
   default_host: string
+}
+
+export interface VersionInfoResponse {
+  version: string
+  git_commit?: string
+  build_time?: string
+  checked: boolean
+  latest?: string
+  release_url?: string
+  published_at?: string
+  update_available: boolean
+  check_error?: string
 }
 
 export interface DevOptionsStatusResponse {

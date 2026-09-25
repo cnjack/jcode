@@ -511,6 +511,14 @@
 .jcode-prose a:hover {
   opacity: 0.85;
 }
+.jcode-prose a[data-jcode-download-state='checking'],
+.jcode-prose a[data-jcode-download-state='unavailable'] {
+  color: var(--jcode-color-muted-foreground);
+  cursor: not-allowed;
+  opacity: 0.65;
+  pointer-events: none;
+  text-decoration: none;
+}
 
 /* ─── Markdown tables (GFM) ───
  * Framed, scrollable, token-driven. renderMarkdown wraps each <table> in

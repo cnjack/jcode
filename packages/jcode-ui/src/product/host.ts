@@ -139,6 +139,9 @@ export interface ProductComposerHost {
   /** Open the host's remote-connect wizard (ssh:// and docker:// workspaces). */
   openRemoteConnect?: (prefill?: RemotePrefill | null) => void
 
+  /** Hosts with pre-task attachment staging own all browser file ingestion. */
+  stageAttachments?: (files: File[]) => void
+
   // ── Native file drops ─────────────────────────────────────────────────────
   /**
    * Subscribe to native file drag/drop events. Desktop hosts use this to keep

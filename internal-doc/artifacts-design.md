@@ -396,8 +396,17 @@ ArtifactViewedAt time.Time `json:"artifact_viewed_at,omitempty"`
 GET /api/tasks/{taskID}/artifacts
 GET /api/tasks/{taskID}/artifacts/{artifactID}/content
 GET /api/tasks/{taskID}/artifacts/{artifactID}/download
+HEAD /api/tasks/{taskID}/artifacts/{artifactID}/download
+GET /api/tasks/{taskID}/files/download?path={workspaceRelativePath}
+HEAD /api/tasks/{taskID}/files/download?path={workspaceRelativePath}
 PATCH /api/tasks/{taskID}/artifacts/viewed
 ```
+
+The task-scoped `files/download` routes support assistant Markdown links to a
+relative workspace filename. They accept no absolute paths, require a local
+task workspace, and use the same sensitive-path, symlink, regular-file, and
+containment checks as Artifact opens. `HEAD` is used to enable a chat download
+link only while the file exists; `GET` repeats the validation when serving it.
 
 ### 8.1 List
 
@@ -957,7 +966,7 @@ HTTP 使用稳定错误码字段，例如 `artifact_not_found`、`artifact_missi
 
 - 增加 state、WS bridge、API client。
 - 增加 Artifacts panel、Viewer 和工具结果卡片。
-- 完成 HTML/Markdown/text/image/PDF/CSV renderer。
+- 完成 HTML/Markdown/text/image/PDF/CSV/Excel renderer。
 
 ### Step 4：Desktop
 

@@ -69,6 +69,36 @@ func TestManagedModelParsersCoverProviderShapes(t *testing.T) {
 	}
 }
 
+func TestParseManagedModelsReadsCopilotCapabilities(t *testing.T) {
+	t.Parallel()
+	decoder := json.NewDecoder(bytes.NewReader([]byte(`{"data":[
+		{"id":"claude-sonnet-5","name":"Claude Sonnet 5","vendor":"Anthropic","model_picker_enabled":true,
+		 "capabilities":{"type":"chat","limits":{"max_prompt_tokens":200000,"max_context_window_tokens":264000},
+		  "supports":{"vision":true,"tool_calls":true,"reasoning_effort":["low","high"]}}},
+		{"id":"gpt-4.1","name":"GPT-4.1","vendor":"OpenAI","model_picker_enabled":true,
+		 "capabilities":{"type":"chat","limits":{"max_prompt_tokens":128000},"supports":{"tool_calls":true}}}
+	]}`)))
+	decoder.UseNumber()
+	var payload any
+	if err := decoder.Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	want := []Model{
+		{
+			ID: "claude-sonnet-5", Name: "Claude Sonnet 5", Vendor: "Anthropic",
+			Protocol: ProtocolChatCompletions, Kind: ModelKindChat, Attachment: true, Context: 200000,
+			Reasoning: true, EffortTiers: []string{"low", "high"},
+		},
+		{
+			ID: "gpt-4.1", Name: "GPT-4.1", Vendor: "OpenAI",
+			Protocol: ProtocolResponses, Kind: ModelKindChat, Context: 128000,
+		},
+	}
+	if got := parseManagedModels(MethodGitHubCopilot, payload); !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %#v, want %#v", got, want)
+	}
+}
+
 func TestParseManagedModelsReadsXAIImagePriceAndContext(t *testing.T) {
 	t.Parallel()
 	models := parseManagedModels(MethodXAIOAuth, map[string]any{"data": []any{

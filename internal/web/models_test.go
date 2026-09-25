@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/modelcatalog"
 	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 )
@@ -144,6 +145,251 @@ func TestCustomProviderCatalogUsesPersistedLiveModelVisibility(t *testing.T) {
 	}
 }
 
+// copilotRelayModels mirrors a Copilot-compatible relay's /v1/models payload,
+// where all metadata lives under capabilities.limits / capabilities.supports.
+const copilotRelayModels = `{"object":"list","data":[
+	{"id":"claude-sonnet-5","object":"model","owned_by":"Anthropic","name":"Claude Sonnet 5",
+	 "capabilities":{"type":"chat","limits":{"vision":{"max_prompt_images":5},"max_output_tokens":64000,
+	   "max_prompt_tokens":200000,"max_context_window_tokens":264000},
+	  "supports":{"vision":true,"tool_calls":true,"reasoning_effort":["low","medium","high","xhigh","max"]}}},
+	{"id":"claude-haiku-4.5","object":"model","owned_by":"Anthropic","name":"Claude Haiku 4.5",
+	 "capabilities":{"type":"chat","limits":{"max_prompt_tokens":136000,"max_context_window_tokens":200000},
+	  "supports":{"tool_calls":true,"vision":true,"max_thinking_budget":32000}}},
+	{"id":"text-embedding-3-small","object":"model","owned_by":"OpenAI","name":"Embedding",
+	 "capabilities":{"type":"embeddings","supports":{}}}
+]}`
+
+func serveLiveModels(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer test" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestCustomProviderCatalogMapsRichLiveMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	live := serveLiveModels(t, copilotRelayModels)
+	const providerID = "Share Copilot"
+	if err := config.SaveConfig(&config.Config{Providers: map[string]*config.ProviderConfig{
+		providerID: {
+			APIKey: "test", BaseURL: live.URL + "/v1", Name: providerID,
+			CustomModels: []config.CustomModelConfig{
+				{ID: "retired-model", Name: "Retired", ToolCall: true},
+			},
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{registry: model.NewModelRegistry()}
+	req := httptest.NewRequest(http.MethodGet, "/api/providers/Share%20Copilot/models", nil)
+	req.SetPathValue("id", providerID)
+	rec := httptest.NewRecorder()
+	s.handleProviderCatalog(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("catalog: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+	var got []struct {
+		ID          string   `json:"id"`
+		Name        string   `json:"name"`
+		Added       bool     `json:"added"`
+		Context     int      `json:"context"`
+		Reasoning   bool     `json:"reasoning"`
+		Attachment  bool     `json:"attachment"`
+		EffortTiers []string `json:"effort_tiers"`
+		Custom      bool     `json:"custom"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("catalog should list two chat models plus the retired custom row: %#v", got)
+	}
+	sonnet, haiku, retired := got[0], got[1], got[2]
+	if sonnet.ID != "claude-sonnet-5" || sonnet.Name != "Claude Sonnet 5" || sonnet.Context != 200000 ||
+		!sonnet.Reasoning || !sonnet.Attachment || sonnet.Added ||
+		strings.Join(sonnet.EffortTiers, ",") != "low,medium,high,xhigh,max" {
+		t.Fatalf("sonnet entry = %#v", sonnet)
+	}
+	// A thinking budget is not a reasoning_effort control: haiku stays
+	// non-reasoning even though registry siblings are reasoning models.
+	if haiku.ID != "claude-haiku-4.5" || haiku.Context != 136000 || haiku.Reasoning ||
+		!haiku.Attachment || len(haiku.EffortTiers) != 0 {
+		t.Fatalf("haiku entry = %#v", haiku)
+	}
+	if retired.ID != "retired-model" || !retired.Added || !retired.Custom {
+		t.Fatalf("configured model missing from live catalog: %#v", retired)
+	}
+}
+
+func TestEnableCustomProviderLiveModelPersistsLiveCapabilities(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	live := serveLiveModels(t, copilotRelayModels)
+	const providerID = "Share Copilot"
+	if err := config.SaveConfig(&config.Config{Providers: map[string]*config.ProviderConfig{
+		providerID: {APIKey: "test", BaseURL: live.URL + "/v1", Name: providerID},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{cfg: &config.Config{}, registry: model.NewModelRegistry(), needsSetup: true}
+	recorder := httptest.NewRecorder()
+	s.handleToggleModelEnabled(recorder, httptest.NewRequest(
+		http.MethodPost, "/api/model-state/enabled",
+		strings.NewReader(`{"provider":"Share Copilot","model":"claude-sonnet-5","enabled":true}`),
+	))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("enable model: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	loaded, err := config.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := loaded.Providers[providerID].CustomModels
+	if len(models) != 1 {
+		t.Fatalf("stored models = %#v", models)
+	}
+	stored := models[0]
+	if stored.ID != "claude-sonnet-5" || stored.Name != "Claude Sonnet 5" || !stored.ToolCall ||
+		stored.Context != 200000 || !stored.Reasoning || !stored.Attachment || stored.Managed ||
+		strings.Join(stored.EffortTiers, ",") != "low,medium,high,xhigh,max" {
+		t.Fatalf("stored custom live model = %#v", stored)
+	}
+	_, runtime, ok := s.registry.LookupModel(providerID, "claude-sonnet-5")
+	if !ok || runtime.Limit == nil || runtime.Limit.Context != 200000 || len(runtime.ReasoningOptions) != 1 ||
+		strings.Join(runtime.ReasoningOptions[0].Values, ",") != "low,medium,high,xhigh,max" {
+		t.Fatalf("runtime registry model = %#v", runtime)
+	}
+}
+
+// Reproduces a provider re-created by hand under the same id: config has no
+// custom_models, but model_state.json still enables models from before. Enabling
+// one more model must persist those leftovers too (with live names/metadata),
+// otherwise config becomes authoritative and they silently vanish.
+func TestEnableCustomModelPersistsLegacyStateOnlyModels(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	live := serveLiveModels(t, copilotRelayModels)
+	const providerID = "Share Copilot"
+	if err := config.SaveConfig(&config.Config{Providers: map[string]*config.ProviderConfig{
+		providerID: {APIKey: "test", BaseURL: live.URL + "/v1"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveModelState(&config.ModelState{
+		EnabledModels: []config.ModelRef{
+			{Provider: providerID, Model: "claude-haiku-4.5"},
+			{Provider: providerID, Model: "gone-from-endpoint"},
+			{Provider: "other", Model: "claude-haiku-4.5"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{cfg: &config.Config{}, registry: model.NewModelRegistry(), needsSetup: true}
+	recorder := httptest.NewRecorder()
+	s.handleToggleModelEnabled(recorder, httptest.NewRequest(
+		http.MethodPost, "/api/model-state/enabled",
+		strings.NewReader(`{"provider":"Share Copilot","model":"claude-sonnet-5","enabled":true}`),
+	))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("enable model: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	loaded, err := config.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]config.CustomModelConfig)
+	for _, row := range loaded.Providers[providerID].CustomModels {
+		byID[row.ID] = row
+	}
+	if len(byID) != 3 {
+		t.Fatalf("stored models = %#v", loaded.Providers[providerID].CustomModels)
+	}
+	if got := byID["claude-sonnet-5"]; got.Name != "Claude Sonnet 5" || got.Context != 200000 {
+		t.Fatalf("enabled model = %#v", got)
+	}
+	if got := byID["claude-haiku-4.5"]; got.Name != "Claude Haiku 4.5" || got.Context != 136000 || !got.Attachment {
+		t.Fatalf("legacy state-only model lost live metadata: %#v", got)
+	}
+	if got := byID["gone-from-endpoint"]; got.Name != "gone-from-endpoint" || !got.ToolCall {
+		t.Fatalf("legacy model missing from endpoint should persist as bare row: %#v", got)
+	}
+}
+
+func TestDeleteProviderForgetsModelState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const providerID = "Share Copilot"
+	if err := config.SaveConfig(&config.Config{Providers: map[string]*config.ProviderConfig{
+		providerID: {
+			APIKey: "test", BaseURL: "http://127.0.0.1:9/v1",
+			CustomModels: []config.CustomModelConfig{{ID: "gpt-6-sol", ToolCall: true}},
+		},
+		"other": {
+			APIKey: "test", BaseURL: "http://127.0.0.1:9/v1",
+			CustomModels: []config.CustomModelConfig{{ID: "m", ToolCall: true}},
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	keep := config.ModelRef{Provider: "other", Model: "m"}
+	if err := config.SaveModelState(&config.ModelState{
+		EnabledModels: []config.ModelRef{{Provider: providerID, Model: "gpt-6-sol"}, keep},
+		Favorite:      []config.ModelRef{{Provider: providerID, Model: "gpt-6-sol"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{cfg: &config.Config{}, registry: model.NewModelRegistry(), needsSetup: true}
+	req := httptest.NewRequest(http.MethodDelete, "/api/providers/Share%20Copilot", nil)
+	req.SetPathValue("id", providerID)
+	rec := httptest.NewRecorder()
+	s.handleDeleteProvider(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	state, err := config.LoadModelState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.EnabledModels) != 1 || state.EnabledModels[0] != keep || len(state.Favorite) != 0 {
+		t.Fatalf("deleted provider refs survived in model state: %#v", state)
+	}
+}
+
+func TestCustomModelConfigFromLiveFillsUnknownsFromRegistry(t *testing.T) {
+	registry := model.NewModelRegistry()
+	provider := registry.GetProvider("openai")
+	if provider == nil {
+		t.Skip("openai missing from registry")
+	}
+	var exact *model.RegistryModel
+	for _, candidate := range provider.Models {
+		if candidate.ToolCall && candidate.Reasoning && candidate.Limit != nil && candidate.Limit.Context > 0 {
+			exact = candidate
+			break
+		}
+	}
+	if exact == nil {
+		t.Skip("no reasoning openai model in registry")
+	}
+	got := customModelConfigFromLive(registry, "gateway", modelcatalog.Entry{ID: exact.ID, Vendor: "openai"})
+	if got.Name != exact.Name || !got.Reasoning || got.Context != exact.Limit.Context || !got.ToolCall {
+		t.Fatalf("bare-id gateway model not enriched from registry: %#v (registry %#v)", got, exact)
+	}
+	// Explicit endpoint declarations beat registry defaults.
+	no := false
+	got = customModelConfigFromLive(registry, "gateway", modelcatalog.Entry{
+		ID: exact.ID, Name: "Gateway Name", Context: 1234, Reasoning: &no, Attachment: &no,
+	})
+	if got.Name != "Gateway Name" || got.Context != 1234 || got.Reasoning || got.Attachment || got.EffortTiers != nil {
+		t.Fatalf("endpoint metadata was overridden by registry: %#v", got)
+	}
+}
+
 func TestManagedProviderCatalogUsesLiveAccountModels(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	err := config.SaveConfig(&config.Config{
@@ -235,8 +481,12 @@ func TestEnableManagedModelPersistsRuntimeMetadata(t *testing.T) {
 
 func TestEnableCustomProviderLiveModelPersistsRuntimeMetadata(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	// An unreachable endpoint must still persist a usable bare row.
+	unreachable := httptest.NewServer(http.NotFoundHandler())
+	unreachableURL := unreachable.URL
+	unreachable.Close()
 	cfg := &config.Config{Providers: map[string]*config.ProviderConfig{
-		"Local": {APIKey: "test", BaseURL: "http://127.0.0.1:1234/v1", Name: "Local"},
+		"Local": {APIKey: "test", BaseURL: unreachableURL + "/v1", Name: "Local"},
 	}}
 	if err := config.SaveConfig(cfg); err != nil {
 		t.Fatal(err)

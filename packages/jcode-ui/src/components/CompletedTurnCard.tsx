@@ -16,6 +16,8 @@ export interface CompletedTurnCardProps {
   durationLabel?: (durationMs: number) => string
   expandLabel?: string
   collapseLabel?: string
+  onDownloadFile?: (href: string, fileName: string) => boolean
+  validateDownloadFile?: (href: string, fileName: string) => Promise<boolean | null>
 }
 
 export const CompletedTurnCard = memo(function CompletedTurnCard({
@@ -24,6 +26,8 @@ export const CompletedTurnCard = memo(function CompletedTurnCard({
   durationLabel = defaultDurationLabel,
   expandLabel = 'Show work',
   collapseLabel = 'Hide work',
+  onDownloadFile,
+  validateDownloadFile,
 }: CompletedTurnCardProps) {
   const [expanded, setExpanded] = useState(false)
   const regionId = useId()
@@ -79,7 +83,12 @@ export const CompletedTurnCard = memo(function CompletedTurnCard({
         ))
       )}
 
-      <Message message={turn.summary} showDuration={false} />
+      <Message
+        message={turn.summary}
+        onDownloadFile={onDownloadFile}
+        validateDownloadFile={validateDownloadFile}
+        showDuration={false}
+      />
     </section>
   )
 })

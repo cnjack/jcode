@@ -27,6 +27,7 @@ import (
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/providerauth"
+	"github.com/cnjack/jcode/internal/release"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
@@ -143,6 +144,12 @@ type Server struct {
 	// setup mode and exposes setup API endpoints while blocking chat operations.
 	needsSetup bool
 	version    string
+	gitCommit  string
+	buildTime  string
+
+	// latestRelease looks up the newest published release for /api/version's
+	// update check. nil uses release.Latest; tests inject a stub.
+	latestRelease func(ctx context.Context) (release.Info, error)
 
 	// usageStore backs the global usage-statistics endpoint. nil falls back to
 	// usage.Default(); tests inject a temp-dir store.
@@ -275,6 +282,8 @@ type ServerConfig struct {
 	Pwd                  string
 	WorkspaceKind        session.WorkspaceKind
 	Version              string
+	GitCommit            string // build commit stamped via ldflags ("unknown" for dev builds)
+	BuildTime            string // build timestamp stamped via ldflags ("unknown" for dev builds)
 	Agent                *adk.ChatModelAgent
 	CreateAgent          func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	RebuildForMode       func(planMode bool) (*adk.ChatModelAgent, error)
@@ -379,6 +388,8 @@ func NewServer(cfg *ServerConfig) *Server {
 		host:                 cfg.Host,
 		openBrowser:          cfg.OpenBrowser,
 		version:              cfg.Version,
+		gitCommit:            cfg.GitCommit,
+		buildTime:            cfg.BuildTime,
 		wsBroker:             NewWSBroker(),
 		newEngine:            cfg.NewEngine,
 		newScratchEngine:     cfg.NewScratchEngine,
@@ -448,6 +459,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// API routes
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("GET /api/version", s.handleVersion)
 	mux.HandleFunc("POST /api/auth/verify", s.handleAuthVerify)
 	mux.HandleFunc("GET /api/ws", s.handleWebSocket)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
@@ -473,6 +485,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/tasks/{id}/uploads", s.handleTaskUpload)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/content", s.handleArtifactContent)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/download", s.handleArtifactDownload)
+	mux.HandleFunc("HEAD /api/tasks/{id}/artifacts/{artifactID}/download", s.handleArtifactDownload)
+	mux.HandleFunc("GET /api/tasks/{id}/files/download", s.handleTaskFileDownload)
+	mux.HandleFunc("HEAD /api/tasks/{id}/files/download", s.handleTaskFileDownload)
 	mux.HandleFunc("PATCH /api/tasks/{id}/artifacts/viewed", s.handleArtifactsViewed)
 	mux.HandleFunc("POST /api/tasks/{id}/artifacts/{artifactID}/shares", s.handleCreateArtifactShare)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/shares", s.handleListArtifactShares)
@@ -504,6 +519,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/mode", s.handleSwitchMode)
 	mux.HandleFunc("POST /api/exec", s.handleExec)
 	mux.HandleFunc("GET /api/diff", s.handleDiff)
+	mux.HandleFunc("GET /api/sessions/{id}/changes", s.handleSessionChanges)
+	mux.HandleFunc("POST /api/sessions/{id}/draft-pr", s.handleSessionDraftPR)
+	mux.HandleFunc("GET /api/sessions/{id}/draft-pr/preview", s.handleSessionDraftPreview)
 	mux.HandleFunc("GET /api/mcp", s.handleListMCP)
 	mux.HandleFunc("POST /api/mcp/servers", s.handleCreateMCP)
 	mux.HandleFunc("PUT /api/mcp/servers/{name}", s.handleUpdateMCP)
@@ -951,7 +969,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Max-Age", "86400")

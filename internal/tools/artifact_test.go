@@ -55,6 +55,13 @@ func TestShowArtifactRegistersBeforeEmittingWebEvent(t *testing.T) {
 	if response["artifact_id"] == "" || response["revision"] != float64(1) || eventName != "artifact_upserted" || eventRecord.Title != "Demo" {
 		t.Fatalf("response=%v event=%q record=%+v", response, eventName, eventRecord)
 	}
+	wantDownloadURL := "/api/tasks/task-1/artifacts/" + response["artifact_id"].(string) + "/download"
+	if response["download_url"] != wantDownloadURL {
+		t.Fatalf("download URL=%v, want %q", response["download_url"], wantDownloadURL)
+	}
+	if response["download_name"] != "report.html" {
+		t.Fatalf("download name=%v, want report.html", response["download_name"])
+	}
 }
 
 func TestShowArtifactSchemaExplainsWebDeliveryAndNoCloudUpload(t *testing.T) {

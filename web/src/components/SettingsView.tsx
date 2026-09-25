@@ -5,7 +5,7 @@
  * A first-class app view (`ui.activeView === 'settings'`) rendered inside the
  * workspace main column: its own left nav rail + an inset surface content
  * panel — the same geometry as the chat page, NOT a small centered dialog.
- * Tabs: General (server/token/auto-approve/language + the M19 cloud-sync
+ * Tabs: General (server/version & updates/token/auto-approve/language + the M19 cloud-sync
  * default), Cloud (M18: account/connection state, auto-connect, pairing
  * approvals, device-code login and logout — moved out of the
  * CloudBadge popover), Agent (tool discovery), Review (Auto approval review),
@@ -60,6 +60,7 @@ import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { uiActions, modelActions, loadConfig, loadModels, type SettingsTab } from '../app/store'
 import { ProviderIcon } from './ProviderIcon'
 import { CloudTab } from './settings/CloudTab'
+import { ServerVersionRow } from './settings/ServerVersionRow'
 import {
   ProviderAuthSection,
   isProviderAuthReady,
@@ -1886,10 +1887,10 @@ function GeneralTab() {
         </div>
       </div>
 
-      {/* Desktop only: current app version + manual update check. The banner
-          is the install surface; this row lets the user re-check after
-          dismissing it. */}
-      {isTauri && <VersionUpdateRow />}
+      {/* Version & updates. Desktop: app version + Tauri updater check (the
+          banner is the install surface; this row re-checks after dismissing
+          it). Browser: the jcode server build + a GitHub latest-release check. */}
+      {isTauri ? <VersionUpdateRow /> : <ServerVersionRow />}
 
       {tokenSnapshot && (
         <div className={ROW}>

@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   ArrowDownTrayIcon,
   ArrowTopRightOnSquareIcon,
@@ -117,13 +117,13 @@ export const GeneratedImageCard = memo(function GeneratedImageCard({
   onOpenSettings,
 }: GeneratedImageCardProps) {
   const strings = useMemo(() => ({ ...DEFAULT_STRINGS, ...stringOverrides }), [stringOverrides])
-  const [imageReady, setImageReady] = useState(false)
-  const [imageFailed, setImageFailed] = useState(false)
-
-  useEffect(() => {
-    setImageReady(false)
-    setImageFailed(false)
-  }, [imageSrc])
+  // Readiness is keyed to the src it was observed for, not reset by an effect:
+  // a load can land between commit and passive effects (slow main thread), and
+  // an effect-based reset would then undo it and leave the card loading forever.
+  const [readySrc, setReadySrc] = useState<string>()
+  const [failedSrc, setFailedSrc] = useState<string>()
+  const imageReady = !!imageSrc && readySrc === imageSrc
+  const imageFailed = !!imageSrc && failedSrc === imageSrc
 
   const ratio = safeAspectRatio(aspectRatio, artifact)
   const isSuccess = state === 'succeeded'
@@ -145,14 +145,13 @@ export const GeneratedImageCard = memo(function GeneratedImageCard({
   } as CSSProperties
 
   const revealDecodedImage = (image: HTMLImageElement) => {
+    const src = image.getAttribute('src') ?? undefined
     if (typeof image.decode !== 'function') {
-      setImageReady(true)
+      setReadySrc(src)
       return
     }
-    void image.decode().catch(() => undefined).then(() => {
-      // A late settle must not reveal an asset whose src has since changed.
-      if (image.getAttribute('src') === imageSrc) setImageReady(true)
-    })
+    // A late settle for a replaced src is harmless: it no longer matches imageSrc.
+    void image.decode().catch(() => undefined).then(() => setReadySrc(src))
   }
 
   return (
@@ -171,7 +170,7 @@ export const GeneratedImageCard = memo(function GeneratedImageCard({
             src={imageSrc}
             alt={alt || title || strings.succeeded}
             onLoad={(event) => revealDecodedImage(event.currentTarget)}
-            onError={() => setImageFailed(true)}
+            onError={(event) => setFailedSrc(event.currentTarget.getAttribute('src') ?? undefined)}
           />
         ) : null}
 

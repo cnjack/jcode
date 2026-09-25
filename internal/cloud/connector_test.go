@@ -926,3 +926,33 @@ func TestShouldConnect(t *testing.T) {
 		t.Error("empty device token → must not connect")
 	}
 }
+
+func TestWorkspaceChangesUsesExactSession(t *testing.T) {
+	var path string
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{"session_id": "inactive-session", "files": []any{}})
+	}))
+	defer local.Close()
+	conn := newTestConnector(t, "http://127.0.0.1:1", local.URL)
+	if err := conn.syncStore.Set("inactive-session", true); err != nil {
+		t.Fatal(err)
+	}
+	status, result := conn.executeCommand(t.Context(), DeviceCommand{ID: "inspect", Kind: "workspace.changes", SessionID: "inactive-session", Payload: json.RawMessage(`{"session_id":"inactive-session"}`)})
+	if status != "ok" || path != "/api/sessions/inactive-session/changes" {
+		t.Fatalf("status=%s path=%s result=%v", status, path, result)
+	}
+	if err := conn.syncStore.Set("inactive-session", false); err != nil {
+		t.Fatal(err)
+	}
+	path = ""
+	status, _ = conn.executeCommand(t.Context(), DeviceCommand{Kind: "workspace.changes", SessionID: "inactive-session", Payload: json.RawMessage(`{"session_id":"inactive-session"}`)})
+	if status != "error" || path != "" {
+		t.Fatal("inspection bypassed disabled Cloud sync")
+	}
+	path = ""
+	status, _ = conn.executeCommand(t.Context(), DeviceCommand{ID: "inspect", Kind: "workspace.changes"})
+	if status != "error" || path != "" {
+		t.Fatal("missing session reached the local control plane")
+	}
+}

@@ -43,6 +43,7 @@ type AccountProviderConfigRemote struct {
 }
 
 type CloudModel struct {
+	Protocol        string `json:"protocol,omitempty"`
 	ModelID         string `json:"model_id"`
 	ProviderID      string `json:"provider_id"`
 	Kind            string `json:"kind"`

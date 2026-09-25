@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -96,8 +97,16 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, records)
 }
 
-func artifactInlineLimit(kind artifact.Kind) int64 {
-	switch kind {
+func artifactInlineLimit(record artifact.Record) int64 {
+	path := record.RelativePath
+	if record.EffectiveStorageKind() == artifact.StorageManaged {
+		path = record.RelativeKey
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".xls", ".xlsx", ".xlsm", ".xlsb":
+		return artifact.MaxInlineBinarySize
+	}
+	switch record.Kind {
 	case artifact.KindText, artifact.KindMarkdown, artifact.KindCode, artifact.KindHTML, artifact.KindCSV:
 		return artifact.MaxInlineTextSize
 	default:
@@ -119,6 +128,40 @@ func (s *Server) handleArtifactContent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
 	s.serveArtifactFile(w, r, true)
+}
+
+func (s *Server) handleTaskFileDownload(w http.ResponseWriter, r *http.Request) {
+	if s.artifacts == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+		return
+	}
+	scope, err := s.artifactScope(r)
+	if err != nil || scope.managedOnly || scope.workspace == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+		return
+	}
+	relativePath := r.URL.Query().Get("path")
+	file, info, err := s.artifacts.OpenWorkspaceFile(r.Context(), scope.workspace, relativePath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+		return
+	}
+	defer func() { _ = file.Close() }()
+	if info.Size() > artifact.MaxDownloadSize {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "file_too_large"})
+		return
+	}
+
+	name := artifactDownloadName(relativePath)
+	contentType := mime.TypeByExtension(filepath.Ext(name))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, name, info.ModTime(), file)
 }
 
 func (s *Server) serveArtifactFile(w http.ResponseWriter, r *http.Request, download bool) {
@@ -143,7 +186,7 @@ func (s *Server) serveArtifactFile(w http.ResponseWriter, r *http.Request, downl
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
 		return
 	}
-	limit := artifactInlineLimit(record.Kind)
+	limit := artifactInlineLimit(record)
 	if download {
 		limit = artifact.MaxDownloadSize
 	}

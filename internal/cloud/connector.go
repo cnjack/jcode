@@ -523,10 +523,18 @@ func (c *Connector) executeAndAck(ctx context.Context, cmd DeviceCommand) {
 
 // ack posts one command ack, sealing the result when encryption is active.
 func (c *Connector) ack(ctx context.Context, id, status string, result any) {
-	if c.cipherSnapshot() != nil && result != nil {
-		if plain, err := json.Marshal(result); err == nil {
-			result = c.sealUplink(plain)
+	if cipher := c.cipherSnapshot(); cipher != nil && result != nil {
+		plain, err := json.Marshal(result)
+		if err != nil {
+			c.logf("ack for command %s not sent: result encoding failed", id)
+			return
 		}
+		sealed, err := cipher.Seal(plain)
+		if err != nil {
+			c.logf("ack for command %s not sent: result encryption failed", id)
+			return
+		}
+		result = sealed
 	}
 	if err := c.client.AckCommand(ctx, c.token, id, CommandAck{Status: status, Result: result}); err != nil && ctx.Err() == nil {
 		c.logf("ack for command %s failed: %v", id, err)
@@ -599,18 +607,19 @@ func (l *localControlPlane) doJSON(ctx context.Context, method, path string, bod
 // project_path, model, effort, goal, attachments — all optional. goal_armed
 // (M14) flips the meaning of text: it is a goal objective and the command
 // only arms the goal (POST /api/goal with start=true), skipping /api/chat and
-// every other compose step.
+// every other compose step. Workspace selection still applies before arming.
 type chatSendPayload struct {
-	Text        string           `json:"text"`
-	Images      []chatImage      `json:"images,omitempty"`
-	Mode        string           `json:"mode,omitempty"`
-	Channel     string           `json:"channel,omitempty"` // "console" | "mobile"
-	ProjectPath string           `json:"project_path,omitempty"`
-	Model       *chatModelRef    `json:"model,omitempty"`
-	Effort      string           `json:"effort,omitempty"`
-	Goal        string           `json:"goal,omitempty"`
-	GoalArmed   bool             `json:"goal_armed,omitempty"`
-	Attachments []chatAttachment `json:"attachments,omitempty"`
+	WorkspaceKind string           `json:"workspace_kind,omitempty"`
+	Text          string           `json:"text"`
+	Images        []chatImage      `json:"images,omitempty"`
+	Mode          string           `json:"mode,omitempty"`
+	Channel       string           `json:"channel,omitempty"` // "console" | "mobile"
+	ProjectPath   string           `json:"project_path,omitempty"`
+	Model         *chatModelRef    `json:"model,omitempty"`
+	Effort        string           `json:"effort,omitempty"`
+	Goal          string           `json:"goal,omitempty"`
+	GoalArmed     bool             `json:"goal_armed,omitempty"`
+	Attachments   []chatAttachment `json:"attachments,omitempty"`
 }
 
 // chatModelRef is the model facet of a compose chat.send.
@@ -623,7 +632,7 @@ type chatModelRef struct {
 // therefore goes through the ordered compose pipeline instead of the plain
 // one-shot /api/chat call.
 func (p *chatSendPayload) needsCompose() bool {
-	return p.ProjectPath != "" || p.Model != nil || p.Effort != "" || p.Goal != "" || len(p.Attachments) > 0
+	return p.WorkspaceKind != "" || p.ProjectPath != "" || p.Model != nil || p.Effort != "" || p.Goal != "" || len(p.Attachments) > 0
 }
 
 // cloudForbiddenMode reports whether a cloud chat.send asks for unrestricted
@@ -669,6 +678,12 @@ func (c *Connector) executeCommand(ctx context.Context, cmd DeviceCommand) (stri
 		return c.execSessionDelete(ctx, cmd)
 	case "workspace.browse":
 		return c.execWorkspaceBrowse(ctx, cmd)
+	case "workspace.changes":
+		return c.execWorkspaceChanges(ctx, cmd)
+	case "workspace.draft_preview":
+		return c.execWorkspaceDraftPreview(ctx, cmd)
+	case "workspace.draft_pr":
+		return c.execWorkspaceDraftPR(ctx, cmd)
 	case "approval.respond":
 		return c.execApprovalRespond(ctx, cmd)
 	case "pairing.request":
@@ -683,6 +698,13 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
 		return "error", map[string]string{"error": fmt.Sprintf("invalid chat.send payload: %v", err)}
 	}
+	if p.WorkspaceKind != "" && p.WorkspaceKind != "project" && p.WorkspaceKind != "scratch" {
+		return "error", map[string]string{"error": "invalid_workspace_kind"}
+	}
+	if p.WorkspaceKind == "scratch" && p.ProjectPath != "" && cmd.SessionID == "" {
+		return "error", map[string]string{"error": "scratch_workspace_path_managed"}
+	}
+
 	// M20 mode ceiling: a cloud-originated session may not run full_access
 	// (bypass). Rejected before any side effect — even a goal_armed payload
 	// that declares the intent is refused.
@@ -699,7 +721,7 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	}
 	// goal_armed wins over everything: text is the goal objective and the
 	// command only arms the goal — /api/chat and all compose facets
-	// (mode/images/session/attachments/…) are ignored.
+	// (mode/images/attachments/…) are ignored; workspace selection still applies.
 	if p.GoalArmed {
 		return c.execChatSendGoalArmed(ctx, cmd, &p)
 	}
@@ -721,7 +743,7 @@ func (c *Connector) execChatSendGoalArmed(ctx context.Context, cmd DeviceCommand
 	if objective == "" {
 		return "error", map[string]string{"error": "chat.send: goal_armed with empty objective"}
 	}
-	sessionID, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel)
+	sessionID, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel, p.WorkspaceKind)
 	if err != nil {
 		return "error", map[string]string{"error": err.Error()}
 	}
@@ -744,7 +766,7 @@ func (c *Connector) execChatSendLegacy(ctx context.Context, cmd DeviceCommand, p
 	// an empty id to /api/chat targets the local active engine, which could be a
 	// different conversation. The created id is therefore the sole target for
 	// both the message and the successful command acknowledgment.
-	sessionID, err := c.activateSession(ctx, cmd.SessionID, "", p.Channel)
+	sessionID, err := c.activateSession(ctx, cmd.SessionID, "", p.Channel, "")
 	if err != nil {
 		return "error", map[string]string{"error": err.Error()}
 	}
@@ -813,7 +835,7 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 
 	// 1. Activate the session without changing Desktop's foreground and return
 	// the id required by every task-scoped compose facet below.
-	sid, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel)
+	sid, err := c.activateSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel, p.WorkspaceKind)
 	if err != nil {
 		return errResult(err)
 	}
@@ -902,8 +924,11 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 // activateSession centralizes the non-foreground local session contract for
 // Cloud commands. Source is always non-empty so the server applies the Cloud
 // remote allowlist and safe-mode policy before the first event is emitted.
-func (c *Connector) activateSession(ctx context.Context, sessionID, projectPath, source string) (string, error) {
+func (c *Connector) activateSession(ctx context.Context, sessionID, projectPath, source, workspaceKind string) (string, error) {
 	req := map[string]string{}
+	if workspaceKind != "" {
+		req["workspace_kind"] = workspaceKind
+	}
 	if sessionID != "" {
 		req["session_id"] = sessionID
 	}
@@ -1055,4 +1080,94 @@ func (c *Connector) execApprovalRespond(ctx context.Context, cmd DeviceCommand) 
 		return "error", map[string]string{"error": errUnexpectedStatus("/api/approval", status, string(body)).Error()}
 	}
 	return "ok", json.RawMessage(body)
+}
+
+// execWorkspaceChanges forwards only the explicit session id; it never asks
+// the legacy active-workspace diff endpoint. executeAndAck seals the result.
+func (c *Connector) execWorkspaceChanges(ctx context.Context, cmd DeviceCommand) (string, any) {
+	if err := c.validateWorkspaceCommandSession(cmd); err != nil {
+		return "error", map[string]string{"error": err.Error()}
+	}
+	if cmd.SessionID == "" || cmd.SessionID == "new" {
+		return "error", map[string]string{"error": "workspace.changes requires an existing session"}
+	}
+	status, body, err := c.local.getJSON(ctx, "/api/sessions/"+url.PathEscape(cmd.SessionID)+"/changes")
+	if err != nil {
+		return "error", map[string]string{"error": err.Error()}
+	}
+	if status != http.StatusOK {
+		var failure struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &failure)
+		if failure.Error == "" {
+			failure.Error = fmt.Sprintf("read workspace changes: HTTP %d", status)
+		}
+		return "error", map[string]string{"error": failure.Error}
+	}
+	return "ok", json.RawMessage(body)
+}
+
+func (c *Connector) execWorkspaceDraftPR(ctx context.Context, cmd DeviceCommand) (string, any) {
+	if err := c.validateWorkspaceCommandSession(cmd); err != nil {
+		return "error", map[string]string{"error": err.Error()}
+	}
+	if cmd.SessionID == "" || cmd.SessionID == "new" {
+		return "error", map[string]string{"error": "workspace.draft_pr requires an existing session"}
+	}
+	if !json.Valid(cmd.Payload) {
+		return "error", map[string]string{"error": "invalid draft pull request payload"}
+	}
+	status, body, err := c.local.postJSON(ctx, "/api/sessions/"+url.PathEscape(cmd.SessionID)+"/draft-pr", cmd.Payload)
+	if err != nil {
+		return "error", map[string]string{"error": "The device could not confirm draft PR delivery. Check the device connection and retry; the prepared branch will be reused."}
+	}
+	if status != http.StatusOK {
+		var failure struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &failure)
+		if failure.Error == "" {
+			failure.Error = fmt.Sprintf("create draft pull request: HTTP %d", status)
+		}
+		return "error", map[string]string{"error": failure.Error}
+	}
+	return "ok", json.RawMessage(body)
+}
+
+func (c *Connector) execWorkspaceDraftPreview(ctx context.Context, cmd DeviceCommand) (string, any) {
+	if err := c.validateWorkspaceCommandSession(cmd); err != nil {
+		return "error", map[string]string{"error": err.Error()}
+	}
+	if cmd.SessionID == "" || cmd.SessionID == "new" {
+		return "error", map[string]string{"error": "draft preview requires an existing session"}
+	}
+	status, body, err := c.local.getJSON(ctx, "/api/sessions/"+url.PathEscape(cmd.SessionID)+"/draft-pr/preview")
+	if err != nil {
+		return "error", map[string]string{"error": "Could not load the draft preview from the device. Check its connection and retry."}
+	}
+	if status != http.StatusOK {
+		var failure struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &failure)
+		if failure.Error == "" {
+			failure.Error = "Could not prepare the draft preview"
+		}
+		return "error", map[string]string{"error": failure.Error}
+	}
+	return "ok", json.RawMessage(body)
+}
+
+func (c *Connector) validateWorkspaceCommandSession(cmd DeviceCommand) error {
+	var payload struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(cmd.Payload, &payload); err != nil || payload.SessionID == "" || payload.SessionID != cmd.SessionID {
+		return fmt.Errorf("workspace command session does not match its encrypted payload")
+	}
+	if !c.syncEnabled(cmd.SessionID) {
+		return fmt.Errorf("enable Cloud sync for this session on the device before inspecting or publishing its workspace")
+	}
+	return nil
 }

@@ -137,7 +137,7 @@ func TestEnsureConversationColdResumeUsesCurrentDefaultModel(t *testing.T) {
 	recordActivationSessionWithModel(t, id, project, "legacy-provider", "grok-4.5")
 	s, _, _ := activationTestServer(t, nil)
 
-	if _, err := s.ensureConversation(context.Background(), id, "", "desktop"); err != nil {
+	if _, err := s.ensureConversation(context.Background(), id, "desktop"); err != nil {
 		t.Fatal(err)
 	}
 	provider, modelName, _ := s.resolveEngine(id).modelSnapshot()
@@ -158,7 +158,7 @@ func TestEnsureConversationColdRemoteHydratesBeforePublish(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.ensureConversation(context.Background(), id, "", "cloud")
+		_, err := s.ensureConversation(context.Background(), id, "cloud")
 		done <- err
 	}()
 	// The factory has dialed, but role hydration is intentionally blocked. The
@@ -200,14 +200,14 @@ func TestEnsureConversationReplacesIdleUnhealthyRuntime(t *testing.T) {
 	)
 	recordActivationSession(t, id, project)
 	s, _, dials := activationTestServer(t, nil)
-	if _, err := s.ensureConversation(context.Background(), id, "", "cloud"); err != nil {
+	if _, err := s.ensureConversation(context.Background(), id, "cloud"); err != nil {
 		t.Fatal(err)
 	}
 	old := s.resolveEngine(id)
 	oldExec := old.env.Exec.(*activationRemoteExecutor)
 	oldExec.probeErr = errors.New("transport closed")
 
-	if _, err := s.ensureConversation(context.Background(), id, "", "cloud"); err != nil {
+	if _, err := s.ensureConversation(context.Background(), id, "cloud"); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.resolveEngine(id); got == nil || got == old {

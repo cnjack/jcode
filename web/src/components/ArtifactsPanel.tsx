@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
+import type * as XLSX from 'xlsx'
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
@@ -32,6 +33,16 @@ const BLOCKED_HOST_OPEN_EXTENSIONS = new Set([
   '.msp', '.mst', '.pif', '.ps1', '.reg', '.scr', '.sh', '.svg', '.svgz', '.url', '.vb', '.vbe',
   '.vbs', '.workflow', '.ws', '.wsf', '.wsh', '.xhtml',
 ])
+const SPREADSHEET_EXTENSIONS = new Set(['.xls', '.xlsx', '.xlsm', '.xlsb'])
+const SPREADSHEET_PREVIEW_ROWS = 200
+const SPREADSHEET_PREVIEW_COLUMNS = 50
+
+interface SpreadsheetRows {
+  rows: string[][]
+  startRow: number
+  startColumn: number
+  truncated: boolean
+}
 
 export function canOpenArtifactOnDesktop(record: ArtifactRecord): boolean {
   if (record.kind === 'html') return false
@@ -46,6 +57,40 @@ function artifactKey(record: ArtifactRecord): string {
   return record.storage_kind === 'managed'
     ? record.relative_key || record.title
     : record.relative_path || record.title
+}
+
+function isSpreadsheetArtifact(record: ArtifactRecord): boolean {
+  if (record.kind === 'spreadsheet') return true
+  const key = artifactKey(record).toLowerCase()
+  const dot = key.lastIndexOf('.')
+  return dot >= 0 && SPREADSHEET_EXTENSIONS.has(key.slice(dot))
+}
+
+function spreadsheetRows(worksheet: XLSX.WorkSheet, sheetjs: typeof import('xlsx')): SpreadsheetRows {
+  if (!worksheet['!ref']) {
+    return { rows: [], startRow: 0, startColumn: 0, truncated: false }
+  }
+  const range = sheetjs.utils.decode_range(worksheet['!ref'])
+  const endRow = Math.min(range.e.r, range.s.r + SPREADSHEET_PREVIEW_ROWS - 1)
+  const endColumn = Math.min(range.e.c, range.s.c + SPREADSHEET_PREVIEW_COLUMNS - 1)
+  const previewRange = sheetjs.utils.encode_range({
+    s: range.s,
+    e: { r: endRow, c: endColumn },
+  })
+  const rows = sheetjs.utils.sheet_to_json<unknown[]>(worksheet, {
+    header: 1,
+    raw: false,
+    defval: '',
+    blankrows: true,
+    range: previewRange,
+  }).map((row) => row.map((cell) => String(cell ?? '')))
+
+  return {
+    rows,
+    startRow: range.s.r,
+    startColumn: range.s.c,
+    truncated: range.e.r > endRow || range.e.c > endColumn,
+  }
 }
 
 function formatBytes(bytes: number): string {
@@ -65,6 +110,19 @@ function readBlobText(blob: Blob): Promise<string> {
     reader.onload = () => resolve(String(reader.result ?? ''))
     reader.onerror = () => reject(reader.error ?? new Error('blob read failed'))
     reader.readAsText(blob)
+  })
+}
+
+function readBlobArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (reader.result instanceof ArrayBuffer) resolve(reader.result)
+      else reject(new Error('blob read returned non-binary data'))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('blob read failed'))
+    reader.readAsArrayBuffer(blob)
   })
 }
 
@@ -372,15 +430,40 @@ function ArtifactShareDialog({ taskId, record, onClose }: { taskId: string; reco
 function ArtifactViewer({ taskId, record, onViewed }: { taskId: string; record: ArtifactRecord; onViewed: () => void }) {
   const { t } = useTranslation()
   const [blob, setBlob] = useState<Blob | null>(null)
+  const [sheetjs, setSheetjs] = useState<typeof import('xlsx') | null>(null)
+  const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null)
+  const [selectedSheet, setSelectedSheet] = useState('')
   const [error, setError] = useState('')
+  const spreadsheetArtifact = isSpreadsheetArtifact(record)
   useEffect(() => {
     let active = true
     setBlob(null)
+    setSheetjs(null)
+    setWorkbook(null)
+    setSelectedSheet('')
     setError('')
     if (record.status !== 'available') return () => { active = false }
     void api.artifactContent(taskId, record.id).then((next) => { if (active) setBlob(next) }).catch(() => { if (active) setError(t('artifacts.contentError')) })
     return () => { active = false }
   }, [record.id, record.revision, record.status, taskId, t])
+
+  useEffect(() => {
+    let active = true
+    setWorkbook(null)
+    if (!blob || !spreadsheetArtifact) return () => { active = false }
+    void readBlobArrayBuffer(blob).then(async (data) => {
+      const module = await import('xlsx')
+      const next = module.read(data, { cellDates: true })
+      if (next.SheetNames.length === 0) throw new Error('workbook has no worksheets')
+      if (active) {
+        setSheetjs(module)
+        setWorkbook(next)
+      }
+    }).catch(() => {
+      if (active) setError(t('artifacts.contentError'))
+    })
+    return () => { active = false }
+  }, [blob, spreadsheetArtifact, t])
 
   const [text, setText] = useState('')
   const [textLoaded, setTextLoaded] = useState(false)
@@ -388,7 +471,7 @@ function ArtifactViewer({ taskId, record, onViewed }: { taskId: string; record: 
     let active = true
     setText('')
     setTextLoaded(false)
-    if (!blob || !['text', 'markdown', 'code', 'html', 'csv'].includes(record.kind)) return
+    if (!blob || spreadsheetArtifact || !['text', 'markdown', 'code', 'html', 'csv'].includes(record.kind)) return
     void readBlobText(blob).then((value) => {
       if (active) {
         setText(value)
@@ -396,22 +479,42 @@ function ArtifactViewer({ taskId, record, onViewed }: { taskId: string; record: 
       }
     }).catch(() => { if (active) setError(t('artifacts.contentError')) })
     return () => { active = false }
-  }, [blob, record.kind, t])
+  }, [blob, record.kind, spreadsheetArtifact, t])
 
   useEffect(() => {
-    if (textLoaded && ['text', 'markdown', 'code', 'csv'].includes(record.kind)) onViewed()
-  }, [onViewed, record.kind, record.id, record.revision, textLoaded])
+    if (!spreadsheetArtifact && textLoaded && ['text', 'markdown', 'code', 'csv'].includes(record.kind)) onViewed()
+  }, [onViewed, record.kind, record.id, record.revision, spreadsheetArtifact, textLoaded])
 
   useEffect(() => {
-    if (blob && record.kind === 'binary') onViewed()
-  }, [blob, onViewed, record.id, record.kind, record.revision])
+    if (spreadsheetArtifact && workbook) onViewed()
+  }, [onViewed, record.id, record.revision, spreadsheetArtifact, workbook])
 
-  const objectURL = useMemo(() => blob && ['image', 'pdf', 'binary'].includes(record.kind) ? URL.createObjectURL(blob) : '', [blob, record.kind])
+  useEffect(() => {
+    if (!spreadsheetArtifact && blob && record.kind === 'binary') onViewed()
+  }, [blob, onViewed, record.id, record.kind, record.revision, spreadsheetArtifact])
+
+  const objectURL = useMemo(() => blob && !spreadsheetArtifact && ['image', 'pdf', 'binary'].includes(record.kind) ? URL.createObjectURL(blob) : '', [blob, record.kind, spreadsheetArtifact])
   useEffect(() => () => { if (objectURL) URL.revokeObjectURL(objectURL) }, [objectURL])
+  const sheetNames = workbook?.SheetNames ?? []
+  const activeSheetName = sheetNames.includes(selectedSheet) ? selectedSheet : (sheetNames[0] ?? '')
+  const activeSheet = workbook?.Sheets[activeSheetName]
+  const visibleRows = useMemo(
+    () => activeSheet && sheetjs ? spreadsheetRows(activeSheet, sheetjs) : null,
+    [activeSheet, sheetjs],
+  )
 
   if (record.status !== 'available') return <ViewerState title={t(`artifacts.status.${record.status}`)} />
   if (error) return <ViewerState title={error} retry={() => window.dispatchEvent(new Event('jcode:artifact-upserted'))} />
-  if (!blob || (['text', 'markdown', 'code', 'html', 'csv'].includes(record.kind) && !textLoaded)) return <ViewerState title={t('artifacts.loading')} />
+  if (!blob || (spreadsheetArtifact ? !workbook || !sheetjs : ['text', 'markdown', 'code', 'html', 'csv'].includes(record.kind) && !textLoaded)) return <ViewerState title={t('artifacts.loading')} />
+  if (spreadsheetArtifact && workbook && sheetjs && visibleRows) {
+    return <SpreadsheetTable
+      sheetjs={sheetjs}
+      sheetNames={sheetNames}
+      selectedSheet={activeSheetName}
+      onSelectSheet={setSelectedSheet}
+      preview={visibleRows}
+    />
+  }
   if (record.kind === 'html') return <iframe title={record.title} sandbox="allow-scripts" srcDoc={`<meta http-equiv="Content-Security-Policy" content="${HTML_CSP}">${text}`} onLoad={onViewed} className="h-full min-h-[420px] w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)]" />
   if (record.kind === 'markdown') {
     const html = DOMPurify.sanitize(marked.parse(escapeHTML(text)) as string)
@@ -455,6 +558,77 @@ function ArtifactImageViewer({ src, title, onLoad }: { src: string; title: strin
 function CSVTable({ source }: { source: string }) {
   const rows = useMemo(() => parseCSV(source), [source])
   return <div className="overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-border)]"><table className="min-w-full border-collapse text-left text-xs"><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex} className={rowIndex === 0 ? 'bg-[var(--color-muted)] font-medium' : ''}>{row.map((cell, columnIndex) => <td key={columnIndex} className="max-w-[280px] border-b border-r border-[var(--color-border)] px-2.5 py-2 align-top">{cell}</td>)}</tr>)}</tbody></table></div>
+}
+
+function SpreadsheetTable({
+  sheetjs,
+  sheetNames,
+  selectedSheet,
+  onSelectSheet,
+  preview,
+}: {
+  sheetjs: typeof import('xlsx')
+  sheetNames: string[]
+  selectedSheet: string
+  onSelectSheet: (name: string) => void
+  preview: SpreadsheetRows
+}) {
+  const { t } = useTranslation()
+  const columnCount = preview.rows.reduce((max, row) => Math.max(max, row.length), 0)
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      {(sheetNames.length > 1 || preview.truncated) && (
+        <div className="flex shrink-0 items-center justify-between gap-3">
+          {sheetNames.length > 1 && (
+            <label className="flex items-center gap-2 text-xs text-[var(--color-muted-foreground)]">
+              <span>{t('artifacts.worksheet')}</span>
+              <select
+                aria-label={t('artifacts.worksheet')}
+                value={selectedSheet}
+                onChange={(event) => onSelectSheet(event.target.value)}
+                className="h-8 max-w-64 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs text-[var(--color-foreground)]"
+              >
+                {sheetNames.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </label>
+          )}
+          {preview.truncated && (
+            <span className="ml-auto text-[10px] text-[var(--color-muted-foreground)]">
+              {t('artifacts.previewLimit', { rows: SPREADSHEET_PREVIEW_ROWS, columns: SPREADSHEET_PREVIEW_COLUMNS })}
+            </span>
+          )}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-border)]">
+        <table className="min-w-full border-collapse text-left text-xs">
+          <thead className="sticky top-0 z-[1] bg-[var(--color-muted)]">
+            <tr>
+              <th className="sticky left-0 border-b border-r border-[var(--color-border)] px-2 py-1.5" />
+              {Array.from({ length: columnCount }, (_, columnIndex) => (
+                <th key={columnIndex} scope="col" className="min-w-20 border-b border-r border-[var(--color-border)] px-2.5 py-1.5 font-medium text-[var(--color-muted-foreground)]">
+                  {sheetjs.utils.encode_col(preview.startColumn + columnIndex)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {preview.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                <th scope="row" className="sticky left-0 border-b border-r border-[var(--color-border)] bg-[var(--color-muted)] px-2 py-1.5 text-right font-mono text-[10px] text-[var(--color-muted-foreground)]">
+                  {preview.startRow + rowIndex + 1}
+                </th>
+                {Array.from({ length: columnCount }, (_, columnIndex) => (
+                  <td key={columnIndex} className="max-w-[280px] border-b border-r border-[var(--color-border)] px-2.5 py-1.5 align-top whitespace-pre-wrap break-words">
+                    {row[columnIndex] ?? ''}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
 }
 
 function ViewerState({ title, retry }: { title: string; retry?: () => void }) {

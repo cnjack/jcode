@@ -76,3 +76,47 @@ func TestBuiltinUISkillsBridgeDeferredToolsWithoutShellFallback(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSkillSupportsBlockScalarDescriptions(t *testing.T) {
+	tests := []struct {
+		name        string
+		description string
+		want        string
+	}{
+		{
+			name: "literal",
+			description: `description: |
+  First line.
+  Second line.`,
+			want: "First line.\nSecond line.",
+		},
+		{
+			name: "folded",
+			description: `description: >
+  First line.
+  Second line.`,
+			want: "First line. Second line.",
+		},
+		{
+			name:        "quoted",
+			description: `description: "Use the xlsx skill when the user mentions \"the xlsx\" file."`,
+			want:        `Use the xlsx skill when the user mentions "the xlsx" file.`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := "---\nname: example\n" + tt.description + "\nslash: false\n---\n# Full skill instructions"
+			sk := parseSkill("example", content, false, "")
+			if got := strings.TrimSpace(sk.Description); got != tt.want {
+				t.Fatalf("description = %q, want %q", got, tt.want)
+			}
+			if sk.Slash != "false" {
+				t.Fatalf("slash = %q, want false", sk.Slash)
+			}
+			if !strings.Contains(sk.Body, "# Full skill instructions") {
+				t.Fatalf("skill body was not preserved: %q", sk.Body)
+			}
+		})
+	}
+}

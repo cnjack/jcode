@@ -51,6 +51,10 @@ List, view, and switch between sessions. Start a new session or resume a previou
 
 Switch models, change the session mode (Ask for approval / Plan / Full access), and manage configuration — all from the web interface. Provider forms support API keys plus device-code sign-in for ChatGPT/Codex, xAI/Grok, and GitHub Copilot, including multiple accounts, default-account selection, removal, sign-out, and reauthentication states.
 
+### Version & Updates
+
+Settings → General → *Version & updates* shows the running jcode build (version and commit). **Check for updates** asks the server to look up the latest GitHub release; GitHub is only contacted when you click it. When a newer release exists, the row links to its release notes and reminds you to run `jcode update` on the machine hosting the server. (The desktop app uses its built-in updater here instead — see [Desktop](/docs/desktop).)
+
 ### Theme / Dark Mode
 
 Toggle between **Light**, **Dark**, and **System** themes from the settings dialog. The theme preference is persisted in `localStorage` and applied instantly across all components. When set to **System**, the UI follows your OS appearance preference automatically.
@@ -73,6 +77,7 @@ The web server exposes an HTTP API and a WebSocket stream for programmatic acces
 | `GET /api/sessions` | List sessions |
 | `POST /api/sessions` | Create new session |
 | `GET /api/models` | List available models |
+| `GET /api/version` | Running build version/commit; `?check=1` also compares against the latest GitHub release |
 | `POST /api/model` | Switch active model |
 | `GET /api/provider-auth/{method}` | List non-secret account status for a managed authentication method |
 | `POST /api/provider-auth/{method}/start` | Start a device-code login |

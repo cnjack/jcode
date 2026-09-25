@@ -144,16 +144,21 @@ func activationSnapshot(eng *Engine, kind conversationKind, activated bool) acti
 // to render history continue to use GET /api/sessions/{id}.
 func (s *Server) handleActivateSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SessionID   string `json:"session_id,omitempty"`
-		ProjectPath string `json:"project_path,omitempty"`
-		Source      string `json:"source,omitempty"`
-		Focus       bool   `json:"focus,omitempty"`
+		WorkspaceKind session.WorkspaceKind `json:"workspace_kind,omitempty"`
+		SessionID     string                `json:"session_id,omitempty"`
+		ProjectPath   string                `json:"project_path,omitempty"`
+		Source        string                `json:"source,omitempty"`
+		Focus         bool                  `json:"focus,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil && err != io.EOF {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	result, err := s.ensureConversation(r.Context(), req.SessionID, req.ProjectPath, req.Source)
+	if req.WorkspaceKind != "" && req.WorkspaceKind != session.WorkspaceProject && req.WorkspaceKind != session.WorkspaceScratch {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid workspace_kind"})
+		return
+	}
+	result, err := s.ensureConversationKind(r.Context(), req.SessionID, req.ProjectPath, req.Source, req.WorkspaceKind)
 	if err != nil {
 		writeConversationActivationError(w, err)
 		return
@@ -214,9 +219,9 @@ func writeConversationActivationError(w http.ResponseWriter, err error) {
 // durable session metadata and JSONL state. It never calls setActiveEngine.
 func (s *Server) ensureConversation(
 	ctx context.Context,
-	sessionID, projectPath, source string,
+	sessionID, source string,
 ) (activationResult, error) {
-	return s.ensureConversationKind(ctx, sessionID, projectPath, source, "")
+	return s.ensureConversationKind(ctx, sessionID, "", source, "")
 }
 
 func (s *Server) ensureConversationKind(

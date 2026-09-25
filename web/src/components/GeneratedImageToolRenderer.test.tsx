@@ -81,10 +81,10 @@ const generatedArtifact = {
   height: 1024,
 }
 
-// Shared CI runners occasionally starve workers long enough that the default
-// 1s findByRole window expires even though the synchronous reveal path is
-// intact (once seen on ubuntu-latest: 24s jsdom environment setup). Generous
-// explicit windows keep the assertion about behavior, not runner speed.
+// Generous explicit windows keep these assertions about behavior, not runner
+// speed. (The hang once blamed on runner starvation was a real reveal race in
+// GeneratedImageCard — load landing before its reset effect — now covered by
+// the jcode-ui package tests.)
 const SLOW_RUNNER_WAIT = { timeout: 5000 }
 
 async function readyGeneratedImage() {
