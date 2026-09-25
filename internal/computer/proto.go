@@ -56,6 +56,10 @@ type envelope struct {
 	Type    string          `json:"type"`
 	ID      uint64          `json:"id"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	// Closing marks the daemon's last response before a deliberate exit (it
+	// learned of an Accessibility grant its process cannot use). The client
+	// drops the connection so the next RPC respawns a fresh daemon.
+	Closing bool `json:"closing,omitempty"`
 }
 
 // --- handshake ---
@@ -240,6 +244,9 @@ const (
 	codeCouldNotGetSenderPID   = -10017
 	codeAmbiguousApp           = -10018
 	codeScreenLocked           = -10020
+	// The daemon refused the request without acting on it because it is
+	// restarting to pick up a new grant; replaying it on the new daemon is safe.
+	codeHelperRestarting = -10021
 )
 
 // --- framing ---

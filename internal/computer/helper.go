@@ -3,6 +3,7 @@ package computer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os/exec"
@@ -69,8 +70,15 @@ func newHelperConnContext(ctx context.Context, conn net.Conn, token string) (*he
 		_ = conn.Close()
 		return nil, err
 	}
+	if h.dead {
+		// The handshake pong was this daemon's last response (a grant landed
+		// between its launch and the ping); the connection is already closed.
+		return nil, errHelperRestarting
+	}
 	return h, nil
 }
+
+var errHelperRestarting = errors.New("computer-use helper restarted during the handshake to pick up a new permission grant")
 
 func (h *helperBackend) Kind() string { return "helper" }
 
@@ -95,9 +103,11 @@ func (h *helperBackend) PermissionStatus() HelperPermissions {
 }
 
 // RefreshPermissionStatus sends another authenticated ping over the existing
-// connection. AXIsProcessTrusted and CGPreflightScreenCaptureAccess are sampled
-// by the daemon for every pong, so a settings poll can notice a grant without
-// restarting jcode or the daemon.
+// connection. The daemon re-samples both grants for every pong (Accessibility
+// in a fresh process, because the in-process answer is cached until exit), so
+// a settings poll can notice a grant without restarting jcode. A pong that
+// reports a newly usable Accessibility grant is marked closing; the next RPC
+// then talks to a respawned daemon that can actually use it.
 func (h *helperBackend) RefreshPermissionStatus(ctx context.Context) (HelperPermissions, error) {
 	h.mu.Lock()
 	token := h.token
@@ -180,8 +190,33 @@ func (h *helperBackend) applyPong(pong pongPayload) {
 // a ctx with no deadline gets one imposed here — the socket must never be the
 // thing that wedges the agent.
 func (h *helperBackend) roundTrip(ctx context.Context, reqType string, payload any) (envelope, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return envelope{}, fmt.Errorf("marshal %s payload: %w", reqType, err)
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	resp, err := h.exchangeLocked(ctx, reqType, raw)
+	if err == nil && resp.Closing && resp.Type == typeError && daemonErrorCode(resp.Payload) == codeHelperRestarting {
+		// The daemon refused without acting and exited so that a fresh one can
+		// use an Accessibility grant made after it started. Replaying once on
+		// the respawned daemon cannot double-apply anything.
+		resp, err = h.exchangeLocked(ctx, reqType, raw)
+	}
+	if err != nil {
+		return envelope{}, err
+	}
+	if resp.Type == typeError {
+		return resp, decodeDaemonError(resp.Payload)
+	}
+	return resp, nil
+}
+
+// exchangeLocked performs one write/read on the (re)connected transport. A
+// response marked closing is still returned, but the connection is dropped so
+// the next RPC respawns the daemon instead of failing on a dead socket.
+func (h *helperBackend) exchangeLocked(ctx context.Context, reqType string, raw json.RawMessage) (envelope, error) {
 	if err := h.ensureConnectedLocked(ctx); err != nil {
 		return envelope{}, err
 	}
@@ -189,11 +224,6 @@ func (h *helperBackend) roundTrip(ctx context.Context, reqType string, payload a
 
 	h.seq++
 	id := h.seq
-
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return envelope{}, fmt.Errorf("marshal %s payload: %w", reqType, err)
-	}
 
 	// Bound the exchange. Prefer the caller's deadline; impose a generous default
 	// when it has none, so a hung daemon cannot hang the agent forever.
@@ -240,8 +270,8 @@ func (h *helperBackend) roundTrip(ctx context.Context, reqType string, payload a
 		return envelope{}, requestOutcomeErr(reqType,
 			fmt.Errorf("response id %d does not match request id %d (protocol desync)", resp.ID, id))
 	}
-	if resp.Type == typeError {
-		return resp, decodeDaemonError(resp.Payload)
+	if resp.Closing {
+		h.markDeadLocked()
 	}
 	return resp, nil
 }
@@ -368,6 +398,9 @@ func (h *helperBackend) ensureConnectedLocked(ctx context.Context) error {
 		return fmt.Errorf("computer-use helper connection is unavailable")
 	}
 	fresh, err := h.redial(ctx)
+	if errors.Is(err, errHelperRestarting) {
+		fresh, err = h.redial(ctx)
+	}
 	if err != nil {
 		return fmt.Errorf("reconnect computer-use helper: %w", err)
 	}
@@ -440,6 +473,15 @@ func requestOutcomeErr(reqType string, err error) error {
 
 // decodeDaemonError maps an error frame onto a Go error, translating the codes
 // the tool layer keys on into their sentinels.
+// daemonErrorCode returns the code of an error payload, or 0 if undecodable.
+func daemonErrorCode(payload json.RawMessage) int {
+	var ep errorPayload
+	if json.Unmarshal(payload, &ep) != nil {
+		return 0
+	}
+	return ep.Code
+}
+
 func decodeDaemonError(payload json.RawMessage) error {
 	var ep errorPayload
 	if err := json.Unmarshal(payload, &ep); err != nil {

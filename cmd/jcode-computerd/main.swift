@@ -32,6 +32,10 @@ enum Code {
     static let userIntervened = -10016
     static let ambiguousApp = -10018
     static let screenLocked = -10020
+    // The request was refused before doing anything because this daemon is
+    // exiting to pick up a grant (see freshAccessibilityGranted). Safe for the
+    // client to replay on a fresh daemon.
+    static let helperRestarting = -10021
     static let unknown = -10005
 }
 
@@ -41,8 +45,12 @@ struct Envelope: Codable {
     var type: String
     var id: UInt64
     var payload: Data?
+    // Set on the last response before the daemon exits on purpose, so the
+    // client drops this connection and respawns instead of failing its next
+    // RPC on a dead socket. Outbound only.
+    var closing = false
 
-    enum CodingKeys: String, CodingKey { case type, id, payload }
+    enum CodingKeys: String, CodingKey { case type, id, payload, closing }
 
     init(type: String, id: UInt64, payload: Data?) {
         self.type = type
@@ -69,6 +77,7 @@ struct Envelope: Codable {
         if let p = payload, let v = try? JSONDecoder().decode(JSONValue.self, from: p) {
             try c.encode(v, forKey: .payload)
         }
+        if closing { try c.encode(true, forKey: .closing) }
     }
 }
 
@@ -506,8 +515,44 @@ func surfaceOnboardingUI() -> Bool {
     }
 }
 
+// AXIsProcessTrusted asks tccd once and then caches the answer for the life of
+// the process: this daemon has no run loop, so the invalidation notification
+// never arrives, and a grant made after launch stays "denied" until restart
+// (observed on macOS 26/27; the Screen Recording state was always fresh only
+// because it is sampled in a new capture-worker process). So when the cached
+// answer is "denied", ask again from a fresh child of this same executable.
+// The child is spawned disclaimed, i.e. with the same bundle identity this
+// self-responsible daemon has; without the re-exec the two identities differ
+// and the child's answer would say nothing about this process.
+//
+// A fresh "granted" does not make this process's own AX calls work, so it also
+// schedules an exit after the current response (see serveConnection). The
+// client respawns a daemon, whose first AXIsProcessTrusted sees the grant.
+var restartForAccessibilityGrant = false
+
+func freshAccessibilityGranted() -> Bool {
+    guard ProcessInfo.processInfo.environment["JCODE_COMPUTERD_SELF_DISCLAIMED"] == "1" else {
+        return false
+    }
+    let exe = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+    guard runPermissionProbe(executable: exe, arguments: ["--check-accessibility"]) == "granted" else {
+        return false
+    }
+    restartForAccessibilityGrant = true
+    return true
+}
+
+func accessibilityTrusted() -> Bool {
+    AXIsProcessTrusted() || freshAccessibilityGranted()
+}
+
 func requireAccessibilityTrusted() throws {
     if AXIsProcessTrusted() { return }
+    if freshAccessibilityGranted() {
+        throw DaemonError(
+            code: Code.helperRestarting,
+            message: "Accessibility was granted after the computer-use helper started; the helper is restarting to pick it up. Retry the action.")
+    }
     if !didAutoPromptAccessibility {
         didAutoPromptAccessibility = true
         if !surfaceOnboardingUI() { _ = requestAccessibilityPermission() }
@@ -1303,11 +1348,18 @@ func spawnDisclaimedWorker(
 
 func captureWorkerPermissionState() -> String {
     guard let helper = captureHelperURL() else { return "unknown" }
+    return runPermissionProbe(executable: helper, arguments: ["--check-permission"])
+}
+
+// runPermissionProbe runs a disclaimed, non-prompting TCC check that prints
+// "granted" or "denied" and exits. Anything else — spawn failure, a hang past
+// the 2s bound, a bad exit — is "unknown".
+func runPermissionProbe(executable: URL, arguments: [String]) -> String {
     let stdout = Pipe()
     let process: WorkerProcess
     do {
         process = try spawnDisclaimedWorker(
-            executable: helper, arguments: ["--check-permission"], stdout: stdout, stderr: Pipe())
+            executable: executable, arguments: arguments, stdout: stdout, stderr: Pipe())
     } catch {
         return "unknown"
     }
@@ -1582,15 +1634,17 @@ func errorEnvelope(_ id: UInt64, _ code: Int, _ msg: String) -> Envelope {
 
 func currentPong() -> PongPayload {
     // These calls only inspect TCC state; neither asks the user or opens System
-    // Settings. Accessibility belongs to this long-lived AX daemon. Screen
-    // Recording belongs to the separate executable that actually calls
-    // ScreenCaptureKit, so query that worker instead of sampling this process
-    // and risking a false-green result under identity-scoped TCC.
+    // Settings. Accessibility belongs to this long-lived AX daemon (re-checked
+    // in a fresh process when the cached answer is stale; see
+    // freshAccessibilityGranted). Screen Recording belongs to the separate
+    // executable that actually calls ScreenCaptureKit, so query that worker
+    // instead of sampling this process and risking a false-green result under
+    // identity-scoped TCC.
     PongPayload(
         server_api_version: apiVersion,
         platform: "darwin",
         helper_version: helperVersion,
-        accessibility_permission: AXIsProcessTrusted() ? "granted" : "denied",
+        accessibility_permission: accessibilityTrusted() ? "granted" : "denied",
         screen_recording_permission: captureWorkerPermissionState())
 }
 
@@ -1611,6 +1665,20 @@ func serveConnection(_ fd: Int32, token: String, shotsDir: String) {
     defer { close(fd) }
     let session = Session(shotsDir: shotsDir)
 
+    // Sends one response. Once a fresh probe has shown an Accessibility grant
+    // this process cannot use, the response is marked closing and the daemon
+    // exits right after sending it; the client respawns on its next RPC.
+    func send(_ resp: Envelope) -> Bool {
+        guard restartForAccessibilityGrant else { return (try? writeFrame(fd, resp)) != nil }
+        var last = resp
+        last.closing = true
+        // Unlink first: the replacement daemon binds this same path, and must
+        // not lose it to this process's exit-time cleanup.
+        if let path = listeningSocketPath { unlink(path) }
+        _ = try? writeFrame(fd, last)
+        exit(0)
+    }
+
     // runServer has already checked that the kernel-reported peer PID is the
     // jcode process that spawned this daemon. The token is a second factor for
     // protocol authentication; neither a readable same-uid socket nor the
@@ -1620,19 +1688,20 @@ func serveConnection(_ fd: Int32, token: String, shotsDir: String) {
         return
     }
     let firstResponse = handlePing(first, token: token)
-    guard (try? writeFrame(fd, firstResponse)) != nil, firstResponse.type == "pong" else { return }
+    guard send(firstResponse), firstResponse.type == "pong" else { return }
 
     // Serve requests until the client disconnects.
     while let req = try? readFrame(fd) {
         if req.type == "ping" {
             // Re-sample both grants so a settings poll can observe a permission
-            // change without restarting either process. A bad re-authentication
-            // attempt terminates this connection after its error response.
+            // change without the user restarting jcode (an Accessibility grant
+            // restarts this daemon; see send). A bad re-authentication attempt
+            // terminates this connection after its error response.
             let resp = handlePing(req, token: token)
-            if (try? writeFrame(fd, resp)) == nil || resp.type != "pong" { return }
+            if !send(resp) || resp.type != "pong" { return }
         } else {
             let resp = dispatch(req, session)
-            if (try? writeFrame(fd, resp)) == nil { return }
+            if !send(resp) { return }
         }
     }
 }
@@ -1758,6 +1827,7 @@ func runServer(socketPath: String, tokenFile: String, shotsDir: String, clientPI
     unlink(socketPath)
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     if fd < 0 { perror("socket"); exit(1) }
+    listeningSocketPath = socketPath
     defer {
         close(fd)
         unlink(socketPath)
@@ -1823,7 +1893,17 @@ func runServer(socketPath: String, tokenFile: String, shotsDir: String, clientPI
 // short enough that a crashed jcode's daemon doesn't linger.
 let idleTimeoutSeconds = 300
 
+// The bound socket path, for the deliberate exit in serveConnection.
+var listeningSocketPath: String?
+
 // MARK: - main
+
+// Fresh-TCC probe (freshAccessibilityGranted). The daemon spawns this already
+// disclaimed, so it needs neither the re-exec nor any server flags.
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--check-accessibility" {
+    FileHandle.standardOutput.write((AXIsProcessTrusted() ? "granted\n" : "denied\n").data(using: .utf8)!)
+    exit(0)
+}
 
 func parseFlag(_ name: String) -> String? {
     let args = CommandLine.arguments

@@ -645,6 +645,16 @@ they matter, instead of sending the user hunting through System Settings:
   fires the same prompt once per daemon launch (an agent loop cannot stack
   system alerts), then returns `permissionsNotGranted` with the remediation
   paths named in the error.
+- **Observing a grant without restarting jcode:** `AXIsProcessTrusted` asks
+  tccd once and caches the answer for the life of the process (the daemon has
+  no run loop to receive the invalidation), so a grant made after the daemon
+  started never shows up in-process. When the cached answer is "denied", the
+  daemon re-asks from a fresh disclaimed child of its own executable
+  (`--check-accessibility`, same bundle identity). If that says "granted", the
+  daemon marks its response `closing` and exits; the client drops the
+  connection, and the next RPC respawns a daemon that can use the grant. A
+  request the daemon refused for this reason (`helperRestarting`, -10021) was
+  never acted on, so the client replays it once on the new daemon.
 
 `OpenScreenshot` re-parses the uuid, rejects symlink/reparse-point cache roots,
 opens only canonical `UUID.png` regular files under the cross-process store lock,

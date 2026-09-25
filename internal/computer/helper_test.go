@@ -602,6 +602,131 @@ func TestHelperConcurrentCallsShareOneReconnect(t *testing.T) {
 	}
 }
 
+// --- a daemon restarting to pick up an Accessibility grant ---
+
+func TestHelperClosingPongRespawnsOnNextRequest(t *testing.T) {
+	h, first := dialMock(t, nil)
+	first.on(typePing, func(id uint64, _ json.RawMessage) envelope {
+		return envelope{Type: typePong, ID: id, Closing: true, Payload: mustJSON(pongPayload{
+			ServerAPIVersion:          apiVersion,
+			Platform:                  "darwin",
+			HelperVersion:             "test-1.0",
+			AccessibilityPermission:   PermissionGranted,
+			ScreenRecordingPermission: PermissionGranted,
+		})}
+	})
+	reconnects := 0
+	h.redial = func(context.Context) (*helperBackend, error) {
+		reconnects++
+		fresh, _ := dialMock(t, nil)
+		return fresh, nil
+	}
+
+	perms, err := h.RefreshPermissionStatus(context.Background())
+	if err != nil || perms.Accessibility != PermissionGranted {
+		t.Fatalf("closing pong must still report its grants: %+v, %v", perms, err)
+	}
+	if reconnects != 0 {
+		t.Fatalf("closing pong redialed eagerly: reconnects=%d", reconnects)
+	}
+	if _, err := h.ListApps(context.Background()); err != nil {
+		t.Fatalf("request after a closing pong: %v", err)
+	}
+	if reconnects != 1 {
+		t.Fatalf("reconnects=%d, want 1", reconnects)
+	}
+	if got := countRequests(first.seen(), typeListApps); got != 0 {
+		t.Fatalf("closing daemon still received %d ListApps", got)
+	}
+}
+
+func TestHelperReplaysRequestRefusedForRestart(t *testing.T) {
+	h, first := dialMock(t, func(d *mockDaemon) {
+		d.on(typePerform, func(id uint64, _ json.RawMessage) envelope {
+			resp := errFrame(id, codeHelperRestarting, "restarting")
+			resp.Closing = true
+			return resp
+		})
+	})
+	var second *mockDaemon
+	h.redial = func(context.Context) (*helperBackend, error) {
+		fresh, daemon := dialMock(t, nil)
+		second = daemon
+		return fresh, nil
+	}
+
+	if err := h.Perform(context.Background(), Action{Kind: "click", BundleID: "com.apple.Notes", Ref: 101}); err != nil {
+		t.Fatalf("refused-for-restart Perform was not replayed: %v", err)
+	}
+	if got := countRequests(first.seen(), typePerform); got != 1 {
+		t.Fatalf("restarting daemon saw Perform %d times, want 1", got)
+	}
+	if second == nil || countRequests(second.seen(), typePerform) != 1 {
+		t.Fatal("replacement daemon did not receive the replayed Perform exactly once")
+	}
+}
+
+func TestHelperDoesNotReplayOtherClosingErrors(t *testing.T) {
+	h, _ := dialMock(t, func(d *mockDaemon) {
+		d.on(typePerform, func(id uint64, _ json.RawMessage) envelope {
+			resp := errFrame(id, codeAccessibilityError, "boom")
+			resp.Closing = true
+			return resp
+		})
+	})
+	reconnects := 0
+	h.redial = func(context.Context) (*helperBackend, error) {
+		reconnects++
+		fresh, _ := dialMock(t, nil)
+		return fresh, nil
+	}
+	err := h.Perform(context.Background(), Action{Kind: "click", BundleID: "com.apple.Notes", Ref: 101})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("closing error = %v, want the daemon's error", err)
+	}
+	if reconnects != 0 {
+		t.Fatalf("a non-restart error was replayed: reconnects=%d", reconnects)
+	}
+}
+
+func TestHelperRedialRetriesDaemonClosedDuringHandshake(t *testing.T) {
+	closingPong := func(d *mockDaemon) {
+		d.on(typePing, func(id uint64, _ json.RawMessage) envelope {
+			return envelope{Type: typePong, ID: id, Closing: true, Payload: mustJSON(pongPayload{
+				ServerAPIVersion: apiVersion, Platform: "darwin", HelperVersion: "test-1.0",
+				AccessibilityPermission: PermissionGranted, ScreenRecordingPermission: PermissionGranted,
+			})}
+		})
+	}
+	client, server := net.Pipe()
+	d := newMockDaemon(server, "test-token")
+	closingPong(d)
+	go d.serve()
+	if _, err := newHelperConn(client, "test-token"); !errors.Is(err, errHelperRestarting) {
+		t.Fatalf("closing handshake pong = %v, want errHelperRestarting", err)
+	}
+
+	h, _ := dialMock(t, nil)
+	h.mu.Lock()
+	h.markDeadLocked()
+	h.mu.Unlock()
+	redials := 0
+	h.redial = func(context.Context) (*helperBackend, error) {
+		redials++
+		if redials == 1 {
+			return nil, errHelperRestarting
+		}
+		fresh, _ := dialMock(t, nil)
+		return fresh, nil
+	}
+	if _, err := h.ListApps(context.Background()); err != nil {
+		t.Fatalf("ListApps after a restart during handshake: %v", err)
+	}
+	if redials != 2 {
+		t.Fatalf("redials=%d, want 2", redials)
+	}
+}
+
 func TestSessionInvalidatesUIDsWhenHelperReconnects(t *testing.T) {
 	h, _ := dialMock(t, nil)
 	mgr := NewManager(Config{Enabled: true, MaxActionsPerBatch: 20}, t.TempDir())
