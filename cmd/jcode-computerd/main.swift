@@ -561,8 +561,10 @@ func axValue(_ el: AXUIElement, _ attr: String) -> CFTypeRef? {
         currentAXFatalError = DaemonError(
             code: Code.accessibilityError, message: "Accessibility element became invalid; take a fresh snapshot")
     default:
-        currentAXFatalError = DaemonError(
-            code: Code.accessibilityError, message: "Accessibility read failed: \(result.rawValue)")
+        // Per-element rejections (kAXErrorFailure -25200, notImplemented, ...)
+        // say nothing about the rest of the tree. Treat them as a missing
+        // attribute so one uncooperative element cannot void the snapshot.
+        return nil
     }
     return nil
 }
@@ -597,14 +599,22 @@ func axSecondaryActions(_ el: AXUIElement) -> [String] {
     var values: CFArray?
     let result = AXUIElementCopyActionNames(el, &values)
     guard result == .success else {
-        if result == .cannotComplete {
+        switch result {
+        case .apiDisabled:
+            currentAXFatalError = DaemonError(
+                code: Code.permissionsNotGranted, message: "Accessibility API is disabled")
+        case .cannotComplete:
             currentAXFatalError = DaemonError(
                 code: Code.accessibilityError,
                 message: "target app did not answer Accessibility within the timeout")
-        } else if result != .actionUnsupported && result != .noValue {
-            currentAXFatalError = DaemonError(
-                code: Code.accessibilityError,
-                message: "Accessibility action lookup failed: \(result.rawValue)")
+        default:
+            // Some apps (observed: Calculator on macOS 27) answer
+            // AXUIElementCopyActionNames with kAXErrorFailure (-25200) for
+            // individual elements whose attributes read fine. Secondary actions
+            // are optional metadata — clicks still go through AXPress or a
+            // synthesized event — so drop them for this element instead of
+            // failing the whole snapshot.
+            break
         }
         return []
     }
