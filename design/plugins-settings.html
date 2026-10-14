@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>jcode · 设置 — 插件 设计稿 v3</title>
+<style>
+/* ════════════════════════════════════════════════════════════════════
+   Design Tokens — verbatim copy of web/src/styles/tokens.css (light + dark).
+   结构/尺寸镜像 web/src/components/SettingsView.tsx 与 settings/atoms.tsx。
+   ════════════════════════════════════════════════════════════════════ */
+:root {
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-xs: 3px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-lg: 8px; --radius-xl: 12px; --radius-2xl: 16px; --radius-pill: 9999px;
+  --shadow-sm: 0 1px 2px rgba(24,20,16,.06);
+  --shadow-md: 0 4px 14px -4px rgba(24,20,16,.12);
+  --shadow-lg: 0 14px 36px -14px rgba(24,20,16,.20);
+  --shadow-xl: 0 1px 2px rgba(24,20,16,.04), 0 24px 56px -28px rgba(24,20,16,.26);
+  --accent-wash-soft: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  --accent-wash: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  --accent-wash-strong: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  --accent-border: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  --color-accent-neutral: var(--color-foreground);
+  --neutral-wash-soft: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  --neutral-wash: color-mix(in srgb, var(--color-foreground) 11%, transparent);
+  --neutral-border: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+  --duration-fast:100ms; --duration-normal:150ms;
+  --color-primary:#FF8400; --color-background:#F2F3F0; --color-surface:#FFFFFF;
+  --color-foreground:#111111; --color-muted-foreground:#666666; --color-border:#CBCCC9;
+  --color-muted:#F2F3F0; --color-secondary:#E7E8E5; --color-secondary-foreground:#111111;
+  --color-success-bg:#DFE6E1; --color-success-fg:#004D1A;
+  --color-error-bg:#E5DCDA; --color-error-fg:#8C1C00;
+  --color-warning-bg:#E9E3D8; --color-warning-fg:#804200;
+  --color-info-bg:#DFDFE6; --color-info-fg:#000066;
+  --color-destructive:#D93C15; --color-on-primary:#FFFFFF; --color-on-destructive:#FFFFFF;
+  --color-success:#16A34A;
+}
+.dark {
+  --color-primary:#FF8400; --color-background:#111111; --color-surface:#1A1A1A;
+  --color-foreground:#FFFFFF; --color-muted-foreground:#B8B9B6; --color-border:#2E2E2E;
+  --color-muted:#2E2E2E; --color-secondary:#2E2E2E; --color-secondary-foreground:#FFFFFF;
+  --color-success-bg:#222924; --color-success-fg:#B6FFCE;
+  --color-error-bg:#24100B; --color-error-fg:#FF5C33;
+  --color-warning-bg:#291C0F; --color-warning-fg:#FF8400;
+  --color-info-bg:#222229; --color-info-fg:#B2B2FF;
+  --color-destructive:#FF5C33; --color-on-primary:#FFFFFF; --color-on-destructive:#FFFFFF;
+  --color-success:#22C55E;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-md: 0 4px 14px -4px rgba(0,0,0,.5);
+  --shadow-lg: 0 14px 36px -14px rgba(0,0,0,.6);
+  --shadow-xl: 0 1px 2px rgba(0,0,0,.3), 0 24px 56px -28px rgba(0,0,0,.7);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-sans);
+  background: var(--color-muted);
+  color: var(--color-foreground);
+  font-size: 13px;
+  padding: 28px 14px 96px;
+  -webkit-font-smoothing: antialiased;
+}
+code { font-family: var(--font-mono); font-size: .92em; }
+
+.stage-label {
+  max-width: 1140px; margin: 30px auto 10px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-muted-foreground);
+  display: flex; align-items: center; gap: 8px;
+}
+.stage-label::after { content:''; flex:1; height:1px; background: var(--color-border); }
+.stage-label b { color: var(--color-primary); font-weight: 600; }
+
+/* ── macOS 窗口 ─────────────────────────────────────────────────────── */
+.window {
+  max-width: 1140px; margin: 0 auto; height: 720px;
+  display: flex; flex-direction: column;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+.titlebar {
+  height: 28px; flex: none; display: flex; align-items: center; padding: 0 12px; gap: 8px;
+}
+.tl { width: 12px; height: 12px; border-radius: var(--radius-pill); }
+.tl.r { background: #FF5F57; } .tl.y { background: #FEBC2E; } .tl.g { background: #28C840; }
+
+/* settings shell（镜像 SettingsView.tsx） */
+.shell { display: flex; flex: 1; min-height: 0; }
+.rail {
+  width: 208px; flex: none; overflow-y: auto;
+  padding: 12px; display: flex; flex-direction: column; gap: 2px;
+}
+.rail .tab {
+  position: relative; display: flex; align-items: center; gap: 10px;
+  height: 32px; padding: 0 10px; border-radius: var(--radius-md);
+  font-size: 13px; color: var(--color-muted-foreground); white-space: nowrap;
+  transition: background var(--duration-fast);
+}
+.rail .tab svg { width: 14px; height: 14px; flex: none; }
+.rail .tab.on { background: var(--color-secondary); color: var(--color-foreground); font-weight: 500; }
+.rail .tab.on::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 16px; border-radius: var(--radius-pill);
+  background: var(--color-accent-neutral);
+}
+.rail .back {
+  margin-top: auto; display: flex; align-items: center; gap: 6px;
+  height: 36px; padding: 0 10px; font-size: 13px; font-weight: 500;
+  color: var(--color-muted-foreground); border-radius: var(--radius-md);
+}
+.rail .back svg { width: 16px; height: 16px; }
+
+.panel-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.panel {
+  flex: 1; min-height: 0; overflow-y: auto;
+  margin: 4px 14px 14px 4px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-2xl);
+  background: var(--color-surface); box-shadow: var(--shadow-sm);
+}
+.inner { max-width: 768px; margin: 0 auto; padding: 28px 32px 40px; }
+.stack > * + * { margin-top: 20px; }
+
+/* ── atoms（镜像 settings/atoms.tsx）────────────────────────────────── */
+.section-title { font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+.count { font-family: var(--font-mono); font-size: 11px; color: var(--color-muted-foreground); }
+.grouplabel {
+  font-size: 10px; font-weight: 500; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--color-muted-foreground);
+}
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 12px; border-radius: var(--radius-md);
+  font-size: 12px; font-weight: 500; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--color-foreground);
+  transition: background var(--duration-fast);
+}
+.btn svg { width: 14px; height: 14px; }
+.btn.primary { background: var(--color-primary); color: var(--color-on-primary); }
+.btn.secondary { background: var(--color-surface); border-color: var(--color-border); }
+.btn.secondary:hover { background: var(--color-secondary); }
+.btn.ghost:hover { background: var(--color-secondary); }
+.btn.danger { color: var(--color-destructive); }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 11px; border-radius: var(--radius-sm); }
+.btn.xs { height: 22px; padding: 0 8px; font-size: 10px; border-radius: var(--radius-sm); }
+.btn.xs svg { width: 12px; height: 12px; }
+
+.input {
+  width: 100%; height: 32px; padding: 0 10px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface); color: var(--color-foreground);
+  font: inherit; font-size: 12px; outline: none;
+}
+.input.mono { font-family: var(--font-mono); }
+.input::placeholder { color: var(--color-muted-foreground); }
+.input:focus { border-color: var(--color-primary); }
+
+.seg { display: inline-flex; gap: 2px; border-radius: var(--radius-md); background: var(--color-muted); padding: 2px; }
+.seg button {
+  height: 24px; padding: 0 10px; border: 0; border-radius: var(--radius-sm);
+  font: inherit; font-size: 11px; font-weight: 500; cursor: pointer;
+  background: transparent; color: var(--color-muted-foreground);
+}
+.seg button.on { background: var(--color-surface); color: var(--color-foreground); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 8px;
+  border-radius: var(--radius-pill); font-size: 10px; font-weight: 500;
+  background: var(--color-muted); color: var(--color-muted-foreground); white-space: nowrap;
+}
+.chip.accent { background: var(--neutral-wash); color: var(--color-accent-neutral); }
+.chip.warn { background: var(--color-warning-bg); color: var(--color-warning-fg); }
+
+.row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+.row[data-muted="true"] { opacity: .55; }
+.iconbox {
+  width: 28px; height: 28px; flex: none; display: grid; place-items: center;
+  border-radius: var(--radius-md); color: var(--color-muted-foreground);
+}
+.iconbox svg { width: 16px; height: 16px; }
+.row-title { font-size: 12px; font-weight: 500; }
+.row-desc { font-size: 11px; color: var(--color-muted-foreground); margin-top: 2px; }
+.row-mono {
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-muted-foreground);
+  margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.status-dot { font-size: 10px; }
+.status-dot.ok { color: var(--color-success); }
+
+.switch {
+  position: relative; width: 34px; height: 20px; flex: none;
+  border-radius: var(--radius-pill); border: 0; padding: 0; cursor: pointer;
+  background: var(--color-accent-neutral); transition: background var(--duration-fast);
+}
+.switch::after {
+  content: ''; position: absolute; left: 2px; top: 2px;
+  width: 16px; height: 16px; border-radius: var(--radius-pill);
+  background: var(--color-surface); box-shadow: var(--shadow-sm);
+  transition: transform var(--duration-fast);
+}
+.switch.on::after { transform: translateX(14px); }
+.switch:not(.on) { background: var(--color-border); }
+
+/* 行内展开详情（对齐 MCP OAuth 展开行 mt-2 pl-10） */
+.detail { margin-top: 8px; padding-left: 40px; }
+.detail > * + * { margin-top: 8px; }
+.dtitle {
+  font-size: 10px; font-weight: 500; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--color-muted-foreground);
+}
+.dlist { list-style: none; }
+.dlist > * + * { margin-top: 3px; }
+.dlist li { font-family: var(--font-mono); font-size: 11px; display: flex; align-items: center; gap: 6px; }
+.dlist li .sub { font-family: var(--font-sans); font-size: 10.5px; color: var(--color-muted-foreground); }
+.dpaths { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-muted-foreground); line-height: 1.7; word-break: break-all; }
+.dactions { display: flex; gap: 6px; align-items: center; }
+.diag { display: flex; gap: 6px; align-items: flex-start; font-size: 10.5px; line-height: 1.5; color: var(--color-warning-fg); }
+.diag svg { width: 12px; height: 12px; flex: none; margin-top: 1px; }
+.diag-err { color: var(--color-error-fg); font-family: var(--font-mono); font-size: 10px; }
+
+/* 内联 install 表单卡（镜像 MCP edit form） */
+.form-card {
+  overflow: hidden; border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border); background: var(--color-surface);
+}
+.fc-head {
+  border-bottom: 1px solid var(--color-border); background: var(--color-muted);
+  padding: 10px 14px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--color-muted-foreground);
+}
+.fc-body { padding: 16px; }
+.field { margin-bottom: 14px; }
+.field:last-child { margin-bottom: 0; }
+.field label { display: block; font-size: 11px; font-weight: 500; margin-bottom: 6px; }
+.trust-box {
+  display: flex; gap: 8px; align-items: flex-start;
+  border: 1px solid var(--accent-border); background: var(--accent-wash-soft);
+  border-radius: var(--radius-md); padding: 10px 12px;
+  font-size: 11.5px; line-height: 1.6;
+}
+.trust-box svg { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--color-warning-fg); }
+.trust-box .tp { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-muted-foreground); margin-top: 6px; line-height: 1.7; }
+.fc-foot {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 16px; border-top: 1px solid var(--color-border);
+}
+
+/* EmptyState（镜像 atoms.EmptyState） */
+.empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 48px 0; text-align: center; }
+.e-icon {
+  width: 36px; height: 36px; display: grid; place-items: center;
+  border-radius: var(--radius-lg); background: var(--color-secondary);
+  color: var(--color-muted-foreground);
+}
+.e-icon svg { width: 16px; height: 16px; }
+.e-title { font-size: 13px; font-weight: 500; }
+.e-hint { max-width: 260px; font-size: 11px; line-height: 1.6; color: var(--color-muted-foreground); }
+
+.fab {
+  position: fixed; right: 18px; bottom: 18px;
+  border: 1px solid var(--color-border); background: var(--color-surface);
+  color: var(--color-foreground); border-radius: var(--radius-pill);
+  padding: 8px 14px; font-size: 12px; cursor: pointer; box-shadow: var(--shadow-md);
+}
+</style>
+</head>
+<body>
+
+<!-- 共用 SVG 定义 -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- heroicons outline（24，stroke 1.8 近似） -->
+    <g id="i-puzzle"><path d="M10 3.5a1.8 1.8 0 0 1 3.6 0V5h3.4a1 1 0 0 1 1 1v3.4h1.5a1.8 1.8 0 0 1 0 3.6H18V16a1 1 0 0 1-1 1h-3.4v1.5a1.8 1.8 0 0 1-3.6 0V17H6.9a1 1 0 0 1-1-1v-3H4.5a1.8 1.8 0 0 1 0-3.6H6V6a1 1 0 0 1 1-1h3V3.5z"/></g>
+    <g id="i-gear"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></g>
+    <g id="i-cloud"><path d="M17.5 18a4.5 4.5 0 0 0 .42-8.98 6 6 0 0 0-11.06 3.1A3.5 3.5 0 0 0 7 19h10.5z" transform="translate(0,-1)"/></g>
+    <g id="i-swatch"><path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-.8 2-1.7 0-.9-.8-1.3-.8-2.3 0-1 .8-1.7 2-1.7H17a4 4 0 0 0 4-4c0-4.5-4-8.3-9-8.3z"/></g>
+    <g id="i-chip"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></g>
+    <g id="i-server"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></g>
+    <g id="i-sparkles"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></g>
+    <g id="i-db"><ellipse cx="12" cy="5.5" rx="8" ry="2.5"/><path d="M4 5.5V18.5c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5V5.5"/><path d="M4 12c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5"/></g>
+    <g id="i-globe"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></g>
+    <g id="i-monitor"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></g>
+    <g id="i-terminal"><path d="m5 7 5 5-5 5M12 17h7"/></g>
+    <g id="i-kbd"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M17 10h.01M7 14h10"/></g>
+    <g id="i-chart"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></g>
+    <g id="i-wrench"><path d="M14.7 6.3a4.5 4.5 0 0 0-6 6L3 18l3 3 5.7-5.7a4.5 4.5 0 0 0 6-6L14 13l-3-3 3.7-3.7z"/></g>
+    <g id="i-back"><path d="M19 12H5M11 18l-6-6 6-6"/></g>
+    <g id="i-plus"><path d="M12 5v14M5 12h14"/></g>
+    <g id="i-warn"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></g>
+    <g id="i-store"><path d="M3 9l1.5-5h15L21 9M3 9v10a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V9M3 9h18M9 13h6"/></g>
+  </defs>
+</svg>
+
+<div class="stage-label"><b>状态 ①</b> 设置 → 插件 · 列表（卡片 = 现有 ROW/GeneralTab 语言，详情行内展开）</div>
+
+<!-- ══════════════ STATE 1 : list ══════════════ -->
+<div class="window">
+  <div class="titlebar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></div>
+  <div class="shell">
+    <nav class="rail">
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-gear"/></svg>通用</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-cloud"/></svg>云</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-swatch"/></svg>外观</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-chip"/></svg>服务商</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-server"/></svg>MCP 服务器</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-sparkles"/></svg>技能</div>
+      <div class="tab on"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-puzzle"/></svg>插件</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-db"/></svg>记忆</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-globe"/></svg>浏览器</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-monitor"/></svg>电脑操控</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-terminal"/></svg>SSH</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-kbd"/></svg>快捷键</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-chart"/></svg>使用统计</div>
+      <div class="tab"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-wrench"/></svg>开发者</div>
+      <div class="back"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-back"/></svg>返回工作区</div>
+    </nav>
+
+    <div class="panel-wrap">
+      <div class="panel">
+        <div class="inner stack">
+          <!-- 页头：SECTION_TITLE + 计数 + 右侧小按钮（同 MCPTab） -->
+          <div style="display:flex; align-items:center; justify-content:space-between">
+            <div style="display:flex; align-items:baseline; gap:8px">
+              <h3 class="section-title">插件</h3>
+              <span class="count">3</span>
+            </div>
+            <button class="btn secondary sm">
+              <svg fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><use href="#i-plus"/></svg>
+              安装插件
+            </button>
+          </div>
+          <p style="font-size:11px; color:var(--color-muted-foreground); line-height:1.6">
+            插件可为 Agent 添加技能与 MCP 服务器（Agent Plugins 规范）。
+            <span style="color:var(--color-warning-fg)">仅安装来自可信来源的插件。</span>
+            <a href="https://agent-plugins.org" style="color:var(--color-primary); text-decoration:none">了解更多 ↗</a>
+          </p>
+          <div style="display:flex; align-items:center; gap:8px">
+            <div class="seg">
+              <button class="on">全部</button>
+              <button>已启用</button>
+              <button>已停用</button>
+            </div>
+            <input class="input" style="flex:1" placeholder="搜索插件…">
+          </div>
+
+          <div class="grouplabel">已安装</div>
+
+          <!-- 插件卡：enabled + 展开详情 -->
+          <div class="row" style="align-items:flex-start">
+            <div class="iconbox"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-puzzle"/></svg></div>
+            <div style="min-width:0; flex:1">
+              <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px">
+                <span class="row-title">pr-workflows</span>
+                <span class="chip">v1.2.0</span>
+                <span class="chip">技能 3</span>
+                <span class="chip">MCP 1</span>
+                <span class="status-dot ok">● 已启用</span>
+              </div>
+              <div class="row-desc">PR 审查、评论处理与提交的一整套工作流技能，附 CI 状态 MCP 服务器。</div>
+              <div class="detail">
+                <div>
+                  <div class="dtitle">技能</div>
+                  <ul class="dlist">
+                    <li>review-pr <span class="sub">/review-pr</span></li>
+                    <li>pr-comments <span class="sub">/pr-comments</span></li>
+                    <li>submit-pr <span class="sub">/submit-pr</span></li>
+                  </ul>
+                </div>
+                <div>
+                  <div class="dtitle">MCP 服务器</div>
+                  <ul class="dlist">
+                    <li>ci-status <span class="sub">stdio · ./bin/ci-server · ● 已连接</span></li>
+                  </ul>
+                </div>
+                <div class="dpaths">
+                  来源 jcode-plugins 插件市场 · 数据目录 ~/.jcode/plugins/data/pr-workflows
+                </div>
+                <div class="dactions">
+                  <button class="btn ghost xs">检查更新</button>
+                  <button class="btn ghost xs danger">卸载</button>
+                </div>
+              </div>
+            </div>
+            <button class="switch on" title="已启用"></button>
+          </div>
+
+          <!-- 插件卡：disabled + 诊断 -->
+          <div class="row" data-muted="true" style="align-items:flex-start">
+            <div class="iconbox"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-puzzle"/></svg></div>
+            <div style="min-width:0; flex:1">
+              <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px">
+                <span class="row-title">azure-devops</span>
+                <span class="chip">v0.9.1</span>
+                <span class="chip">技能 1</span>
+                <span class="chip">MCP 2</span>
+                <span class="chip warn">1 个服务器已跳过</span>
+              </div>
+              <div class="row-desc">将 Azure DevOps 工作项、仓库与 PR 工作流带入 jcode。</div>
+              <div class="detail">
+                <div class="diag">
+                  <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><use href="#i-warn"/></svg>
+                  <span>mcp.json · 服务器 <code>legacy-events</code>：传输 <code>sse</code> 当前不受支持，已跳过；其余组件不受影响。</span>
+                </div>
+                <div class="dactions">
+                  <button class="btn ghost xs">详情</button>
+                  <button class="btn ghost xs danger">卸载</button>
+                </div>
+              </div>
+            </div>
+            <button class="switch" title="已停用"></button>
+          </div>
+
+          <!-- 插件卡：enabled 收起态 -->
+          <div class="row">
+            <div class="iconbox"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-puzzle"/></svg></div>
+            <div style="min-width:0; flex:1">
+              <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px">
+                <span class="row-title">teams-cli</span>
+                <span class="chip">v2.0.3</span>
+                <span class="chip">技能 1</span>
+                <span class="chip">MCP 1</span>
+                <span class="status-dot ok">● 已启用</span>
+              </div>
+              <div class="row-desc">从 Agent 直接收发 Microsoft Teams 消息。</div>
+            </div>
+            <button class="switch on"></button>
+          </div>
+
+          <!-- marketplace 浏览 -->
+          <div class="grouplabel">jcode-plugins 插件市场 · github.com/cnjack/jcode-plugins</div>
+
+          <div class="row">
+            <div class="iconbox"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-puzzle"/></svg></div>
+            <div style="min-width:0; flex:1">
+              <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px">
+                <span class="row-title">fabric-skills</span>
+                <span class="chip">v1.0.0</span>
+                <span class="chip">技能 12</span>
+              </div>
+              <div class="row-desc">Microsoft Fabric 开发者与使用者的完整技能包。</div>
+            </div>
+            <button class="btn secondary xs">安装</button>
+          </div>
+
+          <div class="row">
+            <div class="iconbox"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-puzzle"/></svg></div>
+            <div style="min-width:0; flex:1">
+              <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px">
+                <span class="row-title">iot-device-lab</span>
+                <span class="chip">v0.4.0</span>
+                <span class="chip">技能 2</span>
+                <span class="chip">MCP 1</span>
+                <span class="chip warn">stdio</span>
+              </div>
+              <div class="row-desc">通过串口烧录、监控与调试 IoT 实验室设备。</div>
+            </div>
+            <button class="btn secondary xs">安装</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="stage-label"><b>状态 ②</b> 安装插件 — 内联表单（复用 MCP edit form 卡片语言），解析 plugin.json 后展示信任确认</div>
+
+<!-- ══════════════ STATE 2 : inline install form ══════════════ -->
+<div class="window" style="height:auto; min-height:560px">
+  <div class="titlebar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></div>
+  <div class="shell">
+    <nav class="rail">
+      <div class="tab on"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-puzzle"/></svg>插件</div>
+      <div class="back"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-back"/></svg>返回工作区</div>
+    </nav>
+    <div class="panel-wrap">
+      <div class="panel">
+        <div class="inner stack">
+          <div style="display:flex; align-items:center; justify-content:space-between">
+            <h3 class="section-title">安装插件</h3>
+            <button class="btn ghost sm">← 返回</button>
+          </div>
+          <div class="form-card">
+            <div class="fc-head">安装插件</div>
+            <div class="fc-body">
+              <div class="field">
+                <label>来源</label>
+                <div class="seg">
+                  <button>本地目录</button>
+                  <button class="on">Git URL</button>
+                  <button>插件市场</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Git URL</label>
+                <input class="input mono" value="https://github.com/acme/iot-device-lab">
+              </div>
+              <div class="trust-box">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><use href="#i-warn"/></svg>
+                <div>
+                  <b>iot-device-lab</b> 包含 <b>stdio MCP 服务器</b>，启用后可在本机启动进程。插件不会被沙箱隔离 — 请仅安装你信任的来源。
+                  <div class="tp">
+                    v0.4.0 · MIT · Acme Platform Team · 组件：2 个技能，1 个 stdio MCP 服务器（./bin/device-lab）
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="fc-foot">
+              <button class="btn ghost">取消</button>
+              <button class="btn primary">信任并安装</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="stage-label"><b>状态 ③</b> 空态（复用 atoms.EmptyState）＋ 插件市场源管理</div>
+
+<!-- ══════════════ STATE 3 : empty + marketplaces ══════════════ -->
+<div class="window" style="height:auto; min-height:520px">
+  <div class="titlebar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></div>
+  <div class="shell">
+    <nav class="rail">
+      <div class="tab on"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-puzzle"/></svg>插件</div>
+      <div class="back"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-back"/></svg>返回工作区</div>
+    </nav>
+    <div class="panel-wrap">
+      <div class="panel">
+        <div class="inner stack">
+          <div style="display:flex; align-items:center; justify-content:space-between">
+            <div style="display:flex; align-items:baseline; gap:8px">
+              <h3 class="section-title">插件</h3>
+              <span class="count">0</span>
+            </div>
+            <button class="btn secondary sm">
+              <svg fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><use href="#i-plus"/></svg>
+              安装插件
+            </button>
+          </div>
+          <p style="font-size:11px; color:var(--color-muted-foreground); line-height:1.6">
+            插件可为 Agent 添加技能与 MCP 服务器（Agent Plugins 规范）。
+            <span style="color:var(--color-warning-fg)">仅安装来自可信来源的插件。</span>
+            <a href="https://agent-plugins.org" style="color:var(--color-primary); text-decoration:none">了解更多 ↗</a>
+          </p>
+
+          <div class="empty">
+            <div class="e-icon"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-puzzle"/></svg></div>
+            <div class="e-title">尚未安装插件</div>
+            <div class="e-hint">从本地目录或 Git URL 安装插件，或添加插件市场以浏览。</div>
+            <div style="display:flex; gap:8px; margin-top:4px">
+              <button class="btn secondary sm">添加插件市场</button>
+            </div>
+          </div>
+
+          <div class="grouplabel">插件市场</div>
+          <div class="row">
+            <div class="iconbox"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><use href="#i-store"/></svg></div>
+            <div style="min-width:0; flex:1">
+              <div style="display:flex; align-items:center; gap:8px">
+                <span class="row-title">jcode-plugins</span>
+                <span class="chip">6 个插件</span>
+              </div>
+              <div class="row-mono">https://github.com/cnjack/jcode-plugins</div>
+            </div>
+            <button class="btn ghost xs">刷新</button>
+            <button class="btn ghost xs danger">移除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<button class="fab" onclick="document.documentElement.classList.toggle('dark')">🌓 切换暗色</button>
+
+</body>
+</html>
