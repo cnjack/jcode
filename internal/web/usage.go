@@ -53,14 +53,15 @@ func (s *Server) handleUsageStats(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"range_days": days,
 		"totals": map[string]any{
-			"total_tokens":      win.Totals.Total,
-			"prompt_tokens":     win.Totals.Prompt,
-			"completion_tokens": win.Totals.Completion,
-			"cached_tokens":     win.Totals.Cached,
-			"reasoning_tokens":  win.Totals.Reasoning,
-			"calls":             win.Totals.Calls,
-			"turns":             win.Totals.Turns,
-			"sessions":          countSessions(windowSince),
+			"total_tokens":       win.Totals.Total,
+			"prompt_tokens":      win.Totals.Prompt,
+			"completion_tokens":  win.Totals.Completion,
+			"cached_tokens":      win.Totals.Cached,
+			"reasoning_tokens":   win.Totals.Reasoning,
+			"cache_write_tokens": win.Totals.CacheWrite,
+			"calls":              win.Totals.Calls,
+			"turns":              win.Totals.Turns,
+			"sessions":           countSessions(windowSince),
 		},
 		"active_days":     win.ActiveDays,
 		"current_streak":  full.CurrentStreak,
@@ -116,12 +117,13 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 		resp["cache_hit_rate"] = eng.tokenUsage.CacheHitRate()
 		resp["cache_supported"] = eng.tokenUsage.CacheObserved()
 		resp["tokens"] = map[string]any{
-			"total_tokens":      full.TotalTokens,
-			"prompt_tokens":     full.PromptTokens,
-			"completion_tokens": full.CompletionTokens,
-			"cached_tokens":     full.CachedTokens,
-			"reasoning_tokens":  full.ReasoningTokens,
-			"calls":             full.CallCount,
+			"total_tokens":       full.TotalTokens,
+			"prompt_tokens":      full.PromptTokens,
+			"completion_tokens":  full.CompletionTokens,
+			"cached_tokens":      full.CachedTokens,
+			"reasoning_tokens":   full.ReasoningTokens,
+			"cache_write_tokens": full.CacheWriteTokens,
+			"calls":              full.CallCount,
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -144,13 +146,14 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 	resp["cache_hit_rate"] = agg.CacheHitRate
 	resp["cache_supported"] = agg.CacheSupported
 	resp["tokens"] = map[string]any{
-		"total_tokens":      agg.Totals.Total,
-		"prompt_tokens":     agg.Totals.Prompt,
-		"completion_tokens": agg.Totals.Completion,
-		"cached_tokens":     agg.Totals.Cached,
-		"reasoning_tokens":  agg.Totals.Reasoning,
-		"calls":             agg.Totals.Calls,
-		"turns":             agg.Totals.Turns,
+		"total_tokens":       agg.Totals.Total,
+		"prompt_tokens":      agg.Totals.Prompt,
+		"completion_tokens":  agg.Totals.Completion,
+		"cached_tokens":      agg.Totals.Cached,
+		"reasoning_tokens":   agg.Totals.Reasoning,
+		"cache_write_tokens": agg.Totals.CacheWrite,
+		"calls":              agg.Totals.Calls,
+		"turns":              agg.Totals.Turns,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Prompt-cache write metrics.** Chat Completions and Responses providers that report cache-creation tokens (OpenRouter `cache_write_tokens`, LiteLLM `cache_creation_tokens`, Anthropic-style `cache_creation_input_tokens`) now feed the existing cache-write counter, and cache-read fallbacks (`cache_read_input_tokens`, DeepSeek `prompt_cache_hit_tokens`, Moonshot `cached_tokens`) fill in when `prompt_tokens_details` is absent. Usage Statistics show cache-write tokens and API-call counts; the composer context popup shows cache writes when present; `/api/usage/stats` and `/api/tasks/{id}/stats` return `cache_write_tokens`.
 - **Unified Provider account sign-in.** Settings and first-run setup can now authenticate OpenAI through ChatGPT/Codex, xAI through Grok, and GitHub Copilot through one device-code account flow, while preserving API-key providers. Providers bind to a default or explicit local account and expose connected, reauthentication, and multi-account management states.
 - GitHub Copilot requests keep one stable session interaction while classifying tool continuations and delegated agents as agent-initiated, avoiding accidental extra premium interactions.
 - Managed ChatGPT/Codex, xAI, and GitHub Copilot Providers now browse the selected account's live model catalog. Enabled account-scoped models survive restart, and Copilot routes OpenAI models through Responses while retaining Chat Completions for other advertised vendors.
@@ -17,12 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Provider capability routing.** Settings now distinguishes chat, image generation, vision input, and provider-bound tools using the exact provider profile, endpoint, protocol, and model. It includes an Image Model picker, provider capability status, a BigModel Search MCP preset, and provider Web Search policy.
 
 ### Changed
+- Upgraded `cloudwego/eino` v0.9.9 → v0.9.21 (checkpoint/cancel fixes, streaming truncation offload with read-tool hints, `CacheWriteTokens` in usage), `eino-ext` MCP tool v0.0.9, `mark3labs/mcp-go` v1.2.1, `go-openai` v1.43.0, the Charm TUI stack (bubbletea v2.1.0, bubbles v2.2.1, lipgloss v2.0.6, glamour v2.0.1), `tinygo bluetooth` v0.16.0, goja and `golang.org/x/*`. The minimum Go version is now 1.26 (required by bubbletea v2.1 and `golang.org/x/*`).
 - Grok Imagine generation now uses xAI-native `aspect_ratio` and `resolution` controls (`1k`/`2k`) instead of forwarding OpenAI-style `size`; older common JCode sizes are normalized into the equivalent native controls before approval and dispatch.
 - **Ask User is now a bottom interaction dock.** Pending questions replace the composer and are presented one at a time with paging, recommended and multi-select options, custom answers, skip, submission progress, and retryable errors. Once answered, a compact receipt remains in the conversation timeline.
 - Pending Ask User calls no longer merge into activity groups, and both pending and resolved question surfaces align with the conversation gutter.
 - Fresh blank sessions hide task/session chrome until conversation work exists; loading and persisted sessions keep their controls.
 
 ### Fixed
+- The `read` tool no longer emits a phantom blank last line for files ending in a newline, reports empty files explicitly instead of a bogus `1 │` line, and explains the valid range when `offset` is past the end of the file instead of returning nothing.
 - Grok device sign-in now accepts xAI's official `accounts.x.ai/oauth2/device` verification page while retaining strict HTTPS, host, port, and user-info checks.
 - Provider Settings now shows the last successful account-scoped model catalog immediately when reopened, revalidates it in the background, and preserves it through transient refresh failures without allowing an older account request to overwrite newer results.
 - Managed Grok Image Models now pass the image-tool availability check without requiring an API key, so selecting a supported Grok Imagine model exposes `generate_image` to active normal-mode agents.

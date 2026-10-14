@@ -48,17 +48,22 @@ const (
 )
 
 type responsesTokenDetails struct {
-	CachedTokens    int  `json:"cached_tokens"`
-	ReasoningTokens int  `json:"reasoning_tokens"`
-	Present         bool `json:"-"`
+	CachedTokens    int `json:"cached_tokens"`
+	ReasoningTokens int `json:"reasoning_tokens"`
+	// Cache-write counters are not part of the OpenAI Responses schema; some
+	// gateways (OpenRouter, LiteLLM) add them under these names.
+	CacheWriteTokens    int  `json:"cache_write_tokens"`
+	CacheCreationTokens int  `json:"cache_creation_tokens"`
+	Present             bool `json:"-"`
 }
 
 type responsesUsage struct {
-	InputTokens   int `json:"input_tokens"`
-	OutputTokens  int `json:"output_tokens"`
-	TotalTokens   int `json:"total_tokens"`
-	InputDetails  responsesTokenDetails
-	OutputDetails responsesTokenDetails
+	InputTokens      int `json:"input_tokens"`
+	OutputTokens     int `json:"output_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+	CacheWriteTokens int `json:"-"`
+	InputDetails     responsesTokenDetails
+	OutputDetails    responsesTokenDetails
 }
 
 func (u responsesUsage) hasUsage() bool {
@@ -66,11 +71,12 @@ func (u responsesUsage) hasUsage() bool {
 }
 
 type responsesUsageWire struct {
-	InputTokens         int                    `json:"input_tokens"`
-	OutputTokens        int                    `json:"output_tokens"`
-	TotalTokens         int                    `json:"total_tokens"`
-	InputTokensDetails  *responsesTokenDetails `json:"input_tokens_details"`
-	OutputTokensDetails *responsesTokenDetails `json:"output_tokens_details"`
+	InputTokens              int                    `json:"input_tokens"`
+	OutputTokens             int                    `json:"output_tokens"`
+	TotalTokens              int                    `json:"total_tokens"`
+	CacheCreationInputTokens int                    `json:"cache_creation_input_tokens"`
+	InputTokensDetails       *responsesTokenDetails `json:"input_tokens_details"`
+	OutputTokensDetails      *responsesTokenDetails `json:"output_tokens_details"`
 }
 
 func (u responsesUsageWire) normalized() responsesUsage {
@@ -80,6 +86,10 @@ func (u responsesUsageWire) normalized() responsesUsage {
 	if u.InputTokensDetails != nil {
 		result.InputDetails = *u.InputTokensDetails
 		result.InputDetails.Present = true
+		result.CacheWriteTokens = firstPositive(u.InputTokensDetails.CacheWriteTokens, u.InputTokensDetails.CacheCreationTokens)
+	}
+	if result.CacheWriteTokens == 0 {
+		result.CacheWriteTokens = firstPositive(u.CacheCreationInputTokens)
 	}
 	if u.OutputTokensDetails != nil {
 		result.OutputDetails = *u.OutputTokensDetails
@@ -264,7 +274,8 @@ func responseMetaFor(usage responsesUsage, status string, hasTools bool) *schema
 		Usage: &schema.TokenUsage{
 			PromptTokens: usage.InputTokens,
 			PromptTokenDetails: schema.PromptTokenDetails{
-				CachedTokens: usage.InputDetails.CachedTokens,
+				CachedTokens:     usage.InputDetails.CachedTokens,
+				CacheWriteTokens: usage.CacheWriteTokens,
 			},
 			CompletionTokens: usage.OutputTokens,
 			TotalTokens:      usage.TotalTokens,

@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- **Cache-write tokens in the context popup.** `ProductComposerStrings` gains
+  `contextCacheWrite` (default `'Cache write'`) and the product `TaskStats.tokens`
+  type gains optional `cache_write_tokens`. The composer's context popup lists
+  cache writes when the token snapshot reports them and appends the session's
+  cache-write total next to the cache hit rate.
 
 - **Any-file composer drops.** The product composer now accepts file drops
   across Browser Web and Tauri Desktop. Supported images keep the existing

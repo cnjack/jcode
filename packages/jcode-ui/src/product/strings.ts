@@ -84,6 +84,7 @@ export interface ProductComposerStrings {
   contextInput: string
   contextOutput: string
   contextCached: string
+  contextCacheWrite: string
   contextReasoning: string
   contextCacheHitRate: string
 
@@ -217,6 +218,7 @@ export const defaultProductComposerStrings: ProductComposerStrings = {
   contextInput: 'Input',
   contextOutput: 'Output',
   contextCached: 'Cached',
+  contextCacheWrite: 'Cache write',
   contextReasoning: 'Reasoning',
   contextCacheHitRate: 'Cache hit rate',
 

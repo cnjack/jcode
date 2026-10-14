@@ -95,6 +95,7 @@ function buildStrings(t: (key: string, opts?: Record<string, unknown>) => string
     contextInput: t('contextCapacity.input'),
     contextOutput: t('contextCapacity.output'),
     contextCached: t('contextCapacity.cached'),
+    contextCacheWrite: t('contextCapacity.cacheWrite'),
     contextReasoning: t('contextCapacity.reasoning'),
     contextCacheHitRate: t('contextCapacity.cacheHitRate'),
 

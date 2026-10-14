@@ -24,8 +24,8 @@ import (
 //
 // CachedTokens is the cache-READ portion of the prompt (tokens served from the
 // provider's KV cache). CacheWriteTokens is the cache-CREATION portion; it is
-// 0 today because the shared go-openai transport does not surface
-// cache_creation_input_tokens, and is kept as a forward-compatible field.
+// non-zero only for providers that report it (see usageCapture), e.g.
+// OpenRouter, LiteLLM and Anthropic-style gateways.
 // ReasoningTokens is the reasoning/thinking subset of the completion.
 type TokenUsage struct {
 	PromptTokens     int64
@@ -374,7 +374,15 @@ func (h *headerDoer) Do(req *http.Request) (*http.Response, error) {
 		// headers can replace a managed account token.
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	return h.base.Do(req)
+	resp, err := h.base.Do(req)
+	if err != nil || resp == nil || resp.Body == nil {
+		return resp, err
+	}
+	if capture := usageCaptureFromContext(req.Context()); capture != nil &&
+		resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		resp.Body = newUsageSniffer(resp, capture)
+	}
+	return resp, nil
 }
 
 func NewChatModel(_ context.Context, cfg *ChatModelConfig) (einomodel.ToolCallingChatModel, error) {
@@ -391,16 +399,16 @@ func NewChatModel(_ context.Context, cfg *ChatModelConfig) (einomodel.ToolCallin
 	if cfg.BaseURL != "" {
 		config.BaseURL = cfg.BaseURL
 	}
-	if len(cfg.Headers) > 0 || cfg.Credential != nil {
-		baseClient := &http.Client{}
-		if cfg.Credential != nil {
-			baseClient = managedNoRedirectClient(baseClient)
-		}
-		config.HTTPClient = &headerDoer{
-			base:       baseClient,
-			headers:    cloneStringMap(cfg.Headers),
-			credential: cfg.Credential,
-		}
+	// headerDoer is always installed: besides custom headers and managed
+	// credentials it side-channels provider cache counters (usageCapture).
+	baseClient := &http.Client{}
+	if cfg.Credential != nil {
+		baseClient = managedNoRedirectClient(baseClient)
+	}
+	config.HTTPClient = &headerDoer{
+		base:       baseClient,
+		headers:    cloneStringMap(cfg.Headers),
+		credential: cfg.Credential,
 	}
 	return &chatModel{
 		client:          openai.NewClientWithConfig(config),
@@ -618,8 +626,9 @@ func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingCh
 }
 
 // extractUsage maps a go-openai Usage onto AddParams. cache_creation tokens are
-// not exposed by go-openai's schema, so CacheWrite is always 0 here; reasoning
-// and cache-read are picked up from the *TokensDetails sub-objects when present.
+// not exposed by go-openai's schema, so CacheWrite is 0 here; recordUsage fills
+// it from the usageCapture side channel. Reasoning and cache-read are picked up
+// from the *TokensDetails sub-objects when present.
 func extractUsage(u openai.Usage) AddParams {
 	p := AddParams{
 		Prompt:     u.PromptTokens,
@@ -652,6 +661,7 @@ func hasUsage(u openai.Usage) bool {
 // pattern.
 func (m *chatModel) recordUsage(ctx context.Context, u openai.Usage) {
 	p := extractUsage(u)
+	usageCaptureFromContext(ctx).apply(&p)
 	TokenTracker.Add(p)
 	TokenTracker.AddByModel(m.model, p.Prompt, p.Completion, p.Total)
 	if local := TokenTrackerFromContext(ctx); local != nil {
@@ -670,6 +680,7 @@ func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, opts 
 		ctx = withCopilotModelRequest(ctx, input)
 	}
 	req := m.buildRequest(input, false, opts...)
+	ctx = withUsageCapture(ctx)
 	config.Logger().Printf("[chatmodel] Generate start (model: %s)", m.model)
 	start := time.Now()
 	resp, err := m.client.CreateChatCompletion(ctx, req)
@@ -697,6 +708,7 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 	req.StreamOptions = &openai.StreamOptions{
 		IncludeUsage: true,
 	}
+	ctx = withUsageCapture(ctx)
 	config.Logger().Printf("[chatmodel] Stream start (model: %s)", m.model)
 	start := time.Now()
 	stream, err := m.client.CreateChatCompletionStream(ctx, req)

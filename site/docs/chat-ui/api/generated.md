@@ -6,12 +6,12 @@ nav_order: 6
 
 # Generated API
 
-> Auto-generated from TypeScript sources on **2026-08-26**.
+> Auto-generated from TypeScript sources on **2026-10-14**.
 > Do not edit by hand — run `node script/generate_jcode_ui_api_docs.mjs`.
 >
 > Human-written guides: [Types](/chat-ui/docs/api/types) · [Runtime](/chat-ui/docs/api/runtime) · [Hooks](/chat-ui/docs/api/hooks) · [Primitives](/chat-ui/docs/api/primitives) · [Components](/chat-ui/docs/api/components).
 
-**364** public symbols extracted.
+**367** public symbols extracted.
 
 ## `jcode-ui`
 
@@ -138,6 +138,7 @@ nav_order: 6
 | [`CompletionResult`](#jcode-ui-completionresult) | interface | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`ContextBarProps`](#jcode-ui-contextbarprops) | interface | `packages/jcode-ui/src/components/ContextBar.tsx` |
 | [`CustomAgentInfo`](#jcode-ui-customagentinfo) | interface | `packages/jcode-ui/src/product/types.ts` |
+| [`DroppedImage`](#jcode-ui-droppedimage) | interface | `packages/jcode-ui/src/product/host.ts` |
 | [`ExploringGroupCardProps`](#jcode-ui-exploringgroupcardprops) | interface | `packages/jcode-ui/src/components/ExploringGroupCard.tsx` |
 | [`ExportButtonProps`](#jcode-ui-exportbuttonprops) | interface | `packages/jcode-ui/src/components/ExportButton.tsx` |
 | [`GeneratedImageCardProps`](#jcode-ui-generatedimagecardprops) | interface | `packages/jcode-ui/src/components/GeneratedImageCard.tsx` |
@@ -192,11 +193,13 @@ nav_order: 6
 | [`TranscriptionProps`](#jcode-ui-transcriptionprops) | interface | `packages/jcode-ui/src/voice/Transcription.tsx` |
 | [`TranscriptSegment`](#jcode-ui-transcriptsegment) | interface | `packages/jcode-ui/src/voice/Transcription.tsx` |
 | [`TurnChangesCardProps`](#jcode-ui-turnchangescardprops) | interface | `packages/jcode-ui/src/components/TurnChangesCard.tsx` |
+| [`UploadedFile`](#jcode-ui-uploadedfile) | interface | `packages/jcode-ui/src/product/host.ts` |
 | [`VoiceVisualizerProps`](#jcode-ui-voicevisualizerprops) | interface | `packages/jcode-ui/src/voice/VoiceVisualizer.tsx` |
 | [`WorkflowCanvasProps`](#jcode-ui-workflowcanvasprops) | interface | `packages/jcode-ui/src/canvas/WorkflowCanvas.tsx` |
 | [`WorkspaceTaskRef`](#jcode-ui-workspacetaskref) | interface | `packages/jcode-ui/src/product/types.ts` |
 | [`AgentMode`](#jcode-ui-agentmode) | type | `packages/jcode-ui/src/product/types.ts` |
 | [`CodeBlockHook`](#jcode-ui-codeblockhook) | type | `packages/jcode-ui/src/lib/markdown.ts` |
+| [`FileDropEvent`](#jcode-ui-filedropevent) | type | `packages/jcode-ui/src/product/host.ts` |
 | [`GeneratedImageState`](#jcode-ui-generatedimagestate) | type | `packages/jcode-ui/src/components/GeneratedImageCard.tsx` |
 | [`JcodeStepData`](#jcode-ui-jcodestepdata) | type | `packages/jcode-ui/src/canvas/WorkflowNode.tsx` |
 | [`JcodeStepNode`](#jcode-ui-jcodestepnode) | type | `packages/jcode-ui/src/canvas/WorkflowNode.tsx` |
@@ -815,7 +818,19 @@ export function BranchPicker({ host, placement = 'top' }: { host: ProductCompose
 `function` · `packages/jcode-ui/src/product/ChatInput.tsx`
 
 ```ts
-export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = false }: ProductChatInputProps) { … }
+export function ChatInput({
+  host,
+  onSent,
+  pickerPlacement = 'top',
+  elevated = false,
+  contextHeader,
+  modelManagement = true,
+  modelFavorites = true,
+  modelSelection = true,
+  modeSelection = true,
+  effortSelection = true,
+  sendDisabled = false,
+}: ProductChatInputProps) { … }
 ```
 
 <a id="jcode-ui-completestreamingmarkdown"></a>
@@ -1185,6 +1200,8 @@ export function stripTrailingLink(text: string): string { … }
 
 ```ts
 export function Thread({
+  onDownloadFile,
+  validateDownloadFile,
   virtualize,
   emptyState,
   suggestions,
@@ -1647,6 +1664,8 @@ export interface CompletedTurnCardProps {
   durationLabel?: (durationMs: number) => string
   expandLabel?: string
   collapseLabel?: string
+  onDownloadFile?: (href: string, fileName: string) => boolean
+  validateDownloadFile?: (href: string, fileName: string) => Promise<boolean | null>
 }
 ```
 
@@ -1697,6 +1716,20 @@ export interface CustomAgentInfo {
   description: string
   /** Optional model applied when this agent is selected. */
   model?: string
+}
+```
+
+<a id="jcode-ui-droppedimage"></a>
+
+### `DroppedImage`
+
+`interface` · `packages/jcode-ui/src/product/host.ts`
+
+```ts
+export interface DroppedImage {
+  data: string
+  media_type: string
+  name: string
 }
 ```
 
@@ -1923,6 +1956,10 @@ export interface MessageProps {
   message: MessageData
   /** Allow editing (typically user messages when idle). */
   canEdit?: boolean
+  /** Handle links to downloadable files with a host-provided save flow. */
+  onDownloadFile?: (href: string, fileName: string) => boolean
+  /** Check that a file is available from the host before enabling its link. */
+  validateDownloadFile?: (href: string, fileName: string) => Promise<boolean | null>
   /** Hide the legacy footer duration when a completed-turn disclosure owns it. */
   showDuration?: boolean
   /** Optional chrome overrides (avatar / header / footer tail). */
@@ -2064,6 +2101,24 @@ export interface ProductChatInputProps {
    * new-task screen). Docked conversation composers stay recessed.
    */
   elevated?: boolean
+  /**
+   * Host-owned context control rendered in the welcome composer's upper-left.
+   * Supplying it replaces the desktop-only Workspace + Branch pickers while
+   * keeping the rest of the product composer identical.
+   */
+  contextHeader?: ReactNode
+  /** Hide Manage Models when the host has no persistence API for that action. */
+  modelManagement?: boolean
+  /** Hide favorite affordances when the host cannot persist favorites. */
+  modelFavorites?: boolean
+  /** Hide model selection when the current conversation cannot change models. */
+  modelSelection?: boolean
+  /** Hide mode selection when the current conversation cannot change modes. */
+  modeSelection?: boolean
+  /** Hide reasoning effort when the current conversation cannot change effort. */
+  effortSelection?: boolean
+  /** Keep drafting/context selection available while the host cannot submit. */
+  sendDisabled?: boolean
 }
 ```
 
@@ -2199,6 +2254,9 @@ export interface ProductComposerStrings {
   goalHintRemove: string
   goalHintReplace: string
   modelNoImages: string
+  fileUploadFailed: string
+  fileUploadUnavailable: string
+  fileTooLarge: string
 
   // ── mode picker ──
   modeApproval: string
@@ -2246,6 +2304,7 @@ export interface ProductComposerStrings {
   contextInput: string
   contextOutput: string
   contextCached: string
+  contextCacheWrite: string
   contextReasoning: string
   contextCacheHitRate: string
 
@@ -2260,6 +2319,7 @@ export interface ProductComposerStrings {
   workspaceOpenError: string
   workspacePathPlaceholder: string
   workspaceScratchAction: string
+  workspaceClearProject: string
   remoteConnect: string
 
   // ── branch picker ──
@@ -2604,6 +2664,7 @@ export interface TaskStats {
     completion_tokens: number
     cached_tokens: number
     reasoning_tokens: number
+    cache_write_tokens?: number
     calls: number
     turns?: number
   }
@@ -2664,6 +2725,10 @@ export interface ThreadListProps {
 
 ```ts
 export interface ThreadProps {
+  /** Handle links to downloadable files with a host-provided save flow. */
+  onDownloadFile?: (href: string, fileName: string) => boolean
+  /** Check that a file is available from the host before enabling its link. */
+  validateDownloadFile?: (href: string, fileName: string) => Promise<boolean | null>
   /** Disable virtualization (short/replay timelines). Default true. */
   virtualize?: boolean
   /** Empty-state node (typically `<ThreadWelcome>`). */
@@ -2869,6 +2934,20 @@ export interface TurnChangesCardProps {
 }
 ```
 
+<a id="jcode-ui-uploadedfile"></a>
+
+### `UploadedFile`
+
+`interface` · `packages/jcode-ui/src/product/host.ts`
+
+```ts
+export interface UploadedFile {
+  path: string
+  name: string
+  size: number
+}
+```
+
 <a id="jcode-ui-voicevisualizerprops"></a>
 
 ### `VoiceVisualizerProps`
@@ -2942,6 +3021,19 @@ Return HTML to fully replace the code block, or `null` to fall through.
 
 ```ts
 export type CodeBlockHook = (args: CodeBlockHookArgs) => string | null;
+```
+
+<a id="jcode-ui-filedropevent"></a>
+
+### `FileDropEvent`
+
+`type` · `packages/jcode-ui/src/product/host.ts`
+
+```ts
+export type FileDropEvent =
+  | { type: 'enter' | 'over'; x: number; y: number }
+  | { type: 'drop'; paths: string[]; x: number; y: number }
+  | { type: 'leave' };
 ```
 
 <a id="jcode-ui-generatedimagestate"></a>
@@ -4899,6 +4991,8 @@ export interface Message {
   /** Origin channel for inbound messages (e.g. 'wechat'). Drives the compact
    *  source label and any host-provided identity chrome. */
   source?: string
+  /** Display attribution supplied by multi-user hosts such as jcode Cloud. */
+  author?: string
   images?: ChatImage[]
   /** system-message severity. */
   level?: SystemLevel
