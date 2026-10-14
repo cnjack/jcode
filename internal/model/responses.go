@@ -379,6 +379,7 @@ func (m *responsesModel) recordUsage(ctx context.Context, usage responsesUsage) 
 		Total:               usage.TotalTokens,
 		Cached:              usage.InputDetails.CachedTokens,
 		Reasoning:           usage.OutputDetails.ReasoningTokens,
+		CacheWrite:          usage.CacheWriteTokens,
 		CacheDetailsPresent: usage.InputDetails.Present,
 	}
 	if params.Total == 0 {

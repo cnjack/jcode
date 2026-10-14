@@ -12,6 +12,7 @@ For implementation-level detail, see the repository's full [CHANGELOG.md](https:
 ## Unreleased
 
 #### Added
+- **Prompt-cache write metrics.** Usage Statistics and the context popup now show cache-write tokens for providers that report them (OpenRouter, LiteLLM, Anthropic-style gateways), plus API-call counts per range.
 - **Live managed model catalogs.** ChatGPT/Codex, Grok, and GitHub Copilot now load the models available to the selected account. Enabled models remain available after restart, and Copilot preserves each model's required Responses or Chat Completions transport.
 - **Provider-backed image generation.** jcode can discover image-capable providers, verify their runtime capabilities, configure image models, and invoke managed provider tools from the same agent workflow used for coding tasks.
 - **Grok Imagine with account sign-in.** Connected xAI accounts can select `grok-imagine-image` or `grok-imagine-image-quality` as the independent Image Model without copying an API key.
@@ -19,10 +20,12 @@ For implementation-level detail, see the repository's full [CHANGELOG.md](https:
 - **Durable generated-image artifacts.** Generated images appear as first-class timeline cards and artifacts, with revision and lifecycle state that survives session replay across Web, Desktop, TUI, ACP, and Cloud transport.
 
 #### Changed
+- **Dependency refresh.** Upgraded the Eino agent framework to v0.9.21, MCP to mcp-go v1.2, and the Charm TUI stack. Building from source now requires Go 1.26 or newer.
 - **Focused Ask User flow.** Pending questions now open in a bottom dock with paging, keyboard-friendly choices, custom answers, skip, submit locking, and retryable errors. Completed answers stay in the conversation as compact receipts instead of collapsing into generic tool activity.
 - **Cleaner new sessions.** A brand-new empty task hides task-specific titlebar controls until the conversation actually contains content.
 
 #### Fixed
+- The `read` tool reports empty files and out-of-range offsets explicitly and no longer counts a trailing newline as an extra blank line.
 - Grok device sign-in accepts xAI's official account verification page without weakening verification-URL origin checks.
 - Reopening Provider Settings renders the last successful account model catalog immediately, refreshes it in the background, and keeps the cached list if the provider is temporarily unavailable.
 - A selected Grok Imagine model now correctly enables the agent's image-generation tool when the Provider uses Grok account sign-in instead of an API key.

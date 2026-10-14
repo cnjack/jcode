@@ -1514,6 +1514,7 @@ export function ChatInput({
                       prompt={tokenSnapshot.prompt_tokens}
                       completion={tokenSnapshot.completion_tokens}
                       cached={tokenSnapshot.cached_tokens}
+                      cacheWrite={tokenSnapshot.cache_write_tokens}
                       reasoning={tokenSnapshot.reasoning_tokens}
                     />
                   )}
@@ -1899,6 +1900,7 @@ function ContextCapacityPopup({
   prompt,
   completion,
   cached,
+  cacheWrite,
   reasoning,
 }: {
   strings: ProductComposerStrings
@@ -1909,6 +1911,7 @@ function ContextCapacityPopup({
   prompt: number
   completion: number
   cached?: number
+  cacheWrite?: number
   reasoning?: number
 }) {
   const context = stats?.context
@@ -1925,6 +1928,7 @@ function ContextCapacityPopup({
         { label: strings.contextInput, value: prompt },
         { label: strings.contextOutput, value: completion },
         { label: strings.contextCached, value: cached || 0 },
+        ...(cacheWrite ? [{ label: strings.contextCacheWrite, value: cacheWrite }] : []),
         { label: strings.contextReasoning, value: reasoning || 0 },
       ]
   const max = Math.max(1, ...rows.map((r) => r.value))
@@ -1966,6 +1970,11 @@ function ContextCapacityPopup({
       {stats?.cache_supported && (
         <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--color-muted)] px-2 py-1.5 text-[10.5px] text-[var(--color-muted-foreground)]">
           {strings.contextCacheHitRate}: <span className="font-mono text-[var(--color-foreground)]">{Math.round(stats.cache_hit_rate * 100)}%</span>
+          {(stats.tokens?.cache_write_tokens ?? 0) > 0 && (
+            <>
+              {' · '}{strings.contextCacheWrite}: <span className="font-mono text-[var(--color-foreground)]">{formatCompact(stats.tokens.cache_write_tokens ?? 0)}</span>
+            </>
+          )}
         </div>
       )}
     </div>

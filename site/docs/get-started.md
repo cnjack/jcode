@@ -7,7 +7,7 @@ nav_order: 1
 
 ## Prerequisites
 
-- **Go 1.22+** installed
+- **Go 1.26+** installed
 - Either an **API key** from an OpenAI-compatible provider or an eligible ChatGPT/Codex, Grok, or GitHub Copilot account
 
 ## Install
@@ -22,7 +22,7 @@ This downloads the latest release binary for your platform and installs it to `/
 
 ### From Source
 
-Requires **Go 1.22+** and **Node.js + pnpm**.
+Requires **Go 1.26+** and **Node.js + pnpm**.
 
 ```bash
 git clone https://github.com/cnjack/jcode.git

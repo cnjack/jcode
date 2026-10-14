@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/cnjack/jcode/main/script/install.sh
 
 ### From source
 
-Requires **Go 1.22+** and **Node.js + pnpm**.
+Requires **Go 1.26+** and **Node.js + pnpm**.
 
 ```bash
 git clone https://github.com/cnjack/jcode.git

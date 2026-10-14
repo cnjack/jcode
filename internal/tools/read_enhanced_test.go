@@ -391,3 +391,69 @@ func TestRead_DirectoryListing(t *testing.T) {
 		t.Fatalf("expected hello.txt in listing, got: %s", result)
 	}
 }
+
+// R-12: An empty file is reported explicitly rather than as a blank line 1.
+func TestRead_EmptyFile(t *testing.T) {
+	env, dir := newTestEnv(t)
+	tool := env.NewReadTool()
+
+	file := filepath.Join(dir, "empty.txt")
+	_ = os.WriteFile(file, nil, 0644)
+
+	result, err := tool.InvokableRun(context.Background(), `{"file_path":"`+file+`"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "│") || !strings.Contains(result, "is empty") {
+		t.Fatalf("expected empty-file notice without numbered lines, got: %q", result)
+	}
+}
+
+// R-13: An offset past the last line explains the valid range instead of
+// returning nothing.
+func TestRead_OffsetPastEOF(t *testing.T) {
+	env, dir := newTestEnv(t)
+	tool := env.NewReadTool()
+
+	file := filepath.Join(dir, "short.txt")
+	_ = os.WriteFile(file, []byte("a\nb\nc\n"), 0644)
+
+	for _, offset := range []string{"3", "300"} {
+		result, err := tool.InvokableRun(context.Background(),
+			`{"file_path":"`+file+`","offset":`+offset+`}`)
+		if err != nil {
+			t.Fatalf("offset %s: unexpected error: %v", offset, err)
+		}
+		if strings.Contains(result, "│") {
+			t.Fatalf("offset %s: expected no numbered lines, got: %q", offset, result)
+		}
+		if !strings.Contains(result, "past the last line") || !strings.Contains(result, "has 3 lines") {
+			t.Fatalf("offset %s: expected past-EOF notice with line count, got: %q", offset, result)
+		}
+	}
+}
+
+// R-14: A trailing newline does not produce a phantom empty last line.
+func TestRead_TrailingNewlineNoPhantomLine(t *testing.T) {
+	env, dir := newTestEnv(t)
+	tool := env.NewReadTool()
+
+	file := filepath.Join(dir, "trailing.txt")
+	_ = os.WriteFile(file, []byte("a\nb\nc\n"), 0644)
+
+	result, err := tool.InvokableRun(context.Background(), `{"file_path":"`+file+`"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "4 │") {
+		t.Fatalf("unexpected phantom line 4, got: %q", result)
+	}
+
+	result, err = tool.InvokableRun(context.Background(), `{"file_path":"`+file+`","limit":2}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "1 more lines, total 3") {
+		t.Fatalf("expected total of 3 lines, got: %q", result)
+	}
+}

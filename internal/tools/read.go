@@ -133,15 +133,24 @@ func (r *readTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 		r.env.FileTracker.TrackRead(input.FilePath, content, modTime)
 	}
 
-	lines := strings.Split(string(content), "\n")
+	// Empty files and offsets past the last line used to yield either a bogus
+	// blank numbered line or an empty string, which the model misreads as file
+	// content. Report both explicitly instead.
+	if len(content) == 0 {
+		return fmt.Sprintf("File %s is empty (0 lines).", input.FilePath), nil
+	}
+
+	// A trailing newline terminates the last line; it does not start a new one.
+	lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
 	totalLines := len(lines)
 
 	start := input.Offset
 	if start < 0 {
 		start = 0
 	}
-	if start > totalLines {
-		start = totalLines
+	if start >= totalLines {
+		return fmt.Sprintf("No content read from %s: offset %d is past the last line (the file has %d lines; valid offsets are 0-%d).",
+			input.FilePath, input.Offset, totalLines, totalLines-1), nil
 	}
 
 	// Apply default limit if not specified.

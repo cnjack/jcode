@@ -5226,15 +5226,16 @@ function UsageTab() {
         <StatCard label={t('settings.usageStats.cacheHitRate')} value={stats.cache_supported ? fmtPct(stats.cache_hit_rate) : '—'} large accent />
         <StatCard label={t('settings.usageStats.mostUsedModel')} value={stats.most_used_model || '—'} title={stats.most_used_model} large />
         <StatCard label={t('settings.usageStats.sessions')} value={fmtFull(totals.sessions)} />
-        <StatCard label={t('settings.usageStats.turns')} value={fmtFull(totals.turns)} />
+        <StatCard label={t('settings.usageStats.turns')} value={fmtFull(totals.turns)} sub={t('settings.usageStats.apiCalls').replace('{n}', fmtFull(totals.calls))} />
         <StatCard label={t('settings.usageStats.activeDays')} value={fmtFull(stats.active_days)} sub={t('settings.usageStats.streak').replace('{n}', String(stats.current_streak))} />
       </div>
 
       <section className={US_PANEL}>
         <div className={US_PANEL_TITLE}>{t('settings.usageStats.tokenBreakdown')}</div>
-        <div className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <div className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
           <MiniStat label={t('settings.usageStats.promptTokens')} value={fmtCompact(totals.prompt_tokens)} />
           <MiniStat label={t('settings.usageStats.cachedTokens')} value={fmtCompact(totals.cached_tokens)} />
+          <MiniStat label={t('settings.usageStats.cacheWriteTokens')} value={fmtCompact(totals.cache_write_tokens ?? 0)} />
           <MiniStat label={t('settings.usageStats.completionTokens')} value={fmtCompact(totals.completion_tokens)} />
           <MiniStat label={t('settings.usageStats.reasoningTokens')} value={fmtCompact(totals.reasoning_tokens)} />
         </div>

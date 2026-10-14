@@ -99,6 +99,7 @@ export interface TaskStats {
     completion_tokens: number
     cached_tokens: number
     reasoning_tokens: number
+    cache_write_tokens?: number
     calls: number
     turns?: number
   }
