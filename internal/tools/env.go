@@ -26,6 +26,14 @@ import (
 // MaxSubagentDepth is the maximum allowed nesting depth for subagents.
 const MaxSubagentDepth = 3
 
+// SessionCaller identifies the top-level conversation a tool call belongs to.
+// It is the only authorization input the cross-session view tools have: the
+// model cannot influence it through tool arguments.
+type SessionCaller struct {
+	SessionID string // top-level conversation UUID; "" = unknown
+	Project   string // recorder project (workspace key); "" = unknown
+}
+
 // Env holds the execution context (local or remote) and is shared by all tools.
 type Env struct {
 	Exec        Executor
@@ -46,6 +54,22 @@ type Env struct {
 	// SessionIDFn returns the owning top-level conversation id for tools that
 	// create session-bound resources. nil/empty falls back to isolated behavior.
 	SessionIDFn func() string
+
+	// SessionCallerFn reports the owning top-level conversation identity for
+	// the cross-session view tools (session_list / session_search /
+	// session_read). Only the three top-level transports set it (TUI, ACP,
+	// Web); subagents (CloneForSubagent) and teammates (fresh Env) keep it nil
+	// so cross-session reads fail closed with SESSION_VIEW_NO_CALLER. Empty
+	// fields mean "unknown". The identity comes from the Recorder, never from
+	// model-supplied arguments — that is the authorization model.
+	SessionCallerFn func() SessionCaller
+
+	// sessionView holds the resolved cross-session view budgets published by
+	// the command-layer registration helper before the tools are built. nil
+	// means the documented defaults. Guarded by sessionViewMu because an agent
+	// rebuild may publish new settings while an older turn still runs a tool.
+	sessionViewMu sync.RWMutex
+	sessionView   *appconfig.SessionViewResolved
 
 	// Browser is the process-wide browser-use manager shared with the web server
 	// (its extension bridge and /api/browser routes) so the agent's browser_*
@@ -167,6 +191,34 @@ func (e *Env) CloneForSubagent() *Env {
 		// app is not a grant to every subagent it spawns.
 		Computer: e.Computer,
 	}
+}
+
+// SetSessionViewSettings publishes the resolved cross-session view budgets.
+// The command-layer registration helper (sessionViewTools) calls this once per
+// agent build, before constructing the three session tools.
+func (e *Env) SetSessionViewSettings(settings appconfig.SessionViewResolved) {
+	e.sessionViewMu.Lock()
+	defer e.sessionViewMu.Unlock()
+	copied := settings
+	e.sessionView = &copied
+}
+
+// SessionViewSettings returns the resolved cross-session view budgets. When
+// nothing was published (unit tests, direct tool construction) the documented
+// defaults apply.
+func (e *Env) SessionViewSettings() appconfig.SessionViewResolved {
+	e.sessionViewMu.RLock()
+	defer e.sessionViewMu.RUnlock()
+	if e.sessionView == nil {
+		return appconfig.SessionViewResolved{
+			Enabled:        true,
+			MaxResults:     appconfig.DefaultSessionViewMaxResults,
+			MaxEntryBytes:  appconfig.DefaultSessionViewMaxEntryBytes,
+			MaxOutputBytes: appconfig.DefaultSessionViewMaxOutputBytes,
+			TimeBudget:     appconfig.DefaultSessionViewTimeBudgetMs * time.Millisecond,
+		}
+	}
+	return *e.sessionView
 }
 
 // BrowserSession returns this task's browser session, opening one on first use.

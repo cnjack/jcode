@@ -31,20 +31,28 @@ var allCommandBuiltinNames = []string{
 	"browser_screenshot", "browser_act", "browser_read", "browser_tabs", "browser_eval",
 	"computer_open", "computer_snapshot", "computer_screenshot", "computer_act",
 	"computer_read", "computer_apps", "show_artifact",
-	"generate_image",
+	"generate_image", "session_list", "session_search", "session_read",
 }
 
 func TestBuildCommandToolPlanMatrix(t *testing.T) {
 	normalDirect := []string{
 		"ask_user", "automation_create", "check_background", "edit", "execute", "generate_image", "grep",
-		"load_skill", "read", "subagent", "todoread", "todowrite", "write",
+		"load_skill", "read", "session_list", "session_read", "session_search", "subagent", "todoread",
+		"todowrite", "write",
 	}
-	planDirect := []string{"ask_user", "execute", "grep", "read", "todoread", "todowrite"}
+	planDirect := []string{
+		"ask_user", "execute", "grep", "read", "session_list", "session_read", "session_search",
+		"todoread", "todowrite",
+	}
 	webNormalDirect := []string{
 		"ask_user", "automation_create", "check_background", "edit", "execute", "generate_image", "grep",
-		"load_skill", "read", "show_artifact", "subagent", "todoread", "todowrite", "write",
+		"load_skill", "read", "session_list", "session_read", "session_search", "show_artifact", "subagent",
+		"todoread", "todowrite", "write",
 	}
-	webPlanDirect := []string{"ask_user", "execute", "grep", "read", "show_artifact", "todoread", "todowrite"}
+	webPlanDirect := []string{
+		"ask_user", "execute", "grep", "read", "session_list", "session_read", "session_search",
+		"show_artifact", "todoread", "todowrite",
+	}
 	normalDeferred := []string{
 		"automation_delete", "automation_list",
 		"browser_act", "browser_eval", "browser_open", "browser_read",

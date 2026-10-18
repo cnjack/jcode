@@ -225,6 +225,8 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 	}
 	all = append(all, s.env.NewBrowserTools()...)
 	all = append(all, s.env.NewComputerTools()...)
+	// Read-only cross-session view tools (absent when session_view is disabled).
+	all = append(all, sessionViewTools(s.env, s.cfg)...)
 	return all
 }
 
@@ -239,7 +241,10 @@ func (s *interactiveState) buildPlanTools() []tool.BaseTool {
 		tools.NewAskUserTool(s.askUserDeps),
 	}
 	plan = append(plan, s.env.NewBrowserPlanTools()...)
-	return append(plan, s.env.NewComputerPlanTools()...)
+	plan = append(plan, s.env.NewComputerPlanTools()...)
+	// Read-only history tools are safe in plan mode (no mutations, no approvals).
+	plan = append(plan, sessionViewTools(s.env, s.cfg)...)
+	return plan
 }
 
 func (s *interactiveState) setTopLevelAgent(name string) error {
@@ -1530,7 +1535,7 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 		rec.SetUUID(resumeUUID)
 	}
 	if rec != nil {
-		env.SessionIDFn = rec.UUID
+		wireSessionCaller(env, rec)
 	}
 	imageLedger, imageLedgerErr := newImageUsageLedger(rec)
 	if imageLedgerErr != nil {

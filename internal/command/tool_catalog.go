@@ -30,6 +30,9 @@ var commandToolPolicies = map[string]commandToolPolicy{
 	"check_background": directPolicy("core.shell", normalMode, "read"),
 	"todowrite":        directPolicy("session.todo", allModes, "session"),
 	"todoread":         directPolicy("session.todo", allModes, "read"),
+	"session_list":     directPolicy("session.history", allModes, "read"),
+	"session_search":   directPolicy("session.history", allModes, "read"),
+	"session_read":     directPolicy("session.history", allModes, "read"),
 	"ask_user": scopedDirectPolicy(
 		"session.question", allModes, tuiAndWebTransports, "interactive",
 	),

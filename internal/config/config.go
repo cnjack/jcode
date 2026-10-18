@@ -505,6 +505,10 @@ type Config struct {
 	// configurations keep exposing the complete static tool set.
 	ToolSearch *ToolSearchConfig `json:"tool_search,omitempty"`
 
+	// SessionView controls the read-only cross-session view tools. An absent
+	// block keeps them enabled; "enabled": false removes all three everywhere.
+	SessionView *SessionViewConfig `json:"session_view,omitempty"`
+
 	// Browser controls the browser-use capability (CDP-driven page control).
 	Browser *BrowserConfig `json:"browser,omitempty"`
 
@@ -745,6 +749,96 @@ func (c *Config) SetToolSearch(tc *ToolSearchConfig) {
 func ToolSearchEnabled(c *Config) bool {
 	tc := c.ToolSearchSettings()
 	return tc.Enabled != nil && *tc.Enabled
+}
+
+// SessionViewConfig controls the read-only cross-session view tools
+// (session_list / session_search / session_read). Enabled is a pointer so an
+// explicitly disabled value survives config round-trips while an absent block
+// keeps the documented default (enabled). See
+// internal-doc/cross-session-view-design.md §5.8.
+type SessionViewConfig struct {
+	// Enabled gates registration of all three tools (default true).
+	Enabled *bool `json:"enabled,omitempty"`
+	// MaxResults caps how many sessions a search returns (default 20, hard cap
+	// 200). Non-positive values fall back to the default.
+	MaxResults int `json:"max_results,omitempty"`
+	// MaxEntryBytes caps a single rendered entry (default 4096). The first
+	// entry returned by session_read is the documented exception: it may use
+	// the whole per-call output budget.
+	MaxEntryBytes int `json:"max_entry_bytes,omitempty"`
+	// MaxOutputBytes caps one tool call's rendered output (default 16384).
+	MaxOutputBytes int `json:"max_output_bytes,omitempty"`
+	// TimeBudgetMs is the search time budget in milliseconds (default 3000).
+	TimeBudgetMs int `json:"time_budget_ms,omitempty"`
+}
+
+// Session-view budget defaults. Keep in sync with design §5.6/§5.8.
+const (
+	DefaultSessionViewMaxResults     = 20
+	DefaultSessionViewMaxEntryBytes  = 4096
+	DefaultSessionViewMaxOutputBytes = 16384
+	DefaultSessionViewTimeBudgetMs   = 3000
+	// MaxSessionViewMaxResults is the hard upper bound for MaxResults.
+	MaxSessionViewMaxResults = 200
+)
+
+// SessionViewResolved is the resolved, defaults-applied session-view budget
+// snapshot consumed by the tool layer. Unlike SessionViewConfig every field is
+// a plain value: it is resolved once per agent build, and both the service and
+// the renderer read this snapshot. (Go cannot give a type and a function the
+// same name, hence the suffix; SessionViewSettings(c) returns it.)
+type SessionViewResolved struct {
+	Enabled        bool
+	MaxResults     int
+	MaxEntryBytes  int
+	MaxOutputBytes int
+	TimeBudget     time.Duration
+}
+
+// SessionViewEnabled reports whether the cross-session view tools are
+// registered. A nil config fails closed; an absent session_view section
+// defaults to enabled; only an explicit "enabled": false disables them (§5.8).
+func SessionViewEnabled(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	if c.SessionView == nil || c.SessionView.Enabled == nil {
+		return true
+	}
+	return *c.SessionView.Enabled
+}
+
+// SessionViewSettings resolves the stored block into the budget snapshot the
+// session tools use. Non-positive values fall back to their defaults and
+// MaxResults is clamped to the hard cap (§5.8). A nil config yields the
+// defaults with Enabled false.
+func SessionViewSettings(c *Config) SessionViewResolved {
+	settings := SessionViewResolved{
+		Enabled:        SessionViewEnabled(c),
+		MaxResults:     DefaultSessionViewMaxResults,
+		MaxEntryBytes:  DefaultSessionViewMaxEntryBytes,
+		MaxOutputBytes: DefaultSessionViewMaxOutputBytes,
+		TimeBudget:     DefaultSessionViewTimeBudgetMs * time.Millisecond,
+	}
+	if c == nil || c.SessionView == nil {
+		return settings
+	}
+	if n := c.SessionView.MaxResults; n > 0 {
+		settings.MaxResults = n
+	}
+	if settings.MaxResults > MaxSessionViewMaxResults {
+		settings.MaxResults = MaxSessionViewMaxResults
+	}
+	if n := c.SessionView.MaxEntryBytes; n > 0 {
+		settings.MaxEntryBytes = n
+	}
+	if n := c.SessionView.MaxOutputBytes; n > 0 {
+		settings.MaxOutputBytes = n
+	}
+	if n := c.SessionView.TimeBudgetMs; n > 0 {
+		settings.TimeBudget = time.Duration(n) * time.Millisecond
+	}
+	return settings
 }
 
 // DeveloperConfig holds developer-only toggles (debug logging, tracing).
