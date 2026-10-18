@@ -98,8 +98,9 @@ func TestEffectiveContextLimit(t *testing.T) {
 	}
 }
 
-// TestMiniMaxM3ContextOverride guards the headline correction: models.dev records
-// MiniMax-M3 at the 512K guaranteed minimum, but its advertised window is 1M.
+// TestMiniMaxM3ContextOverride guards the headline correction: MiniMax-M3's
+// advertised window is 1M, while models.dev has at times recorded only the 512K
+// guaranteed minimum.
 func TestMiniMaxM3ContextOverride(t *testing.T) {
 	reg := NewModelRegistry()
 	for _, prov := range []string{"minimax", "minimax-coding-plan"} {
@@ -109,22 +110,40 @@ func TestMiniMaxM3ContextOverride(t *testing.T) {
 	}
 }
 
-// TestGLM52CatalogMetadata checks GLM-5.2 on catalogs that still advertise it.
-// The Chinese Coding Plan catalog now lists GLM-5.3 instead; do not invent
-// availability there merely to satisfy a stale generated-registry expectation.
-func TestGLM52CatalogMetadata(t *testing.T) {
+// TestGLM53CatalogMetadata checks GLM-5.3 on the first-party catalogs that
+// advertise it. GLM-5.2 stays selectable but is no longer starred.
+func TestGLM53CatalogMetadata(t *testing.T) {
 	reg := NewModelRegistry()
-	for _, prov := range []string{"zhipuai", "zai", "zai-coding-plan"} {
-		_, m, ok := reg.LookupModel(prov, "glm-5.2")
+	for _, prov := range []string{"zhipuai", "zai", "zai-coding-plan", "zhipuai-coding-plan"} {
+		_, m, ok := reg.LookupModel(prov, "glm-5.3")
 		if !ok || m == nil {
-			t.Errorf("%s/glm-5.2 not found", prov)
+			t.Errorf("%s/glm-5.3 not found", prov)
 			continue
 		}
-		if got := reg.GetModelContextLimit(prov, "glm-5.2"); got != 1_000_000 {
-			t.Errorf("%s/glm-5.2 context = %d, want 1000000", prov, got)
+		if got := reg.GetModelContextLimit(prov, "glm-5.3"); got != 1_000_000 {
+			t.Errorf("%s/glm-5.3 context = %d, want 1000000", prov, got)
 		}
 		if !m.Recommended || !m.DefaultEnabled {
-			t.Errorf("%s/glm-5.2 should be Recommended + DefaultEnabled", prov)
+			t.Errorf("%s/glm-5.3 should be Recommended + DefaultEnabled", prov)
+		}
+	}
+}
+
+// TestRecommendedModelsResolve guards the silent-ignore hazard: a starred model
+// ID that disappears from (or is renamed in) the registry after a models.dev
+// refresh would quietly lose its Recommended/DefaultEnabled flags.
+func TestRecommendedModelsResolve(t *testing.T) {
+	reg := NewModelRegistry()
+	for provID, models := range recommendedModels {
+		for modelID := range models {
+			_, m, ok := reg.LookupModel(provID, modelID)
+			if !ok || m == nil {
+				t.Errorf("recommended model %s/%s not found in registry", provID, modelID)
+				continue
+			}
+			if !m.Recommended || !m.DefaultEnabled {
+				t.Errorf("%s/%s should be Recommended + DefaultEnabled", provID, modelID)
+			}
 		}
 	}
 }
@@ -139,12 +158,15 @@ func TestRecommendedFlagshipsAreLongContext(t *testing.T) {
 	}{
 		{"minimax", "MiniMax-M3", 1_000_000},
 		{"deepseek", "deepseek-v4-pro", 1_000_000},
-		{"alibaba-cn", "qwen3.7-plus", 1_000_000},
-		{"anthropic", "claude-opus-4-8", 1_000_000},
-		{"openai", "gpt-5.5", 1_000_000},
-		{"google", "gemini-3.1-pro-preview", 1_000_000},
-		{"zhipuai", "glm-5.2", 1_000_000},
-		{"zai", "glm-5.2", 1_000_000},
+		{"deepseek", "deepseek-flash", 1_000_000},
+		{"alibaba-cn", "qwen3.8-max", 1_000_000},
+		{"anthropic", "claude-opus-5-5", 1_000_000},
+		{"openai", "gpt-6.1-sol", 1_000_000},
+		{"google", "gemini-4-argon", 1_000_000},
+		{"zhipuai", "glm-5.3", 1_000_000},
+		{"zai", "glm-5.3", 1_000_000},
+		{"moonshotai", "kimi-k3", 1_000_000},
+		{"xai", "grok-4.7", 500_000},
 	}
 	for _, c := range cases {
 		_, m, ok := reg.LookupModel(c.provider, c.model)
