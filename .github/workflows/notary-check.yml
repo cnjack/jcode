@@ -1,0 +1,41 @@
+name: Notary credential check
+
+# Read-only diagnostic for the macOS notarization credentials. Runs only when
+# this file changes in a PR (or manually), and never builds/releases anything.
+# It answers one question: do APPLE_API_* currently authenticate against
+# Apple's notary service, and with which error if not?
+on:
+  pull_request:
+    paths:
+      - .github/workflows/notary-check.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notary-history:
+    runs-on: macos-latest
+    steps:
+      - name: Check notary credentials
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          if [ -z "$APPLE_API_KEY_P8_BASE64" ] || [ -z "$APPLE_API_KEY_ID" ] || [ -z "$APPLE_API_ISSUER" ]; then
+            echo "API key secrets are incomplete: key=$([ -n "$APPLE_API_KEY_ID" ] && echo set || echo missing) issuer=$([ -n "$APPLE_API_ISSUER" ] && echo set || echo missing) p8=$([ -n "$APPLE_API_KEY_P8_BASE64" ] && echo set || echo missing)"
+            exit 1
+          fi
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          echo -n "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$KEY_PATH"
+          echo "decoded key file: $(wc -c < "$KEY_PATH" | tr -d ' ') bytes"
+          xcrun notarytool --version
+          echo "--- notarytool history ---"
+          if xcrun notarytool history --key "$KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER"; then
+            echo "RESULT: credentials accepted by the notary service"
+          else
+            code=$?
+            echo "RESULT: notarytool failed with exit code $code"
+            exit "$code"
+          fi
