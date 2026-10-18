@@ -527,15 +527,16 @@ func TestEnableCustomProviderLiveModelPersistsRuntimeMetadata(t *testing.T) {
 }
 
 func TestManagedModelConfigFromLiveUsesXAIImagePrice(t *testing.T) {
+	// grok-4.8 is not baked into the static registry yet: a related sibling may
+	// donate capabilities but must not relabel the live model.
 	got := managedModelConfigFromLive(model.NewModelRegistry(), "xai", providerauth.Model{
-		ID: "grok-4.6", Name: "grok-4.6", Vendor: "xai",
+		ID: "grok-4.8", Name: "grok-4.8", Vendor: "xai",
 		Protocol: providerauth.ProtocolResponses, Kind: providerauth.ModelKindChat,
-		Attachment: true, Context: 500000,
 	})
 	if !got.Attachment || got.Context != 500000 || !got.Reasoning || !got.Managed {
-		t.Fatalf("live grok-4.6 metadata = %#v", got)
+		t.Fatalf("live grok-4.8 metadata = %#v", got)
 	}
-	if got.Name != "grok-4.6" {
+	if got.Name != "grok-4.8" {
 		t.Fatalf("related sibling leaked display name: %#v", got)
 	}
 }

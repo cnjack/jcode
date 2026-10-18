@@ -23,6 +23,7 @@ For implementation-level detail, see the repository's full [CHANGELOG.md](https:
 - **Dependency refresh.** Upgraded the Eino agent framework to v0.9.21, MCP to mcp-go v1.2, and the Charm TUI stack. Building from source now requires Go 1.26 or newer.
 - **Focused Ask User flow.** Pending questions now open in a bottom dock with paging, keyboard-friendly choices, custom answers, skip, submit locking, and retryable errors. Completed answers stay in the conversation as compact receipts instead of collapsing into generic tool activity.
 - **Cleaner new sessions.** A brand-new empty task hides task-specific titlebar controls until the conversation actually contains content.
+- **Model catalog refresh.** The built-in catalog tracks the October 2026 lineups — GPT-6.1 Sol, Claude Opus/Sonnet 5.5, Gemini 4 Argon, GLM-5.3, DeepSeek V4 Pro and V4.1 Flash, Qwen3.8 Max/Flash and Kimi K3 on Alibaba, Kimi K3, MiniMax-M3, and Grok 4.7 — with recommended/default picks and context windows updated to match. Every supported provider now has recommended picks (including OpenRouter, Together AI, Groq, SiliconFlow, Ollama Cloud, Mistral, Xiaomi, the Alibaba token plans, and Tencent TokenHub), and the retired DeepSeek V4 Flash line is no longer selectable.
 
 #### Fixed
 - The `read` tool reports empty files and out-of-range offsets explicitly and no longer counts a trailing newline as an extra blank line.

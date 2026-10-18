@@ -1235,29 +1235,42 @@ var knownModels = map[string]knownModel{
 	"gemini-1.5-pro":   {1000000, 1.25, 5.00},
 	"gemini-1.5-flash": {1000000, 0.075, 0.30},
 	// 2026 long-context flagships (offline fallback when the models.dev registry
-	// is unavailable). Context windows verified against vendor docs / models.dev;
+	// is unavailable). Context windows and prices verified against models.dev;
 	// see internal-doc/model-research.md. Pricing left 0 where not confidently known.
 	"MiniMax-M3":          {1000000, 0.60, 2.40},
 	"minimax-m3":          {1000000, 0.60, 2.40},
 	"deepseek-v4-pro":     {1000000, 0, 0},
-	"deepseek-v4-flash":   {1000000, 0, 0},
+	"deepseek-flash":      {1000000, 0.15, 0.60},
+	"deepseek-v4.1-flash": {1000000, 0.30, 1.19},
 	"qwen3.7-max":         {1000000, 2.50, 7.50},
 	"qwen3.8-max-preview": {1000000, 2.50, 7.50},
+	"qwen3.8-max":         {1000000, 1.78, 5.33},
+	"qwen3.8-flash":       {1000000, 0.12, 0.40},
 	"qwen3.7-plus":        {1000000, 0, 0},
 	"qwen3.6-plus":        {1000000, 0, 0},
 	"kimi-k2.6":           {262144, 0, 0},
 	"kimi-k2.7-code":      {262144, 0, 0},
+	"kimi-k3":             {1048576, 3.00, 15.00},
 	// Kimi For Coding plan tiers — subscription-metered, so no per-token price.
 	"kimi-for-coding":           {262144, 0, 0},
 	"kimi-for-coding-highspeed": {262144, 0, 0},
 	"glm-5":                     {200000, 0, 0},
 	"glm-5.1":                   {200000, 0, 0},
 	"glm-5.2":                   {1000000, 0, 0}, // user-reported 1M; official docs pending
+	"glm-5.3":                   {1000000, 1.40, 4.40},
+	"glm-5.3-flash":             {1000000, 0.15, 0.50},
 	"gpt-5.5":                   {1050000, 0, 0},
+	"gpt-6.1-sol":               {1050000, 2.00, 10.00},
 	"claude-opus-4-8":           {1000000, 0, 0},
 	"claude-sonnet-4-6":         {1000000, 0, 0},
+	"claude-opus-5-5":           {1000000, 4.00, 20.00},
+	"claude-sonnet-5-5":         {1000000, 2.00, 10.00},
 	"gemini-3.1-pro-preview":    {1048576, 0, 0},
 	"gemini-3.5-flash":          {1048576, 0, 0},
+	"gemini-3.8-flash":          {1048576, 0.75, 3.75},
+	"gemini-4-argon":            {1048576, 2.00, 10.00},
+	"grok-4.6":                  {500000, 2.00, 6.00},
+	"grok-4.7":                  {500000, 2.00, 6.00},
 }
 
 // knownModelContextLimits is kept for backward compatibility.

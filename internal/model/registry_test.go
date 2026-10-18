@@ -170,3 +170,44 @@ func TestMergeConfigProvidersCopiesModalitiesWhenLiveAttachmentIsSet(t *testing.
 		t.Fatalf("live attachment should still copy related modalities: %#v", got)
 	}
 }
+
+// TestRetiredModelsStayRemoved guards the retiredModels map: a retired ID must
+// not resolve from the generated registry even though models.dev may still ship
+// it in the snapshot, and the offline fallback must forget it too.
+func TestRetiredModelsStayRemoved(t *testing.T) {
+	reg := NewModelRegistry()
+	for provID, models := range retiredModels {
+		for modelID := range models {
+			if prov, m, ok := reg.LookupModel(provID, modelID); ok {
+				t.Errorf("retired model %s/%s still resolves (provider=%v model=%v)", provID, modelID, prov != nil, m != nil)
+			}
+		}
+	}
+	if _, ok := knownModels["deepseek-v4-flash"]; ok {
+		t.Error("retired deepseek-v4-flash is still in the knownModels fallback")
+	}
+}
+
+// TestEveryBuiltinProviderHasRecommendedModel enforces the 2026-10-18 curation
+// policy: every provider jcode ships a catalog for must star at least one
+// current mainline model, so first-run setup never falls back to an arbitrary
+// unstarred entry (and a new models.dev provider cannot slip in uncurated).
+func TestEveryBuiltinProviderHasRecommendedModel(t *testing.T) {
+	reg := NewModelRegistry()
+	for _, provID := range reg.providerOrder {
+		prov := reg.GetProvider(provID)
+		if prov == nil || len(prov.Models) == 0 {
+			continue
+		}
+		found := false
+		for _, m := range prov.Models {
+			if m.Recommended {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("provider %s has no Recommended model", provID)
+		}
+	}
+}

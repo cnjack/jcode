@@ -584,62 +584,130 @@ func sortModels(models []*RegistryModel) {
 // recommendedModels defines recommended and default-enabled models per provider.
 // Key: provider ID, Value: map of model ID → true (recommended + default enabled).
 //
-// Curated 2026-06-13 toward the current long-context flagships. See
-// internal-doc/model-research.md for the per-provider context-window survey behind these
-// picks. Model IDs must match the registry exactly or the flag is silently ignored.
+// Curated 2026-10-18 toward the current long-context flagships. See
+// internal-doc/model-research.md for the per-provider survey behind these picks.
+// Model IDs must match the registry exactly or the flag is silently ignored.
 var recommendedModels = map[string]map[string]bool{
-	// GLM-5.2 (1M window) is Zhipu's newest flagship. GLM-5.1 stays selectable
+	// GLM-5.3 (1M window) is Zhipu's newest flagship; GLM-5.2 stays selectable
 	// but unstarred.
 	"zhipuai": {
-		"glm-5.2": true,
+		"glm-5.3": true,
 	},
 	"zhipuai-coding-plan": {
-		"glm-5.2": true,
+		"glm-5.3": true,
 	},
 	"zai": {
-		"glm-5.2": true,
+		"glm-5.3": true,
 	},
 	"zai-coding-plan": {
-		"glm-5.2": true,
+		"glm-5.3": true,
 	},
-	// DeepSeek-V4-Pro — genuine 1M-token window.
+	// DeepSeek-V4-Pro is the thinking flagship (1M window). deepseek-flash is
+	// the 2026-10-17 V4.1 Flash update — multimodal, 1M window, cheapest lane.
+	// The retired V4 Flash line is dropped by retiredModels below.
 	"deepseek": {
 		"deepseek-v4-pro": true,
+		"deepseek-flash":  true,
 	},
-	// Qwen 3.7 Plus/Max and DeepSeek-V4-Pro all carry 1M windows on Alibaba's
-	// endpoint; Kimi-K2.6 (256K) rounds out the agentic options.
+	// Qwen 3.8 Max/Flash are Alibaba's current 1M-window flagships; Kimi K3 and
+	// DeepSeek V4.1 Flash are the newest models the endpoint resells.
 	"alibaba-cn": {
-		"qwen3.7-plus":    true,
-		"qwen3.7-max":     true,
-		"deepseek-v4-pro": true,
-		"kimi-k2.6":       true,
+		"qwen3.8-max":         true,
+		"qwen3.8-flash":       true,
+		"deepseek-v4.1-flash": true,
+		"kimi-k3":             true,
 	},
+	// The coding plan catalog still tops out at Qwen3.7 Plus.
 	"alibaba-coding-plan-cn": {
 		"qwen3.7-plus": true,
 	},
-	// Kimi-K2.7-Code is Moonshot's newest coding model (256K window).
+	// Kimi K3 — Moonshot's 1M-window multimodal flagship.
 	"moonshotai": {
-		"kimi-k2.7-code": true,
+		"kimi-k3": true,
 	},
 	// MiniMax-M3 — 1M-token window (corrected via contextLimitOverrides below).
+	// M3.1 is still a preview, so it stays unstarred.
 	"minimax": {
 		"MiniMax-M3": true,
 	},
 	"minimax-coding-plan": {
 		"MiniMax-M3": true,
 	},
-	// GPT-5.5 carries a ~1.05M window.
+	// GPT-6.1 Sol is the newest OpenAI mainline: near-Astra quality at $2/$10
+	// with a ~1.05M window. GPT-6 Astra ($10/$50) stays selectable, unstarred.
 	"openai": {
-		"gpt-5.5": true,
+		"gpt-6.1-sol": true,
 	},
-	// Claude Opus 4.8 and Sonnet 4.6 both expose 1M-token windows.
+	// Claude Opus 5.5 for long-running agent work; Sonnet 5.5 for everyday cost.
 	"anthropic": {
-		"claude-opus-4-8":   true,
-		"claude-sonnet-4-6": true,
+		"claude-opus-5-5":   true,
+		"claude-sonnet-5-5": true,
 	},
-	// Gemini 3.1 Pro — ~1.05M window.
+	// Gemini 4 Argon — Google's current flagship reasoning model (~1.05M window).
 	"google": {
-		"gemini-3.1-pro-preview": true,
+		"gemini-4-argon": true,
+	},
+	// Aggregators and resellers carry several vendors' catalogs. Star the current
+	// affordable mainline flagship(s) each one actually serves; premium, preview,
+	// and beta tiers stay selectable but unstarred, same as above.
+	"openrouter": {
+		"openai/gpt-6.1-sol":                true,
+		"anthropic/claude-sonnet-5.5":       true,
+		"google/gemini-4-argon":             true,
+		"deepseek/deepseek-v4.1-flash-1017": true,
+	},
+	"togetherai": {
+		"meta-models/Muse-Spark-Open-816B-A42B": true,
+		"deepseek-ai/DeepSeek-V4.1-Flash":       true,
+	},
+	"siliconflow": {
+		"zai-org/GLM-5.3":                  true,
+		"deepseek-ai/DeepSeek-V4-Pro-0813": true,
+		"Qwen/Qwen3.8-2.4T-A95B":           true,
+	},
+	"ollama-cloud": {
+		"deepseek-v4.1-flash:1017": true,
+		"glm-5.3":                  true,
+	},
+	"groq": {
+		"qwen/qwen3.8-27b": true,
+	},
+	// Mistral Large 4 is still beta, so the newest stable reasoning tier is the
+	// mainline pick; mistral-large-2512 stays selectable.
+	"mistral": {
+		"mistral-medium-2604": true,
+	},
+	// MiMo V2.6 refresh: the pro flagship plus the affordable flash lane.
+	"xiaomi": {
+		"mimo-v2.6-pro":   true,
+		"mimo-v2.6-flash": true,
+	},
+	"xiaomi-token-plan-cn": {
+		"mimo-v2.6-pro":   true,
+		"mimo-v2.6-flash": true,
+	},
+	// Subscription-metered token plans mirror the alibaba-cn picks. Kimi K3 is not
+	// offered on the token plans, so Kimi K2.7 Code stays selectable only.
+	"alibaba-token-plan": {
+		"qwen3.8-max":         true,
+		"qwen3.8-flash":       true,
+		"deepseek-v4.1-flash": true,
+		"glm-5.3":             true,
+	},
+	"alibaba-token-plan-cn": {
+		"qwen3.8-max":         true,
+		"qwen3.8-flash":       true,
+		"deepseek-v4.1-flash": true,
+		"glm-5.3":             true,
+	},
+	// Hunyuan line is unchanged since 2026-03; the reasoning flagship is the
+	// newest model in the coding plan.
+	"tencent-coding-plan": {
+		"hunyuan-2.0-thinking": true,
+	},
+	// hy4 is still a preview, so the stable Hy3 is the mainline pick.
+	"tencent-tokenhub": {
+		"hy3": true,
 	},
 }
 
@@ -649,8 +717,9 @@ var recommendedModels = map[string]map[string]bool{
 // init() so corrections survive `go generate` regeneration of registry_generated.go.
 // Key: provider ID → model ID → context window (tokens). See internal-doc/model-research.md.
 var contextLimitOverrides = map[string]map[string]int{
-	// MiniMax-M3 advertises a 1M-token window; models.dev records only the
-	// 512K "guaranteed minimum". Use the advertised window for sizing.
+	// MiniMax-M3 advertises a 1M-token window. models.dev has at times recorded
+	// only the 512K "guaranteed minimum"; pin the advertised window so a future
+	// snapshot regression cannot shrink it.
 	"minimax":             {"MiniMax-M3": 1_000_000},
 	"minimax-coding-plan": {"MiniMax-M3": 1_000_000},
 	// models.dev's openrouter records carry transposed digits for these two, which
@@ -665,8 +734,69 @@ var contextLimitOverrides = map[string]map[string]int{
 	},
 }
 
+// retiredModels lists model IDs that upstream has retired (or that were
+// superseded by an identical family refresh) but that models.dev may still ship
+// in its snapshot. They are dropped from the generated registry at init so the
+// catalogs never surface them; the generated file itself is gitignored and
+// rebuilt by `go generate`, so removals have to live here to survive it.
+//
+// DeepSeek V4 Flash was superseded by the 2026-10-17 V4.1 Flash
+// (`deepseek-flash`); the whole retired line is dropped, including the `-0731`
+// snapshots resold by Alibaba, OpenRouter, Together AI, SiliconFlow, and Ollama
+// Cloud. The static Tencent TokenHub Enterprise table removes it directly.
+//
+// Key: provider ID → model ID → true. See internal-doc/model-research.md.
+var retiredModels = map[string]map[string]bool{
+	"deepseek": {
+		"deepseek-v4-flash":            true,
+		"deepseek-v4-flash-vision-exp": true,
+	},
+	"alibaba-cn": {
+		"deepseek-v4-flash": true,
+	},
+	"openrouter": {
+		"deepseek/deepseek-v4-flash":            true,
+		"deepseek/deepseek-v4-flash-0731":       true,
+		"deepseek/deepseek-v4-flash-vision-exp": true,
+		"~deepseek/deepseek-v4-flash-latest":    true,
+	},
+	"togetherai": {
+		"deepseek-ai/DeepSeek-V4-Flash-0731": true,
+	},
+	"alibaba-token-plan": {
+		"deepseek-v4-flash":      true,
+		"deepseek-v4-flash-0731": true,
+	},
+	"alibaba-token-plan-cn": {
+		"deepseek-v4-flash":      true,
+		"deepseek-v4-flash-0731": true,
+	},
+	"siliconflow": {
+		"deepseek-ai/DeepSeek-V4-Flash":            true,
+		"deepseek-ai/DeepSeek-V4-Flash-0731":       true,
+		"deepseek-ai/DeepSeek-V4-Flash-Vision-Exp": true,
+	},
+	"ollama-cloud": {
+		"deepseek-v4-flash":      true,
+		"deepseek-v4-flash:0731": true,
+	},
+}
+
+func applyRetiredModels() {
+	for provID, models := range retiredModels {
+		prov, ok := generatedProviders[provID]
+		if !ok || prov == nil {
+			continue
+		}
+		for modelID := range models {
+			delete(prov.Models, modelID)
+		}
+	}
+}
+
 func init() {
 	applyStaticProviders()
+	applyRetiredModels()
 	applyContextLimitOverrides()
 	applyRecommendedModels()
 }
@@ -682,12 +812,31 @@ var staticProviders = map[string]*RegistryProvider{
 		ID: "xai", Name: "xAI (Grok)", Env: []string{"XAI_API_KEY"},
 		API: "https://api.x.ai/v1", AuthMethods: []string{"api_key", "xai_oauth"},
 		Models: map[string]*RegistryModel{
+			// Grok 4.7 (2026-09-21) is the current flagship: 500K-token window
+			// with effort levels low→xhigh. 4.6/4.5 stay selectable for pinning.
+			"grok-4.7": {
+				ID: "grok-4.7", Name: "Grok 4.7", Family: "grok",
+				Reasoning: true, ToolCall: true, Attachment: true, Temperature: true,
+				DefaultEnabled: true, Recommended: true,
+				Modalities:       &ModelModalities{Input: []string{"text", "image", "pdf"}, Output: []string{"text"}},
+				Limit:            &ModelLimit{Context: 500000, Output: 500000},
+				ReasoningOptions: []ReasoningOption{{Type: "effort", Values: []string{"low", "medium", "high", "xhigh"}}},
+			},
+			"grok-4.6": {
+				ID: "grok-4.6", Name: "Grok 4.6", Family: "grok",
+				Reasoning: true, ToolCall: true, Attachment: true, Temperature: true,
+				DefaultEnabled:   true,
+				Modalities:       &ModelModalities{Input: []string{"text", "image", "pdf"}, Output: []string{"text"}},
+				Limit:            &ModelLimit{Context: 500000, Output: 500000},
+				ReasoningOptions: []ReasoningOption{{Type: "effort", Values: []string{"low", "medium", "high", "xhigh"}}},
+			},
 			"grok-4.5": {
 				ID: "grok-4.5", Name: "Grok 4.5", Family: "grok",
 				Reasoning: true, ToolCall: true, Attachment: true,
-				DefaultEnabled: true, Recommended: true,
-				Modalities: &ModelModalities{Input: []string{"text", "image"}, Output: []string{"text"}},
-				Limit:      &ModelLimit{Context: 256000}, ReasoningOptions: standardEffortOptions(),
+				DefaultEnabled:   true,
+				Modalities:       &ModelModalities{Input: []string{"text", "image", "pdf"}, Output: []string{"text"}},
+				Limit:            &ModelLimit{Context: 500000, Output: 500000},
+				ReasoningOptions: standardEffortOptions(),
 			},
 		},
 	},
@@ -811,12 +960,6 @@ var staticProviders = map[string]*RegistryProvider{
 				Reasoning: true, ToolCall: true, Temperature: true,
 				DefaultEnabled: true, Recommended: true,
 				Modalities: &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
-			},
-			"deepseek-v4-flash": {
-				ID: "deepseek-v4-flash", Name: "DeepSeek-V4-Flash", Family: "deepseek",
-				Reasoning: true, ToolCall: true, Temperature: true,
-				DefaultEnabled: true,
-				Modalities:     &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
 			},
 			"deepseek-v4-pro": {
 				ID: "deepseek-v4-pro", Name: "DeepSeek-V4-Pro", Family: "deepseek",
