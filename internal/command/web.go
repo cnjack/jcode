@@ -506,7 +506,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			trec.SetUUID(taskID)
 		}
 		if trec != nil {
-			tenv.SessionIDFn = trec.UUID
+			wireSessionCaller(tenv, trec)
 		}
 		imageLedger, imageLedgerErr := newImageUsageLedger(trec)
 		if imageLedgerErr != nil {
@@ -719,6 +719,10 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			}
 			all = append(all, tenv.NewBrowserTools()...)
 			all = append(all, tenv.NewComputerTools()...)
+			// Read-only cross-session view tools (absent when session_view is
+			// disabled). They survive dropInteractiveTools: unattended runs may
+			// read history safely.
+			all = append(all, sessionViewTools(tenv, agentCfg)...)
 			if exec == nil {
 				all = append(all, tenv.NewShowArtifactTool(&tools.ShowArtifactDeps{
 					SessionID:    trec.UUID,
@@ -751,6 +755,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			// Plan mode gets the read-only browser subset (look, don't change).
 			plan = append(plan, tenv.NewBrowserPlanTools()...)
 			plan = append(plan, tenv.NewComputerPlanTools()...)
+			plan = append(plan, sessionViewTools(tenv, taskCfg)...)
 			if exec == nil {
 				plan = append(plan, tenv.NewShowArtifactTool(&tools.ShowArtifactDeps{
 					SessionID:    trec.UUID,

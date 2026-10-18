@@ -537,7 +537,7 @@ func (a *acpAgent) buildAgentSession(
 
 	env := tools.NewEnv(pwd, platform)
 	if rec != nil {
-		env.SessionIDFn = rec.UUID
+		wireSessionCaller(env, rec)
 	}
 	config.Logger().Printf("[acp] using LocalExecutor for session %s", sessionID)
 	bgManager := tools.NewBackgroundManager(env)
@@ -677,6 +677,8 @@ func (a *acpAgent) buildAgentSession(
 	}
 	env.Computer = computerMgr
 	allTools = append(allTools, env.NewComputerTools()...)
+	// Read-only cross-session view tools (absent when session_view is disabled).
+	allTools = append(allTools, sessionViewTools(env, cfg)...)
 
 	// Plan mode tools: read-only subset. Goal tools are included — like the
 	// todo tools they only mutate session metadata, and the continuation
@@ -691,6 +693,7 @@ func (a *acpAgent) buildAgentSession(
 		env.NewAutomationListTool(),
 	}
 	planTools = append(planTools, env.NewComputerPlanTools()...)
+	planTools = append(planTools, sessionViewTools(env, cfg)...)
 
 	normalPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 	planPrompt := prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
