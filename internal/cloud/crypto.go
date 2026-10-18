@@ -30,7 +30,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"strings"
 	"sync"
 
@@ -391,16 +390,16 @@ func parseP256SPKI(b64 string) (*ecdh.PublicKey, error) {
 	return ecdhPub, nil
 }
 
-// ecdhPubToSPKI converts an ECDH P-256 public key to SPKI DER bytes. The
-// ecdh key's Bytes() is the SEC 1 uncompressed point (0x04 || X || Y).
+// ecdhPubToSPKI converts an ECDH P-256 public key to SPKI DER bytes. Go's
+// x509.MarshalPKIXPublicKey accepts *ecdh.PublicKey directly, which emits the
+// same P-256 SubjectPublicKeyInfo without rebuilding the deprecated
+// ecdsa.PublicKey X/Y coordinate fields.
 func ecdhPubToSPKI(pub *ecdh.PublicKey) ([]byte, error) {
-	raw := pub.Bytes()
-	if len(raw) != 65 || raw[0] != 0x04 {
-		return nil, fmt.Errorf("unexpected P-256 point encoding (%d bytes)", len(raw))
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ECDH P-256 pubkey: %w", err)
 	}
-	x := new(big.Int).SetBytes(raw[1:33])
-	y := new(big.Int).SetBytes(raw[33:65])
-	return x509.MarshalPKIXPublicKey(&ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y})
+	return der, nil
 }
 
 // deriveWrapKey runs ECDH + HKDF-SHA256(shared, salt=nil, info="jcode-device-cek").
